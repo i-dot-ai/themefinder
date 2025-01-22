@@ -2,6 +2,15 @@ site_name: ThemeFinder documentation
 site_url: https://i-dot-ai.github.io/themefinder/
 repo_url: https://github.com/i-dot-ai/themefinder
 
+nav:
+  - Home: index.md
+  - API Reference: api_reference.md
+  - Examples:
+    - Kaggle Tweet Analysis: example_nb.ipynb
+  - Contributing:
+    - Documentation: contributing_to_docs.md
+  - Evaluation: evaluation.md
+
 theme:
   name: material
   palette:
@@ -27,6 +36,8 @@ theme:
 
 plugins:
   - search
+  - mkdocs-jupyter:
+      include_source: true
   - mkdocstrings:
       handlers:
         python:
