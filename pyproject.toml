@@ -26,7 +26,6 @@ coverage = "^7.6.10"
 mkdocs = "^1.6.1"
 mkdocstrings = {extras = ["python"], version = "^0.27.0"}
 mkdocs-material = "^9.5.50"
-mkdocs-jupyter = "^0.24.6"
 
 [tool.pytest.ini_options]
 pythonpath = "."
