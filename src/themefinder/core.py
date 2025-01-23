@@ -1,3 +1,4 @@
+import logging
 from pathlib import Path
 
 import pandas as pd
@@ -16,6 +17,7 @@ async def find_themes(
     llm: Runnable,
     question: str,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+    verbose: bool = False,
 ) -> dict[str, pd.DataFrame]:
     """Process survey responses through a multi-stage theme analysis pipeline.
 
@@ -32,6 +34,8 @@ async def find_themes(
         question (str): The survey question
         system_prompt (str): System prompt to guide the LLM's behavior.
             Defaults to CONSULTATION_SYSTEM_PROMPT.
+        verbose (bool): Whether to show information messages during processing.
+            Defaults to False.
 
     Returns:
         dict[str, pd.DataFrame]: Dictionary containing results from each pipeline stage:
@@ -42,28 +46,34 @@ async def find_themes(
             - refined_topics: DataFrame with refined theme definitions
             - mapping: DataFrame mapping responses to final themes
     """
-    sentiment_df = await sentiment_analysis(
+    # Store current log level and adjust if needed
+    current_log_level = logger.getEffectiveLevel()
+    if not verbose:
+        logger.setLevel(logging.WARNING)
+
+    try:
+        sentiment_df = await sentiment_analysis(
         responses_df,
         llm,
         question=question,
         system_prompt=system_prompt,
     )
-    theme_df = await theme_generation(
+        theme_df = await theme_generation(
         sentiment_df,
         llm,
         question=question,
         system_prompt=system_prompt,
     )
-    condensed_theme_df = await theme_condensation(
+        condensed_theme_df = await theme_condensation(
         theme_df, llm, question=question, system_prompt=system_prompt
     )
-    refined_theme_df = await theme_refinement(
+        refined_theme_df = await theme_refinement(
         condensed_theme_df,
         llm,
         question=question,
         system_prompt=system_prompt,
     )
-    mapping_df = await theme_mapping(
+        mapping_df = await theme_mapping(
         sentiment_df,
         llm,
         question=question,
@@ -71,18 +81,21 @@ async def find_themes(
         system_prompt=system_prompt,
     )
 
-    logger.info("Finished finding themes")
-    logger.info(
-        "Provide feedback or report bugs: https://forms.gle/85xUSMvxGzSSKQ499 or themefinder@cabinetoffice.gov.uk"
-    )
-    return {
-        "question": question,
-        "sentiment": sentiment_df,
-        "topics": theme_df,
-        "condensed_topics": condensed_theme_df,
-        "refined_topics": refined_theme_df,
-        "mapping": mapping_df,
-    }
+        logger.info("Finished finding themes")
+        logger.info(
+            "Provide feedback or report bugs: https://forms.gle/85xUSMvxGzSSKQ499 or themefinder@cabinetoffice.gov.uk"
+        )
+        return {
+            "question": question,
+            "sentiment": sentiment_df,
+            "topics": theme_df,
+            "condensed_topics": condensed_theme_df,
+            "refined_topics": refined_theme_df,
+            "mapping": mapping_df,
+        }
+    finally:
+        # Restore original log level
+        logger.setLevel(current_log_level)
 
 
 async def sentiment_analysis(

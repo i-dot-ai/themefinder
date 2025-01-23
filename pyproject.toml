@@ -6,7 +6,7 @@ authors = ["i.AI <themefinder@cabinetoffice.gov.uk>"]
 packages = [{include = "themefinder", from = "src"}]
 
 [tool.poetry.dependencies]
-python = ">=3.12,<4.0"
+python = ">=3.10,<4.0"
 langchain = "*"
 langchain-openai = "0.1.17"
 pandas = "^2.2.2"
