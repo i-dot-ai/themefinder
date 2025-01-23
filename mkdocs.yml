@@ -6,7 +6,7 @@ nav:
   - Home: index.md
   - API Reference: api_reference.md
   - Examples:
-    - Kaggle Tweet Analysis: example_nb.ipynb
+    - Quickstart (Google Colab): https://colab.research.google.com/drive/1a8iP4LihlDDDfBz-4vUJuRB6gB4QcAGX?usp=sharing
   - Contributing:
     - Documentation: contributing_to_docs.md
   - Evaluation: evaluation.md
@@ -36,8 +36,6 @@ theme:
 
 plugins:
   - search
-  - mkdocs-jupyter:
-      include_source: true
   - mkdocstrings:
       handlers:
         python:
