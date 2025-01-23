@@ -95,7 +95,7 @@ async def test_find_themes_verbose_control(mock_llm, sample_df):
     original_level = logger.getEffectiveLevel()
 
     # Test with verbose=False (default)
-    with patch.object(logger, 'setLevel') as mock_set_level:
+    with patch.object(logger, "setLevel") as mock_set_level:
         await find_themes(sample_df, mock_llm, question="test question")
         # Should set to WARNING when verbose is False
         mock_set_level.assert_any_call(logging.WARNING)
@@ -134,9 +134,11 @@ async def test_find_themes_verbose_control(mock_llm, sample_df):
     ]
 
     # Test with verbose=True
-    with patch.object(logger, 'setLevel') as mock_set_level:
+    with patch.object(logger, "setLevel") as mock_set_level:
         await find_themes(sample_df, mock_llm, question="test question", verbose=True)
         # Should not set to WARNING when verbose is True
-        assert logging.WARNING not in [call[0][0] for call in mock_set_level.call_args_list]
+        assert logging.WARNING not in [
+            call[0][0] for call in mock_set_level.call_args_list
+        ]
         # Should still restore original level at the end
         mock_set_level.assert_called_with(original_level)

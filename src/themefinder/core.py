@@ -53,33 +53,33 @@ async def find_themes(
 
     try:
         sentiment_df = await sentiment_analysis(
-        responses_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-    )
+            responses_df,
+            llm,
+            question=question,
+            system_prompt=system_prompt,
+        )
         theme_df = await theme_generation(
-        sentiment_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-    )
+            sentiment_df,
+            llm,
+            question=question,
+            system_prompt=system_prompt,
+        )
         condensed_theme_df = await theme_condensation(
-        theme_df, llm, question=question, system_prompt=system_prompt
-    )
+            theme_df, llm, question=question, system_prompt=system_prompt
+        )
         refined_theme_df = await theme_refinement(
-        condensed_theme_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-    )
+            condensed_theme_df,
+            llm,
+            question=question,
+            system_prompt=system_prompt,
+        )
         mapping_df = await theme_mapping(
-        sentiment_df,
-        llm,
-        question=question,
-        refined_themes_df=refined_theme_df,
-        system_prompt=system_prompt,
-    )
+            sentiment_df,
+            llm,
+            question=question,
+            refined_themes_df=refined_theme_df,
+            system_prompt=system_prompt,
+        )
 
         logger.info("Finished finding themes")
         logger.info(
