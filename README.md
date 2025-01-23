@@ -130,6 +130,8 @@ The file `src/themefinder.core.py` contains the function `find_themes` which run
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
+The documentation is [© Crown copyright](https://www.nationalarchives.gov.uk/information-management/re-using-public-sector-information/uk-government-licensing-framework/crown-copyright/) and available under the terms of the [Open Government 3.0 licence](https://www.nationalarchives.gov.uk/doc/open-government-licence/version/3/).
+
 
 ## Feedback
 

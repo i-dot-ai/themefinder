@@ -16,8 +16,5 @@ poetry run mkdocs serve
 ```
 and go to [http://127.0.0.1:8000/i-dot-ai/themefinder/](http://127.0.0.1:8000/i-dot-ai/themefinder/) in the browser.
 
-If you want to manually deploy:
-```
-poetry run mkdocs gh-deploy
-```
-but *note* that this will deploy whatever you have locally to GitHub Pages - be sure you want to deploy this!
+
+

@@ -28,7 +28,7 @@ jobs:
 
       - name: Deploy docs
         run: |
-          poetry run mkdocs gh-deploy
+          poetry run mkdocs gh-deploy --force
 
 
 
