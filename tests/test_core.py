@@ -11,7 +11,6 @@ from themefinder.themefinder_logging import logger
 @pytest.mark.asyncio()
 async def test_find_themes(mock_llm, sample_df):
     """Test the complete theme finding pipeline with mocked LLM responses."""
-    """Test the complete theme finding pipeline with mocked LLM responses."""
     mock_llm.ainvoke.side_effect = [
         MagicMock(
             content='{"responses": [{"response_id": 1, "position": "agreement", "text": "response1"}, {"response_id": 2, "position": "disagreement", "text": "response2"}]}'
@@ -91,16 +90,11 @@ async def test_find_themes_verbose_control(mock_llm, sample_df):
         ),
     ]
 
-    # Store original log level
-    original_level = logger.getEffectiveLevel()
-
     # Test with verbose=False (default)
     with patch.object(logger, "setLevel") as mock_set_level:
         await find_themes(sample_df, mock_llm, question="test question")
-        # Should set to WARNING when verbose is False
-        mock_set_level.assert_any_call(logging.WARNING)
-        # Should restore original level
-        mock_set_level.assert_any_call(original_level)
+        # Should set to CRITICAL when verbose is False
+        mock_set_level.assert_called_with(logging.CRITICAL)
 
     # Reset mock responses for second test
     mock_llm.ainvoke.side_effect = [
@@ -136,9 +130,5 @@ async def test_find_themes_verbose_control(mock_llm, sample_df):
     # Test with verbose=True
     with patch.object(logger, "setLevel") as mock_set_level:
         await find_themes(sample_df, mock_llm, question="test question", verbose=True)
-        # Should not set to WARNING when verbose is True
-        assert logging.WARNING not in [
-            call[0][0] for call in mock_set_level.call_args_list
-        ]
-        # Should still restore original level at the end
-        mock_set_level.assert_called_with(original_level)
+        # Should set to INFO when verbose is True
+        mock_set_level.assert_called_with(logging.INFO)
