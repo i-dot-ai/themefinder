@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import tiktoken
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from tenacity import before, retry, stop_after_attempt, wait_random_exponential
@@ -17,7 +18,6 @@ from .themefinder_logging import logger
 class BatchPrompt:
     prompt_string: str
     response_ids: list[str]
-
 
 async def batch_and_run(
     responses_df: pd.DataFrame,
@@ -51,10 +51,8 @@ async def batch_and_run(
     """
     logger.info(f"Running batch and run with batch size {batch_size}")
     prompt_template = convert_to_prompt_template(prompt_template)
-    batched_response_dfs = batch_responses(
-        responses_df, batch_size=batch_size, partition_key=partition_key
-    )
-    batch_prompts = generate_prompts(batched_response_dfs, prompt_template, **kwargs)
+    batch_prompts = safe_prompt_generation(prompt_template, responses_df, batch_size=batch_size, **kwargs)
+
     llm_responses, failed_ids = await call_llm(
         batch_prompts=batch_prompts,
         llm=llm,
@@ -74,6 +72,17 @@ async def batch_and_run(
         return pd.concat(objs=[processed_failed_responses, processed_responses])
     return processed_responses
 
+
+def calculate_string_token_length(input_text: str, model: str = "gpt-4o") -> int:
+
+    """Calculate the number of tokens in a string using a specific model's tokenizer.
+
+    Returns:
+        int: Number of tokens in the string
+    """
+    tokenizer_encoding = tiktoken.encoding_for_model(model)
+    number_of_tokens = len(tokenizer_encoding.encode(input_text))
+    return number_of_tokens
 
 def load_prompt_from_file(file_path: str | Path) -> str:
     """Load a prompt template from a text file in the prompts directory.
@@ -116,75 +125,90 @@ def convert_to_prompt_template(prompt_template: str | Path | PromptTemplate):
         raise TypeError(msg)
     return template
 
-
-def batch_responses(
-    responses_df: pd.DataFrame, batch_size: int = 10, partition_key: str | None = None
-) -> list[pd.DataFrame]:
-    """Split a DataFrame into batches, optionally partitioned by a key column.
-
-    Args:
-        responses_df (pd.DataFrame): Input DataFrame to be split into batches.
-        batch_size (int, optional): Maximum number of rows in each batch. Defaults to 10.
-        partition_key (str | None, optional): Column name to group by before batching.
-            If provided, ensures rows with the same partition key value stay together
-            and each group is batched separately. Defaults to None.
-
-    Returns:
-        list[pd.DataFrame]: List of DataFrame batches, where each batch contains
-            at most batch_size rows. If partition_key is used, rows within each
-            partition are kept together and batched separately.
+def split_dataframe_by_partition(df: pd.DataFrame, partition_key: str | None) -> list[pd.DataFrame]:
+    """
+    Split the DataFrame into partitions if a partition key is provided.
+    Returns a list of DataFrame partitions.
     """
     if partition_key:
-        grouped = responses_df.groupby(partition_key)
-        batches = []
-        for _, group in grouped:
-            group_batches = [
-                group.iloc[i : i + batch_size].reset_index(drop=True)
-                for i in range(0, len(group), batch_size)
-            ]
-            batches.extend(group_batches)
-        return batches
+        grouped = df.groupby(partition_key)
+        return [group.reset_index(drop=True) for _, group in grouped]
+    return [df]
 
-    return [
-        responses_df.iloc[i : i + batch_size].reset_index(drop=True)
-        for i in range(0, len(responses_df), batch_size)
-    ]
-
-
-def generate_prompts(
-    response_dfs: list[pd.DataFrame], prompt_template: PromptTemplate, **kwargs: Any
-) -> list[BatchPrompt]:
-    """Generate a list of BatchPrompts from DataFrames using a prompt template.
-
-    Args:
-        response_dfs (list[pd.DataFrame]): List of DataFrames, each containing a batch
-            of responses to be processed. Each DataFrame must include a 'response_id' column.
-        prompt_template (PromptTemplate): LangChain PromptTemplate object used to format
-            the prompts for each batch.
-        **kwargs (Any): Additional keyword arguments to pass to the prompt template's
-            format method.
-
-    Returns:
-        list[BatchPrompt]: List of BatchPrompt objects, each containing:
-            - prompt_string: Formatted prompt text for the batch
-            - response_ids: List of response IDs included in the batch
-
-    Note:
-        The function converts each DataFrame to a list of dictionaries and passes it
-        to the prompt template as the 'responses' variable.
+def batch_rows_df(
+    df: pd.DataFrame,
+    allowed_tokens: int,
+    batch_size: int
+    ) -> list[pd.DataFrame]:
     """
-    batched_prompts = []
-    for df in response_dfs:
-        prompt = prompt_template.format(
-            responses=df.to_dict(orient="records"), **kwargs
-        )
-        response_ids = df["response_id"].astype(str).to_list()
-        batched_prompts.append(
-            BatchPrompt(prompt_string=prompt, response_ids=response_ids)
-        )
+    Splits the DataFrame into batches based on a token limit and a maximum row count.
+    Rows that exceed the allowed token limit are skipped and logged.
+    """
+    batches = []
+    current_indexes = []
+    current_token_count = 0
 
-    return batched_prompts
+    for idx, row in df.iterrows():
+        row_str = row.to_json()
+        token_count = calculate_string_token_length(row_str)
 
+        if token_count > allowed_tokens:
+            logging.warning(
+                f"Row at index {idx} exceeds allowed token limit ({token_count} > {allowed_tokens}). Excluding response."
+            )
+            continue
+
+        if current_token_count + token_count > allowed_tokens or len(current_indexes) >= batch_size:
+            if current_indexes:
+                batches.append(df.loc[current_indexes].reset_index(drop=True))
+            current_indexes = [idx]
+            current_token_count = token_count
+        else:
+            current_indexes.append(idx)
+            current_token_count += token_count
+
+    if current_indexes:
+        batches.append(df.loc[current_indexes].reset_index(drop=True))
+    return batches
+
+def build_prompt(
+    prompt_template: PromptTemplate,
+    input_batch: pd.DataFrame,
+    **kwargs
+    ) -> BatchPrompt:
+ 
+    prompt = prompt_template.format(
+        input_data=input_batch.to_dict(orient="records"), **kwargs
+    )
+    response_ids = input_batch["response_id"].astype(str).to_list()
+
+    batch_prompt = BatchPrompt(prompt_string=prompt, response_ids=response_ids)
+    return batch_prompt
+
+def safe_prompt_generation(prompt_template, 
+                           input_data: pd.DataFrame, 
+                           batch_size: int = 50, 
+                           max_prompt_length: int = 50_000, 
+                           partition_key: str | None = None,
+                           **kwargs) -> list[BatchPrompt]:
+    """
+    Generate prompt strings from a DataFrame of responses. Batching is performed based
+    on both a token count limit (considering a system prompt template) and a row count limit.
+    Optionally, responses are partitioned by a key column.
+    """
+    prompt_token_length = calculate_string_token_length(prompt_template.template)
+    allowed_tokens_for_data = max_prompt_length - prompt_token_length
+    
+    all_batches = []
+    partitions = split_dataframe_by_partition(input_data, partition_key)
+    
+    for partition in partitions:
+        partition_batches = batch_rows_df(partition, allowed_tokens_for_data, batch_size)
+        all_batches.extend(partition_batches)
+
+    prompts = [build_prompt(prompt_template, batch, **kwargs) for batch in all_batches]
+    
+    return prompts
 
 async def call_llm(
     batch_prompts: list[BatchPrompt],
