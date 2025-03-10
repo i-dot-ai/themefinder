@@ -3,12 +3,13 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Type
 
 import pandas as pd
 import tiktoken
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
+from pydantic import BaseModel, ValidationError
 from tenacity import before, retry, stop_after_attempt, wait_random_exponential
 
 from .themefinder_logging import logger
@@ -18,6 +19,7 @@ from .themefinder_logging import logger
 class BatchPrompt:
     prompt_string: str
     response_ids: list[str]
+
 
 async def batch_and_run(
     responses_df: pd.DataFrame,
@@ -51,7 +53,9 @@ async def batch_and_run(
     """
     logger.info(f"Running batch and run with batch size {batch_size}")
     prompt_template = convert_to_prompt_template(prompt_template)
-    batch_prompts = safe_prompt_generation(prompt_template, responses_df, batch_size=batch_size, **kwargs)
+    batch_prompts = safe_prompt_generation(
+        prompt_template, responses_df, batch_size=batch_size, **kwargs
+    )
 
     llm_responses, failed_ids = await call_llm(
         batch_prompts=batch_prompts,
@@ -74,7 +78,6 @@ async def batch_and_run(
 
 
 def calculate_string_token_length(input_text: str, model: str = "gpt-4o") -> int:
-
     """Calculate the number of tokens in a string using a specific model's tokenizer.
 
     Returns:
@@ -83,6 +86,7 @@ def calculate_string_token_length(input_text: str, model: str = "gpt-4o") -> int
     tokenizer_encoding = tiktoken.encoding_for_model(model)
     number_of_tokens = len(tokenizer_encoding.encode(input_text))
     return number_of_tokens
+
 
 def load_prompt_from_file(file_path: str | Path) -> str:
     """Load a prompt template from a text file in the prompts directory.
@@ -125,7 +129,10 @@ def convert_to_prompt_template(prompt_template: str | Path | PromptTemplate):
         raise TypeError(msg)
     return template
 
-def split_dataframe_by_partition(df: pd.DataFrame, partition_key: str | None) -> list[pd.DataFrame]:
+
+def split_dataframe_by_partition(
+    df: pd.DataFrame, partition_key: str | None
+) -> list[pd.DataFrame]:
     """
     Split the DataFrame into partitions if a partition key is provided.
     Returns a list of DataFrame partitions.
@@ -135,11 +142,10 @@ def split_dataframe_by_partition(df: pd.DataFrame, partition_key: str | None) ->
         return [group.reset_index(drop=True) for _, group in grouped]
     return [df]
 
+
 def batch_rows_df(
-    df: pd.DataFrame,
-    allowed_tokens: int,
-    batch_size: int
-    ) -> list[pd.DataFrame]:
+    df: pd.DataFrame, allowed_tokens: int, batch_size: int
+) -> list[pd.DataFrame]:
     """
     Splits the DataFrame into batches based on a token limit and a maximum row count.
     Rows that exceed the allowed token limit are skipped and logged.
@@ -158,7 +164,10 @@ def batch_rows_df(
             )
             continue
 
-        if current_token_count + token_count > allowed_tokens or len(current_indexes) >= batch_size:
+        if (
+            current_token_count + token_count > allowed_tokens
+            or len(current_indexes) >= batch_size
+        ):
             if current_indexes:
                 batches.append(df.loc[current_indexes].reset_index(drop=True))
             current_indexes = [idx]
@@ -171,12 +180,10 @@ def batch_rows_df(
         batches.append(df.loc[current_indexes].reset_index(drop=True))
     return batches
 
+
 def build_prompt(
-    prompt_template: PromptTemplate,
-    input_batch: pd.DataFrame,
-    **kwargs
-    ) -> BatchPrompt:
- 
+    prompt_template: PromptTemplate, input_batch: pd.DataFrame, **kwargs
+) -> BatchPrompt:
     prompt = prompt_template.format(
         input_data=input_batch.to_dict(orient="records"), **kwargs
     )
@@ -185,12 +192,15 @@ def build_prompt(
     batch_prompt = BatchPrompt(prompt_string=prompt, response_ids=response_ids)
     return batch_prompt
 
-def safe_prompt_generation(prompt_template, 
-                           input_data: pd.DataFrame, 
-                           batch_size: int = 50, 
-                           max_prompt_length: int = 50_000, 
-                           partition_key: str | None = None,
-                           **kwargs) -> list[BatchPrompt]:
+
+def safe_prompt_generation(
+    prompt_template,
+    input_data: pd.DataFrame,
+    batch_size: int = 50,
+    max_prompt_length: int = 50_000,
+    partition_key: str | None = None,
+    **kwargs,
+) -> list[BatchPrompt]:
     """
     Generate prompt strings from a DataFrame of responses. Batching is performed based
     on both a token count limit (considering a system prompt template) and a row count limit.
@@ -198,17 +208,20 @@ def safe_prompt_generation(prompt_template,
     """
     prompt_token_length = calculate_string_token_length(prompt_template.template)
     allowed_tokens_for_data = max_prompt_length - prompt_token_length
-    
+
     all_batches = []
     partitions = split_dataframe_by_partition(input_data, partition_key)
-    
+
     for partition in partitions:
-        partition_batches = batch_rows_df(partition, allowed_tokens_for_data, batch_size)
+        partition_batches = batch_rows_df(
+            partition, allowed_tokens_for_data, batch_size
+        )
         all_batches.extend(partition_batches)
 
     prompts = [build_prompt(prompt_template, batch, **kwargs) for batch in all_batches]
-    
+
     return prompts
+
 
 async def call_llm(
     batch_prompts: list[BatchPrompt],
@@ -332,3 +345,30 @@ def process_llm_responses(
         task_responses["response_id"] = task_responses["response_id"].astype(int)
         return responses.merge(task_responses, how="inner", on="response_id")
     return task_responses
+
+
+def validate_task_output(
+    task_output: pd.DataFrame | list[dict], task_data_model: Type[BaseModel]
+) -> tuple[list[dict], list[dict]]:
+    """
+    Validate each row in task_output against the provided Pydantic model.
+
+    Returns:
+        valid: a list of validated recors(dicts).
+        invalid: a list of records (dicts) that failed validation.
+    """
+
+    records = (
+        task_output.to_dict(orient="records")
+        if isinstance(task_output, pd.DataFrame)
+        else task_output
+    )
+
+    valid, invalid = [], []
+    for record in records:
+        try:
+            task_data_model(**record)
+            valid.append(record)
+        except ValidationError:
+            invalid.append(record)
+    return valid, invalid
