@@ -305,13 +305,6 @@ async def theme_refinement(
     logger.info(f"Running theme refinement on {len(condensed_themes_df)} responses")
     condensed_themes_df["response_id"] = range(len(condensed_themes_df))
 
-    def transpose_refined_themes(refined_themes: pd.DataFrame):
-        """Transpose topics for increased legibility."""
-        transposed_df = pd.DataFrame(
-            [refined_themes["topic"].to_numpy()], columns=refined_themes["topic_id"]
-        )
-        return transposed_df
-
     refined_themes = await batch_and_run(
         condensed_themes_df,
         prompt_template,
@@ -320,7 +313,7 @@ async def theme_refinement(
         question=question,
         system_prompt=system_prompt,
     )
-    return transpose_refined_themes(refined_themes)
+    return refined_themes
 
 
 async def theme_target_alignment(
@@ -366,17 +359,9 @@ async def theme_target_alignment(
         processing.
     """
     logger.info(
-        f"Running theme target alignment on {len(refined_themes_df.columns)} themes compressing to {target_n_themes} themes"
+        f"Running theme target alignment on {len(refined_themes_df)} themes compressing to {target_n_themes} themes"
     )
-    refined_themes_df = refined_themes_df.T.rename(columns={0: "topic"})
     refined_themes_df["response_id"] = range(len(refined_themes_df))
-
-    def transpose_aligned_themes(aligned_themes: pd.DataFrame):
-        """Transpose topics for increased legibility."""
-        transposed_df = pd.DataFrame(
-            [aligned_themes["topic"].to_numpy()], columns=aligned_themes["topic_id"]
-        )
-        return transposed_df
 
     aligned_themes = await batch_and_run(
         refined_themes_df,
@@ -387,7 +372,7 @@ async def theme_target_alignment(
         system_prompt=system_prompt,
         target_n_themes=target_n_themes,
     )
-    return transpose_aligned_themes(aligned_themes)
+    return aligned_themes
 
 
 async def theme_mapping(

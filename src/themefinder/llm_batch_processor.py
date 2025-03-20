@@ -4,12 +4,13 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Type
 
 import pandas as pd
 import tiktoken
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
+from pydantic import BaseModel, ValidationError
 from tenacity import before, retry, stop_after_attempt, wait_random_exponential
 
 from .themefinder_logging import logger
@@ -403,3 +404,31 @@ def build_prompt(
     response_ids = input_batch["response_id"].astype(str).to_list()
 
     return BatchPrompt(prompt_string=prompt, response_ids=response_ids)
+
+
+def validate_task_data(
+    task_data: pd.DataFrame | list[dict], task_data_model: Type[BaseModel]
+) -> tuple[list[dict], list[dict]]:
+    """
+    Validate each row in task_output against the provided Pydantic model.
+
+    Returns:
+        valid: a list of validated recors(dicts).
+        invalid: a list of records (dicts) that failed validation.
+    """
+
+    records = (
+        task_data.to_dict(orient="records")
+        if isinstance(task_data, pd.DataFrame)
+        else task_data
+    )
+
+    valid, invalid = [], []
+    for record in records:
+        try:
+            task_data_model(**record)
+            valid.append(record)
+        except ValidationError:
+            invalid.append(record)
+            print(record)
+    return valid, invalid

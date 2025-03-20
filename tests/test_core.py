@@ -164,8 +164,8 @@ async def test_theme_refinement(mock_llm):
         condensed_df, mock_llm, question="test question", batch_size=2
     )
     assert isinstance(result, pd.DataFrame)
-    assert "1" in result.columns
-    assert "2" in result.columns
+    assert "topic_id" in result.columns
+    assert "topic" in result.columns
     assert mock_llm.ainvoke.call_count == 1
 
 
@@ -187,8 +187,8 @@ async def test_theme_target_alignment(mock_llm):
         refined_df, mock_llm, question="test question", target_n_themes=2, batch_size=2
     )
     assert isinstance(result, pd.DataFrame)
-    assert "1" in result.columns
-    assert "2" in result.columns
+    assert "topic_id" in result.columns
+    assert "topic" in result.columns
     assert mock_llm.ainvoke.call_count == 1
 
 

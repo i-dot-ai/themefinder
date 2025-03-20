@@ -24,6 +24,9 @@ You MUST include every response ID in the output.
 If the response can not be labelled return empty sections where appropriate but you MUST return an entry
 with the correct response ID for each input object
 
+You MUST pick one of the given POSITION values.
+You MUST not return an empty value for the POSITION of a response.
+
 ## EXAMPLE
 Example 1:
 Question: \n What are your thoughts on the proposed government changes to the policy about reducing school holidays?
