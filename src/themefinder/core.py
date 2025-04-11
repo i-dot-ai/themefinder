@@ -6,7 +6,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 
 from .llm_batch_processor import batch_and_run, load_prompt_from_file
-from .models import SentimentAnalysisOutput, ThemeMappingOutput
+from .models import SentimentAnalysisOutput, ThemeMappingOutput, DetailDetectionOutput
 from .themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -138,7 +138,7 @@ async def sentiment_analysis(
         their original order and association after processing.
     """
     logger.info(f"Running sentiment analysis on {len(responses_df)} responses")
-    processed_rows, unprocessable_rows = await batch_and_run(
+    sentiment, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
         llm,
@@ -149,7 +149,7 @@ async def sentiment_analysis(
         system_prompt=system_prompt,
     )
 
-    return processed_rows, unprocessable_rows
+    return sentiment, unprocessable
 
 
 async def theme_generation(
@@ -432,7 +432,7 @@ async def theme_mapping(
         )
         return transposed_df
 
-    mapping, _ = await batch_and_run(
+    mapping, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
         llm,
@@ -445,4 +445,55 @@ async def theme_mapping(
         task_validation_model=ThemeMappingOutput,
         system_prompt=system_prompt,
     )
-    return mapping, _
+    return mapping, unprocessable
+
+
+async def detail_detection(
+    responses_df: pd.DataFrame,
+    llm: Runnable,
+    question: str,
+    batch_size: int = 20,
+    prompt_template: str | Path | PromptTemplate = "detail_detection",
+    system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Identify responses that provide high-value detailed evidence.
+
+    This function processes survey responses in batches to analyze their level of detail
+    and evidence using a language model. It identifies responses that contain specific
+    examples, data, or detailed reasoning that provide strong supporting evidence.
+
+    Args:
+        responses_df (pd.DataFrame): DataFrame containing survey responses to analyze.
+            Must contain 'response_id' and 'response' columns.
+        llm (Runnable): Language model instance to use for detail detection.
+        question (str): The survey question.
+        batch_size (int, optional): Number of responses to process in each batch.
+            Defaults to 20.
+        prompt_template (str | Path | PromptTemplate, optional): Template for structuring
+            the prompt to the LLM. Can be a string identifier, path to template file,
+            or PromptTemplate instance. Defaults to "detail_detection".
+        system_prompt (str): System prompt to guide the LLM's behavior.
+            Defaults to CONSULTATION_SYSTEM_PROMPT.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]:
+            A tuple containing two DataFrames:
+                - The first DataFrame contains the rows that were successfully processed by the LLM
+                - The second DataFrame contains the rows that could not be processed by the LLM
+
+    Note:
+        The function uses response_id_integrity_check to ensure responses maintain
+        their original order and association after processing.
+    """
+    logger.info(f"Running detail detection on {len(responses_df)} responses")
+    detailed, _ = await batch_and_run(
+        responses_df,
+        prompt_template,
+        llm,
+        batch_size=batch_size,
+        question=question,
+        validation_check=True,
+        task_validation_model=DetailDetectionOutput,
+        system_prompt=system_prompt,
+    )
+    return detailed, _

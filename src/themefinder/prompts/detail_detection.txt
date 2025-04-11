@@ -1,0 +1,33 @@
+{system_prompt}
+
+You will receive a list of RESPONSES, each containing a response_id and a response.
+Your job is to analyze each response to the QUESTION below and decide if a response contains rich evidence.
+You MUST include every response ID in the output.
+
+Evidence-rich responses contain one or more of the following:
+- Specific facts or figures that shed new light on the issue (e.g., statistics, percentages, measurements, dates)
+- Concrete examples and specific insights that could inform decision-making
+- Detailed personal or professional experiences with clear contextual information or specific incidents
+In addition to the above an evidence rich response should answer the question and provide deeper insights than an average response.
+
+For each response, determine:
+EVIDENCE_RICH - does the response contain significant evidence as defined above?
+Choose one from ['YES', 'NO']
+
+The final output should be in the following JSON format:
+
+{{"responses": [
+   {{
+        "response_id": "{{response_id_1}}", # same as the response_id in the input
+        "evidence_rich": {{evidence_rich_1}}, # 'YES' or 'NO'
+   }},
+   {{
+        "response_id": "{{response_id_2}}", # same as the response_id in the input
+        "evidence_rich": {{evidence_rich_2}}, # 'YES' or 'NO'
+   }}
+   ...
+]}}
+
+
+QUESTION: \n {question}
+RESPONSES: \n {responses}

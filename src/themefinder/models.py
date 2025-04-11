@@ -42,6 +42,25 @@ def validate_position(model: BaseModel) -> BaseModel:
     return model
 
 
+def validate_detail_detection(model: BaseModel) -> BaseModel:
+    """
+    Validate that the model's 'evidence_rich' field is one of the allowed values.
+
+    Args:
+        model (BaseModel): A Pydantic model instance with an 'evidence_rich' attribute.
+
+    Returns:
+        BaseModel: The same model if validation passes.
+
+    Raises:
+        ValueError: If the 'evidence_rich' field is not one of the allowed values.
+    """
+    allowed_values = {"YES", "NO"}
+    if model.evidence_rich not in allowed_values:
+        raise ValueError(f"evidence_rich must be one of {allowed_values}")
+    return model
+
+
 def validate_stances(model: BaseModel) -> BaseModel:
     """
     Validate that every stance in the model's 'stances' field is allowed.
@@ -135,4 +154,18 @@ class ThemeMappingOutput(BaseModel):
         validate_stances(self)
         validate_mapping_stance_lengths(self)
         validate_mapping_unique_labels(self)
+        return self
+
+
+class DetailDetectionOutput(BaseModel):
+    response_id: int = Field(gt=0)
+    evidence_rich: str
+
+    @model_validator(mode="after")
+    def run_validations(self) -> "DetailDetectionOutput":
+        """
+        Run all validations for DetailDetectionOutput.
+        """
+        validate_non_empty_fields(self)
+        validate_detail_detection(self)
         return self

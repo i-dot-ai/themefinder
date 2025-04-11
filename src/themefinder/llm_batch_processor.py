@@ -36,7 +36,7 @@ async def batch_and_run(
     batch_size: int = 10,
     partition_key: str | None = None,
     validation_check: bool = False,
-    task_validation_model: Type[BaseModel] = None,
+    task_validation_model: Optional[Type[BaseModel]] = None,
     **kwargs: Any,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Process a DataFrame of responses in batches using an LLM.
@@ -55,7 +55,7 @@ async def batch_and_run(
             response IDs are present in LLM output and validates the rows against the validation model,
             failed rows are retried individually.
             If False, no integrity checking or retrying occurs. Defaults to False.
-        task_validation_model (Type[BaseModel]): the pydanctic model to validate each row against
+        task_validation_model (Optional[Type[BaseModel]]): the pydanctic model to validate each row against
         **kwargs (Any): Additional keyword arguments to pass to the prompt template.
 
     Returns:

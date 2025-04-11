@@ -5,6 +5,7 @@ from .core import (
     theme_generation,
     theme_mapping,
     theme_refinement,
+    detail_detection,
 )
 
 __all__ = [
@@ -14,5 +15,6 @@ __all__ = [
     "theme_condensation",
     "theme_refinement",
     "theme_mapping",
+    "detail_detection",
 ]
 __version__ = "0.1.0"

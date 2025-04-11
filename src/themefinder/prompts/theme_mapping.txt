@@ -14,6 +14,7 @@ Your task is to analyze each response and decide which topics are present. Guide
     - A response doesn't need to exactly match the language used in the TOPIC LIST, it should be considered a match if it expresses a similar sentiment.
     - You must use the alphabetic 'topic_id' to indicate which topic you have assigned. Do not use the full topic description
     - Each response can be assigned to multiple topics if it matches more than one topic from the TOPIC LIST.
+    - Each topic can only be assigned once per response, if the topic is mentioned more than once use the first mention for reasoning and stance.
     - There is no limit on how many topics can be assigned to a response.
     - For each assignment provide a single rationale for why you have chosen the label.
     - For each topic identified in a response, indicate whether the response expresses a positive or negative stance toward that topic (options: 'POSITIVE' or 'NEGATIVE')
