@@ -4,11 +4,12 @@ You will receive a list of RESPONSES, each containing a response_id and a respon
 Your job is to analyze each response to the QUESTION below and decide if a response contains rich evidence.
 You MUST include every response ID in the output.
 
-Evidence-rich responses contain one or more of the following:
+Evidence-rich responses contain two or more of the following:
 - Specific facts or figures that shed new light on the issue (e.g., statistics, percentages, measurements, dates)
-- Concrete examples and specific insights that could inform decision-making
+- Concrete examples and specific insights that could inform decision-making, these must be detailed enough to make sense as stand alone pieces of evidence
 - Detailed personal or professional experiences with clear contextual information or specific incidents
-In addition to the above an evidence rich response should answer the question and provide deeper insights than an average response.
+- Detailed suggestions for possible solutions to problems that are well reasoned and go beyond just criticizing the status quo.
+In addition to the above every evidence rich response should answer the question and provide deeper insights than other responses.
 
 For each response, determine:
 EVIDENCE_RICH - does the response contain significant evidence as defined above?
