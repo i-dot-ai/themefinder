@@ -5,6 +5,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional, Type
+from collections import Counter
 
 import openai
 import pandas as pd
@@ -341,6 +342,8 @@ async def call_llm(
                 failed_ids = get_missing_response_ids(
                     batch_prompt.response_ids, all_results
                 )
+                duplicate_ids = get_duplicate_response_ids(all_results)
+                failed_ids.extend(duplicate_ids)
                 validated_results, invalid_rows = validate_task_data(
                     all_results["responses"], task_validation_model
                 )
@@ -389,6 +392,26 @@ def get_missing_response_ids(
     if missing_ids:
         logger.info(f"Missing response IDs from LLM output: {missing_ids}")
     return missing_ids
+
+
+def get_duplicate_response_ids(parsed_response: dict) -> list[int]:
+    """Identify duplicate response IDs in the LLM's parsed response.
+
+    Args:
+        parsed_response (dict): Parsed response from the LLM containing a 'responses' key,
+            which is a list of dictionaries. Each dictionary is expected to have a
+            'response_id' field.
+
+    Returns:
+        list[int]: List of duplicate response IDs found in the parsed response.
+    """
+    response_ids = [
+        int(row["response_id"])
+        for row in parsed_response["responses"]
+        if "response_id" in row and row["response_id"] is not None
+    ]
+    counts = Counter(response_ids)
+    return [response_id for response_id, count in counts.items() if count > 1]
 
 
 def process_llm_responses(

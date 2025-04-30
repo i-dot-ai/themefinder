@@ -16,6 +16,8 @@ from themefinder.llm_batch_processor import (
     generate_prompts,
     process_llm_responses,
     split_overflowing_batch,
+    get_missing_response_ids,
+    get_duplicate_response_ids,
 )
 
 
@@ -560,3 +562,56 @@ async def test_call_llm_bad_request(monkeypatch, mock_llm):
     # Verify that each response id in the result contains the expected failure details.
     for response_id in batch_prompts[0].response_ids:
         assert response_id in failed_ids
+
+
+def test_get_missing_response_ids_none_missing():
+    """All IDs are present → empty list."""
+    input_ids = [1, 2, 3]
+    parsed = {"responses": [{"response_id": 1}, {"response_id": 2}, {"response_id": 3}]}
+
+    assert get_missing_response_ids(input_ids, parsed) == []
+
+
+def test_get_missing_response_ids_some_missing():
+    """Function returns *only* the absent IDs (order not guaranteed)."""
+    input_ids = [1, 2, 3, 4]
+    parsed = {"responses": [{"response_id": 1}, {"response_id": 3}]}
+
+    missing = get_missing_response_ids(input_ids, parsed)
+    assert set(missing) == {2, 4}
+
+
+def test_get_missing_response_ids_all_missing():
+    """Handles a parsed response with no IDs at all."""
+    input_ids = [10, 20]
+    parsed = {"responses": []}
+
+    assert set(get_missing_response_ids(input_ids, parsed)) == {10, 20}
+
+
+def test_get_duplicate_response_ids_no_duplicates():
+    """Distinct IDs → empty list."""
+    parsed = {"responses": [{"response_id": 5}, {"response_id": 6}, {"response_id": 7}]}
+
+    assert get_duplicate_response_ids(parsed) == []
+
+
+def test_get_duplicate_response_ids_with_duplicates():
+    """
+    Two extra appearances of ID=42:
+    - after first repeat it is appended once;
+    - after second repeat it is appended again.
+    """
+    parsed = {
+        "responses": [
+            {"response_id": 42},
+            {"response_id": 42},  # 1st duplicate
+            {"response_id": 99},
+            {"response_id": 42},  # 2nd duplicate
+        ]
+    }
+
+    dupes = get_duplicate_response_ids(parsed)
+
+    # exactly two entries, each == 42, in the order they occurred
+    assert dupes == [42]
