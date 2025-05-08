@@ -23,28 +23,8 @@ For each topic in your output:
 2. Write a concise description that incorporates key insights from all constituent topics, this should only be a single sentence
 3. Include the total count of original topics combined by summing the source_topic_counts of merged topics (or 1 for topics without a count)
 
-The final output should be in the following JSON format:
-
-{{"responses": [
-    {{"topic_label": "{{label for condensed topic 1}}", 
-      "topic_description": "{{description for condensed topic 1}}",
-      "source_topic_count": {{sum of source_topic_counts from combined topics}}
-    }},
-    {{"topic_label": "{{label for condensed topic 2}}", 
-      "topic_description": "{{description for condensed topic 2}}",
-      "source_topic_count": {{sum of source_topic_counts from combined topics}}
-    }},
-    {{"topic_label": "{{label for condensed topic 3}}", 
-      "topic_description": "{{description for condensed topic 3}}",
-      "source_topic_count": {{sum of source_topic_counts from combined topics}}
-    }},
-    // Additional topics as necessary
-]}}
-
-[Question]
-
+QUESTION:
 {question}
 
-[Themes]
-
+TOPICS:
 {responses}

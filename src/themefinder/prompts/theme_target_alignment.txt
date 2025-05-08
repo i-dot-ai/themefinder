@@ -10,17 +10,9 @@ Requirements:
 - Each consolidated theme should capture all relevant information from its source themes
 - Final descriptions should be concise but thorough
 - The merged themes should be distinct from each other with minimal overlap
+- The source_topic_count field should be included for each theme and represent the sum of all source themes that were combined to create it
+- You cannot return more than {target_n_themes}
 
-Return your output in the following JSON format:
-
-{{
-   "responses": [
-       {{"topic_id": "A", "topic": "{{topic label 1}}: {{topic description 1}}"}},
-       {{"topic_id": "B", "topic": "{{topic label 2}}: {{topic description 2}}"}},
-       {{"topic_id": "C", "topic": "{{topic label 3}}: {{topic description 3}}"}},
-      // Additional topics as necessary
-   ]
-}}
 
 Themes to analyze: 
 {responses}

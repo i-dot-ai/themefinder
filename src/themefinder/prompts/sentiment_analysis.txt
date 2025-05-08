@@ -6,20 +6,6 @@ Your job is to analyze each response to the QUESTION below and decide:
 POSITION - is the response AGREEING or DISAGREEING or is it UNCLEAR about the change being proposed in the question.
 Choose one from [AGREEMENT, DISAGREEMENT, UNCLEAR]
 
-The final output should be in the following JSON format:
-
-{{"responses": [
-    {{
-        "response_id": "{{response_id_1}}",
-        "position": {{position_1}},
-    }},
-    {{
-        "response_id": "{{response_id_2}}",
-        "position": {{position_2}},
-    }}
-    ...
-]}}
-
 You MUST include every response ID in the output.
 If the response can not be labelled return empty sections where appropriate but you MUST return an entry
 with the correct response ID for each input object

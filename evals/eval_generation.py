@@ -25,7 +25,6 @@ async def evaluate_generation():
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
     )
     sentiments, question, theme_framework = load_responses_and_framework()
     themes_df, _ = await theme_generation(
@@ -43,7 +42,7 @@ async def evaluate_generation():
         llm=llm,
         question=question,
     )
-    eval_scores = calculate_generation_metrics(llm, refined_themes_df, theme_framework)
+    eval_scores = calculate_generation_metrics(refined_themes_df, theme_framework)
     print(f"Theme Generation Eval Results: \n {eval_scores}")
 
 

@@ -1,4 +1,5 @@
-from unittest.mock import MagicMock
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import httpx
 import openai
@@ -7,13 +8,23 @@ import pytest
 import tiktoken
 
 from themefinder import sentiment_analysis
+from themefinder.models import (
+    Position,
+    SentimentAnalysisOutput,
+    SentimentAnalysisResponses,
+)
 from themefinder.llm_batch_processor import (
     BatchPrompt,
+    PromptTemplate,
+    batch_and_run,
     batch_task_input_df,
     build_prompt,
     calculate_string_token_length,
     call_llm,
+    convert_to_prompt_template,
     generate_prompts,
+    get_missing_response_ids,
+    partition_dataframe,
     process_llm_responses,
     split_overflowing_batch,
 )
@@ -42,18 +53,28 @@ async def test_retries(mock_llm, sample_df):
     Verifies that the system properly retries after an exception
     and successfully processes the responses on subsequent attempts.
     """
-    exception = Exception("Rate limited!")
-    mock_llm.ainvoke.side_effect = [
-        exception,
-        MagicMock(
-            content='{"responses": [{"response_id": 1, "position": "AGREEMENT", "text": "response1"}, {"response_id": 2, "position": "DISAGREEMENT", "text": "response2"}]}'
-        ),
-    ]
-    result, _ = await sentiment_analysis(sample_df, mock_llm, question="doesn't matter")
-    # we got something back
-    assert isinstance(result, pd.DataFrame)
-    # we hit the llm twice
-    assert mock_llm.ainvoke.call_count == 2
+    mock_response = SentimentAnalysisResponses(
+        responses=[
+            SentimentAnalysisOutput(response_id=1, position=Position.AGREEMENT),
+            SentimentAnalysisOutput(response_id=2, position=Position.DISAGREEMENT),
+        ]
+    )
+    with patch("themefinder.llm_batch_processor.call_llm") as mock_call_llm:
+        mock_call_llm.side_effect = [
+            ([], [1, 2]),  # First call fails, returns empty responses and failed IDs
+            (
+                [
+                    mock_response.responses[0].model_dump(),
+                    mock_response.responses[1].model_dump(),
+                ],
+                [],
+            ),  # Second call succeeds
+        ]
+        result, _ = await sentiment_analysis(
+            sample_df, mock_llm, question="doesn't matter"
+        )
+        assert isinstance(result, pd.DataFrame)
+        assert mock_call_llm.call_count == 2
 
 
 def test_empty_string(monkeypatch):
@@ -560,3 +581,317 @@ async def test_call_llm_bad_request(monkeypatch, mock_llm):
     # Verify that each response id in the result contains the expected failure details.
     for response_id in batch_prompts[0].response_ids:
         assert response_id in failed_ids
+
+
+@pytest.mark.asyncio
+async def test_batch_and_run_successful(monkeypatch, mock_llm, sample_df):
+    """
+    Test batch_and_run when all processing is successful.
+    Verifies that the function processes all rows and returns an empty DataFrame for unprocessable rows.
+    """
+    # Create a mock for generate_prompts that returns deterministic prompts
+    batch_prompts = [
+        BatchPrompt(prompt_string="Test prompt 1", response_ids=[1, 2]),
+        BatchPrompt(prompt_string="Test prompt 2", response_ids=[3]),
+    ]
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.generate_prompts",
+        lambda *args, **kwargs: batch_prompts,
+    )
+
+    # Create a mock for call_llm that returns successful responses
+    mock_responses = [
+        {"response_id": 1, "llm_contribution": "result1"},
+        {"response_id": 2, "llm_contribution": "result2"},
+        {"response_id": 3, "llm_contribution": "result3"},
+    ]
+
+    async def mock_call_llm(*args, **kwargs):
+        return mock_responses, []
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.call_llm",
+        mock_call_llm,
+    )
+
+    # Create a mock for process_llm_responses
+    processed_df = pd.DataFrame(
+        {
+            "response_id": [1, 2, 3],
+            "text": ["a", "b", "c"],
+            "llm_contribution": ["result1", "result2", "result3"],
+        }
+    )
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.process_llm_responses",
+        lambda *args, **kwargs: processed_df,
+    )
+
+    # Create a real PromptTemplate instance
+    from langchain_core.prompts import PromptTemplate
+
+    prompt_template = PromptTemplate.from_template("Test template {responses}")
+
+    result_df, unprocessable_df = await batch_and_run(
+        sample_df, prompt_template, mock_llm, batch_size=2
+    )
+
+    assert len(result_df) == 3
+    assert len(unprocessable_df) == 0
+    assert all(result_df["llm_contribution"] == ["result1", "result2", "result3"])
+
+
+@pytest.mark.asyncio
+async def test_batch_and_run_with_retries(monkeypatch, mock_llm, sample_df):
+    """
+    Test batch_and_run when some initial processing fails but succeeds on retry.
+    Verifies that the function retries failed rows and combines results appropriately.
+    """
+
+    # Create a mock for generate_prompts
+    def mock_generate_prompts(*args, **kwargs):
+        batch_size = kwargs.get("batch_size", 10)
+        if batch_size == 1:  # For retry prompts
+            return [
+                BatchPrompt(prompt_string="Retry prompt 1", response_ids=[2]),
+            ]
+        else:  # For initial prompts
+            return [
+                BatchPrompt(prompt_string="Initial prompt", response_ids=[1, 2]),
+            ]
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.generate_prompts",
+        mock_generate_prompts,
+    )
+
+    # Create a mock for call_llm that simulates failure for ID 2 on first attempt
+    call_count = 0
+
+    async def mock_call_llm(*args, **kwargs):
+        nonlocal call_count
+        if call_count == 0:  # First call - return one success, one failure
+            call_count += 1
+            return [{"response_id": 1, "llm_contribution": "result1"}], [2]
+        else:  # Second call - retry success
+            return [{"response_id": 2, "llm_contribution": "result2"}], []
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.call_llm",
+        mock_call_llm,
+    )
+
+    # Create mocks for process_llm_responses
+    def mock_process_llm_responses(responses, df):
+        response_ids = [r["response_id"] for r in responses]
+        return pd.DataFrame(
+            {
+                "response_id": response_ids,
+                "text": ["a" if id == 1 else "b" for id in response_ids],
+                "llm_contribution": [r["llm_contribution"] for r in responses],
+            }
+        )
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.process_llm_responses",
+        mock_process_llm_responses,
+    )
+
+    # Create a real PromptTemplate instance
+    from langchain_core.prompts import PromptTemplate
+
+    prompt_template = PromptTemplate.from_template("Test template {responses}")
+
+    result_df, unprocessable_df = await batch_and_run(
+        sample_df, prompt_template, mock_llm, batch_size=2
+    )
+
+    assert len(result_df) == 2
+    assert len(unprocessable_df) == 0
+    assert set(result_df["response_id"]) == {1, 2}
+    assert set(result_df["llm_contribution"]) == {"result1", "result2"}
+
+
+@pytest.mark.asyncio
+async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
+    """
+    Test batch_and_run when some rows remain unprocessable even after retries.
+    Verifies that the function properly identifies and returns unprocessable rows.
+    """
+
+    # Create a mock for generate_prompts
+    def mock_generate_prompts(*args, **kwargs):
+        batch_size = kwargs.get("batch_size", 10)
+        if batch_size == 1:  # For retry prompts
+            return [
+                BatchPrompt(prompt_string="Retry prompt 1", response_ids=[2]),
+                BatchPrompt(prompt_string="Retry prompt 2", response_ids=[3]),
+            ]
+        else:  # For initial prompts
+            return [
+                BatchPrompt(prompt_string="Initial prompt", response_ids=[1, 2, 3]),
+            ]
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.generate_prompts",
+        mock_generate_prompts,
+    )
+
+    # Create a mock for call_llm that simulates failures
+    call_count = 0
+
+    async def mock_call_llm(*args, **kwargs):
+        nonlocal call_count
+        if call_count == 0:  # First call - one success, two failures
+            call_count += 1
+            return [{"response_id": 1, "llm_contribution": "result1"}], [2, 3]
+        else:  # Second call - one retry success, one permanent failure
+            return [{"response_id": 2, "llm_contribution": "result2"}], [3]
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.call_llm",
+        mock_call_llm,
+    )
+
+    # Create mocks for process_llm_responses
+    def mock_process_llm_responses(responses, df):
+        response_ids = [r["response_id"] for r in responses]
+        return pd.DataFrame(
+            {
+                "response_id": response_ids,
+                "text": ["txt" + str(id) for id in response_ids],
+                "llm_contribution": [r["llm_contribution"] for r in responses],
+            }
+        )
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.process_llm_responses",
+        mock_process_llm_responses,
+    )
+
+    # Create a test DataFrame
+    test_df = pd.DataFrame(
+        {
+            "response_id": [1, 2, 3],
+            "text": ["text1", "text2", "text3"],
+        }
+    )
+
+    # Create a real PromptTemplate instance
+    from langchain_core.prompts import PromptTemplate
+
+    prompt_template = PromptTemplate.from_template("Test template {responses}")
+
+    result_df, unprocessable_df = await batch_and_run(
+        test_df, prompt_template, mock_llm, batch_size=3
+    )
+
+    assert len(result_df) == 2
+    assert len(unprocessable_df) == 1
+    assert set(result_df["response_id"]) == {1, 2}
+    assert set(unprocessable_df["response_id"]) == {3}
+
+
+def test_convert_to_prompt_template_string(monkeypatch):
+    """
+    Test convert_to_prompt_template with a string input.
+    Verifies that a string is correctly loaded from a file and converted to a PromptTemplate.
+    """
+    # Mock load_prompt_from_file
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.load_prompt_from_file",
+        lambda _: "This is a test prompt with {variable}",
+    )
+
+    result = convert_to_prompt_template("test_prompt")
+
+    assert isinstance(result, PromptTemplate)
+    assert result.template == "This is a test prompt with {variable}"
+    assert "variable" in result.input_variables
+
+
+def test_convert_to_prompt_template_path(monkeypatch):
+    """
+    Test convert_to_prompt_template with a Path input.
+    Verifies that a Path is correctly loaded and converted to a PromptTemplate.
+    """
+    # Mock load_prompt_from_file
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.load_prompt_from_file",
+        lambda _: "This is a path-based prompt with {variable}",
+    )
+
+    result = convert_to_prompt_template(Path("test_prompt"))
+
+    assert isinstance(result, PromptTemplate)
+    assert result.template == "This is a path-based prompt with {variable}"
+
+
+def test_convert_to_prompt_template_invalid_type():
+    """
+    Test convert_to_prompt_template with an invalid input type.
+    Verifies that the function raises a TypeError for unsupported input types.
+    """
+    with pytest.raises(TypeError):
+        convert_to_prompt_template(123)  # Integer is not a valid type
+
+
+def test_load_prompt_from_file_not_found(monkeypatch):
+    """
+    Test load_prompt_from_file when the file is not found.
+    Verifies that the function raises FileNotFoundError when the prompt file doesn't exist.
+    """
+
+    def mock_open(*args, **kwargs):
+        raise FileNotFoundError("File not found")
+
+    monkeypatch.setattr(Path, "open", mock_open)
+
+    with pytest.raises(FileNotFoundError):
+        from themefinder.llm_batch_processor import load_prompt_from_file
+
+        load_prompt_from_file("nonexistent_prompt")
+
+
+def test_get_missing_response_ids():
+    """
+    Test get_missing_response_ids function.
+    Verifies that the function correctly identifies missing response IDs.
+    """
+    input_response_ids = [1, 2, 3, 4]
+    parsed_response = {
+        "responses": [
+            {"response_id": 1, "content": "result1"},
+            {"response_id": 3, "content": "result3"},
+            # response_id 2 and 4 are missing
+        ]
+    }
+
+    missing_ids = get_missing_response_ids(input_response_ids, parsed_response)
+
+    assert set(missing_ids) == {2, 4}
+
+
+def test_partition_dataframe():
+    """
+    Test partition_dataframe function.
+    Verifies that the function correctly partitions a DataFrame based on the partition key.
+    """
+    df = pd.DataFrame(
+        {
+            "response_id": [1, 2, 3, 4],
+            "text": ["a", "b", "c", "d"],
+            "group": ["A", "A", "B", "B"],
+        }
+    )
+
+    # With partition key
+    partitions = partition_dataframe(df, partition_key="group")
+    assert len(partitions) == 2
+    assert set(partitions[0]["group"].unique()) == {"A"}
+    assert set(partitions[1]["group"].unique()) == {"B"}
+
+    # Without partition key
+    partitions = partition_dataframe(df, partition_key=None)
+    assert len(partitions) == 1
+    assert len(partitions[0]) == 4

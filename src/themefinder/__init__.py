@@ -5,6 +5,7 @@ from .core import (
     theme_generation,
     theme_mapping,
     theme_refinement,
+    theme_target_alignment,
     detail_detection,
 )
 
@@ -14,6 +15,7 @@ __all__ = [
     "theme_generation",
     "theme_condensation",
     "theme_refinement",
+    "theme_target_alignment",
     "theme_mapping",
     "detail_detection",
 ]

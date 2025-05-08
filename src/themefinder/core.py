@@ -3,10 +3,17 @@ from pathlib import Path
 
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import Runnable
+from langchain.schema.runnable import RunnableWithFallbacks
 
 from .llm_batch_processor import batch_and_run, load_prompt_from_file
-from .models import SentimentAnalysisOutput, ThemeMappingOutput, DetailDetectionOutput
+from .models import (
+    SentimentAnalysisResponses,
+    ThemeGenerationResponses,
+    ThemeCondensationResponses,
+    ThemeRefinementResponses,
+    ThemeMappingResponses,
+    DetailDetectionResponses,
+)
 from .themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -14,7 +21,7 @@ CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
 
 async def find_themes(
     responses_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     target_n_themes: int | None = None,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
@@ -33,7 +40,7 @@ async def find_themes(
 
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses
-        llm (Runnable): Language model instance for text analysis
+        llm (RunnableWithFallbacks): Language model instance for text analysis
         question (str): The survey question
         target_n_themes (int | None, optional): Target number of themes to consolidate to.
             If None, skip theme target alignment step. Defaults to None.
@@ -98,6 +105,13 @@ async def find_themes(
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
+    detailed_df, _ = await detail_detection(
+        responses_df[["response_id", "response"]],
+        llm,
+        question=question,
+        system_prompt=system_prompt,
+        concurrency=concurrency,
+    )
 
     logger.info("Finished finding themes")
     logger.info(
@@ -108,13 +122,14 @@ async def find_themes(
         "sentiment": sentiment_df,
         "themes": refined_theme_df,
         "mapping": mapping_df,
+        "detailed_responses": detailed_df,
         "unprocessables": pd.concat([sentiment_unprocessables, mapping_unprocessables]),
     }
 
 
 async def sentiment_analysis(
     responses_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 20,
     prompt_template: str | Path | PromptTemplate = "sentiment_analysis",
@@ -129,7 +144,7 @@ async def sentiment_analysis(
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses to analyze.
             Must contain 'response_id' and 'response' columns.
-        llm (Runnable): Language model instance to use for sentiment analysis.
+        llm (RunnableWithFallbacks): Language model instance to use for sentiment analysis.
         question (str): The survey question.
         batch_size (int, optional): Number of responses to process in each batch.
             Defaults to 20.
@@ -147,18 +162,17 @@ async def sentiment_analysis(
                 - The second DataFrame contains the rows that could not be processed by the LLM
 
     Note:
-        The function uses validation_check to ensure responses maintain
+        The function uses integrity_check to ensure responses maintain
         their original order and association after processing.
     """
     logger.info(f"Running sentiment analysis on {len(responses_df)} responses")
     sentiment, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(SentimentAnalysisResponses),
         batch_size=batch_size,
         question=question,
-        validation_check=True,
-        task_validation_model=SentimentAnalysisOutput,
+        integrity_check=True,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
@@ -168,7 +182,7 @@ async def sentiment_analysis(
 
 async def theme_generation(
     responses_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 50,
     partition_key: str | None = "position",
@@ -183,7 +197,7 @@ async def theme_generation(
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses.
             Must include 'response_id' and 'response' columns.
-        llm (Runnable): Language model instance to use for theme generation.
+        llm (RunnableWithFallbacks): Language model instance to use for theme generation.
         question (str): The survey question.
         batch_size (int, optional): Number of responses to process in each batch.
             Defaults to 50.
@@ -209,7 +223,7 @@ async def theme_generation(
     generated_themes, _ = await batch_and_run(
         responses_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(ThemeGenerationResponses),
         batch_size=batch_size,
         partition_key=partition_key,
         question=question,
@@ -221,7 +235,7 @@ async def theme_generation(
 
 async def theme_condensation(
     themes_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 75,
     prompt_template: str | Path | PromptTemplate = "theme_condensation",
@@ -237,7 +251,7 @@ async def theme_condensation(
     Args:
         themes_df (pd.DataFrame): DataFrame containing the initial themes identified
             from survey responses.
-        llm (Runnable): Language model instance to use for theme condensation.
+        llm (RunnableWithFallbacks): Language model instance to use for theme condensation.
         question (str): The survey question.
         batch_size (int, optional): Number of themes to process in each batch.
             Defaults to 100.
@@ -266,7 +280,7 @@ async def theme_condensation(
         themes_df, _ = await batch_and_run(
             themes_df,
             prompt_template,
-            llm,
+            llm.with_structured_output(ThemeCondensationResponses),
             batch_size=batch_size,
             question=question,
             system_prompt=system_prompt,
@@ -283,7 +297,7 @@ async def theme_condensation(
     themes_df, _ = await batch_and_run(
         themes_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(ThemeCondensationResponses),
         batch_size=batch_size,
         question=question,
         system_prompt=system_prompt,
@@ -297,7 +311,7 @@ async def theme_condensation(
 
 async def theme_refinement(
     condensed_themes_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 10000,
     prompt_template: str | Path | PromptTemplate = "theme_refinement",
@@ -314,7 +328,7 @@ async def theme_refinement(
     Args:
         condensed_themes (pd.DataFrame): DataFrame containing the condensed themes
             from the previous pipeline stage.
-        llm (Runnable): Language model instance to use for theme refinement.
+        llm (RunnableWithFallbacks): Language model instance to use for theme refinement.
         question (str): The survey question.
         batch_size (int, optional): Number of themes to process in each batch.
             Defaults to 10000.
@@ -342,7 +356,7 @@ async def theme_refinement(
     refined_themes, _ = await batch_and_run(
         condensed_themes_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(ThemeRefinementResponses),
         batch_size=batch_size,
         question=question,
         system_prompt=system_prompt,
@@ -353,7 +367,7 @@ async def theme_refinement(
 
 async def theme_target_alignment(
     refined_themes_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     target_n_themes: int = 10,
     batch_size: int = 10000,
@@ -371,7 +385,7 @@ async def theme_target_alignment(
     Args:
         refined_themes_df (pd.DataFrame): DataFrame containing the refined themes
             from the previous pipeline stage.
-        llm (Runnable): Language model instance to use for theme alignment.
+        llm (RunnableWithFallbacks): Language model instance to use for theme alignment.
         question (str): The survey question.
         target_n_themes (int, optional): Target number of themes to consolidate to.
             Defaults to 10.
@@ -402,7 +416,7 @@ async def theme_target_alignment(
     aligned_themes, _ = await batch_and_run(
         refined_themes_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(ThemeRefinementResponses),
         batch_size=batch_size,
         question=question,
         system_prompt=system_prompt,
@@ -414,7 +428,7 @@ async def theme_target_alignment(
 
 async def theme_mapping(
     responses_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     refined_themes_df: pd.DataFrame,
     batch_size: int = 20,
@@ -430,7 +444,7 @@ async def theme_mapping(
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses.
             Must include 'response_id' and 'response' columns.
-        llm (Runnable): Language model instance to use for theme mapping.
+        llm (RunnableWithFallbacks): Language model instance to use for theme mapping.
         question (str): The survey question.
         refined_themes_df (pd.DataFrame): Single-row DataFrame where each column
             represents a theme (from theme_refinement stage).
@@ -464,14 +478,13 @@ async def theme_mapping(
     mapping, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(ThemeMappingResponses),
         batch_size=batch_size,
         question=question,
         refined_themes=transpose_refined_themes(refined_themes_df).to_dict(
             orient="records"
         ),
-        validation_check=True,
-        task_validation_model=ThemeMappingOutput,
+        integrity_check=True,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
@@ -480,7 +493,7 @@ async def theme_mapping(
 
 async def detail_detection(
     responses_df: pd.DataFrame,
-    llm: Runnable,
+    llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 20,
     prompt_template: str | Path | PromptTemplate = "detail_detection",
@@ -496,7 +509,7 @@ async def detail_detection(
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses to analyze.
             Must contain 'response_id' and 'response' columns.
-        llm (Runnable): Language model instance to use for detail detection.
+        llm (RunnableWithFallbacks): Language model instance to use for detail detection.
         question (str): The survey question.
         batch_size (int, optional): Number of responses to process in each batch.
             Defaults to 20.
@@ -521,11 +534,10 @@ async def detail_detection(
     detailed, _ = await batch_and_run(
         responses_df,
         prompt_template,
-        llm,
+        llm.with_structured_output(DetailDetectionResponses),
         batch_size=batch_size,
         question=question,
-        validation_check=True,
-        task_validation_model=DetailDetectionOutput,
+        integrity_check=True,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )

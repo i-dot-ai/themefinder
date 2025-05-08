@@ -49,7 +49,6 @@ async def evaluate_mapping(question_num: int | None = None):
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
     )
     questions_to_process = [question_num] if question_num is not None else range(1, 4)
     for i in questions_to_process:

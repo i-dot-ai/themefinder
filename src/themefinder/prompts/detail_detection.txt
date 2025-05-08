@@ -14,20 +14,6 @@ For each response, determine:
 EVIDENCE_RICH - does the response contain significant evidence as defined above?
 Choose one from ['YES', 'NO']
 
-The final output should be in the following JSON format:
-
-{{"responses": [
-   {{
-        "response_id": "{{response_id_1}}", # same as the response_id in the input
-        "evidence_rich": {{evidence_rich_1}}, # 'YES' or 'NO'
-   }},
-   {{
-        "response_id": "{{response_id_2}}", # same as the response_id in the input
-        "evidence_rich": {{evidence_rich_2}}, # 'YES' or 'NO'
-   }}
-   ...
-]}}
-
 
 QUESTION: \n {question}
 RESPONSES: \n {responses}

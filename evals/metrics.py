@@ -28,12 +28,11 @@ def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
 
 
 def calculate_generation_metrics(
-    llm: AzureChatOpenAI, generated_topics: pd.DataFrame, topic_framework: dict
+    generated_topics: pd.DataFrame, topic_framework: dict
 ) -> dict[str, float | int]:
     """Calculate precision and recall metrics for generated themes against a framework.
 
     Args:
-        llm (AzureChatOpenAI): Language model for evaluation
         generated_topics (pd.DataFrame): DataFrame containing generated themes as columns
         topic_framework (dict): Dictionary containing reference framework themes
 
@@ -45,6 +44,11 @@ def calculate_generation_metrics(
             - Recall N not Captured: Count of framework topics not captured
             - Recall Average topic Representation: Mean representation score
     """
+    llm = AzureChatOpenAI(
+        model_name="gpt-4o",
+        temperature=0,
+        model_kwargs={"response_format": {"type": "json_object"}},
+    )
     precision_scores = llm.invoke(
         read_and_render(
             "generation_eval.txt",
@@ -61,7 +65,7 @@ def calculate_generation_metrics(
     recall_scores = list(json.loads(recall_scores.content).values())
     threshold = 3
     return {
-        "Precision N topics": len(generated_topics.columns),
+        "Precision N topics": len(generated_topics),
         "Precision N not well grounded": sum([i < threshold for i in precision_scores]),
         "Precision Average Groundedness": np.mean(precision_scores).round(2),
         "Recall N not Captured": sum([i < threshold for i in recall_scores]),

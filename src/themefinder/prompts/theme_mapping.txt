@@ -1,12 +1,12 @@
 {system_prompt}
 
-Your job is to help identify which topics come up in responses to a question.
+Your job is to help identify which topics come up in free_text_responses to a question.
 
 You will be given:
     - a QUESTION that has been asked
-    - a TOPIC LIST of topics that are known to be present in responses to this question. These will be structured as follows:
+    - a TOPIC LIST of topics that are known to be present in free_text_responses to this question. These will be structured as follows:
         {{'topic_id': 'topic_description}}
-    - a list of RESPONSES to the question. These will be structured as follows:
+    - a list of FREE_TEXT_RESPONSES to the question. These will be structured as follows:
         {{'response_id': 'free text response'}}
 
 Your task is to analyze each response and decide which topics are present. Guidelines:
@@ -18,7 +18,7 @@ Your task is to analyze each response and decide which topics are present. Guide
     - There is no limit on how many topics can be assigned to a response.
     - For each assignment provide a single rationale for why you have chosen the label.
     - For each topic identified in a response, indicate whether the response expresses a positive or negative stance toward that topic (options: 'POSITIVE' or 'NEGATIVE')
-    - You MUST use either 'POSTIVE' or 'NEGATIVE'
+    - You MUST use either 'POSITIVE' or 'NEGATIVE'
     - The order of reasons and stances must align with the order of labels (e.g., stance_a applies to topic_a)
 
 You MUST include every response ID in the output.
@@ -26,24 +26,6 @@ If the response can not be labelled return empty sections where appropriate but 
 with the correct response ID for each input object.
 You must only return the alphabetic topic_ids in the labels section.
 
-The final output should be in the following JSON format:
-
-{{
-  "responses": [
-    {{
-      "response_id": response_id_1,
-      "reasons": ["reason_a", "reason_b"],
-      "labels": ["topic_a", "topic_b"],
-      "stances": ["stance_a", "stance_b"],
-    }},
-    {{
-      "response_id": response_id_2,
-      "reasons": ["reason_c"],
-      "labels": ["topic_c"],
-      "stances": ["stance_c"],
-    }}
-  ]
-}}
 
 QUESTION:
 
@@ -53,6 +35,6 @@ TOPIC LIST:
 
 {refined_themes}
 
-RESPONSES:
+FREE_TEXT_RESPONSES:
 
 {responses}

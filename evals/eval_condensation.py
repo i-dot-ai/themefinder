@@ -33,7 +33,6 @@ async def evaluate_condensation():
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
     )
     themes, question = load_generated_themes()
     condensed_themes, _ = await theme_condensation(
@@ -49,7 +48,6 @@ async def evaluate_condensation():
         {"original_topics": themes, "condensed_topics": condensed_themes},
     )
     response = llm.invoke(eval_prompt)
-    print(condensed_themes)
     print(f"Theme Condensation Eval Results: \n {response.content}")
 
 
