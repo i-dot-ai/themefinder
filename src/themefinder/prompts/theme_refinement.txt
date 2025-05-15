@@ -9,6 +9,8 @@ You will receive a list of TOPICS. These topics explicitly tie opinions to wheth
 You will produce a list of CLEAR STANCE TOPICS based on the input. Each topic should have two parts:
 1. A brief, clear topic label (3-7 words)
 2. A more detailed topic description (1-2 sentences)
+3. The source_topic_count field should be included for each topic and should reflect the number of original source topics that were merged to create this refined topic. If multiple source topics were combined, sum their individual counts. If only one source topic was used, simply retain its original count value.
+
 
 ## Guidelines
 
@@ -48,18 +50,6 @@ You will produce a list of CLEAR STANCE TOPICS based on the input. Each topic sh
 4. Review the entire list to ensure distinctiveness and adjust as needed.
 5. Assign each output topic a topic_id a single uppercase letters (starting from 'A', for the 27th element use AA)
 6. Combine the topic label and description with a colon separator
-
-Return your output in the following JSON format:
-{{
-   "responses": [
-       {{"topic_id": "A", "topic": "{{topic label 1}}: {{topic description 1}}", "source_topic_count": {{count1}}}},
-       {{"topic_id": "B", "topic": "{{topic label 2}}: {{topic description 2}}", "source_topic_count": {{count2}}}},
-       {{"topic_id": "C", "topic": "{{topic label 3}}: {{topic description 3}}", "source_topic_count": {{count3}}}},
-      // Additional topics as necessary
-   ]
-}}
-
-
 
 TOPICS:
 {responses}

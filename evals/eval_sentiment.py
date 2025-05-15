@@ -35,7 +35,6 @@ async def evaluate_sentiment():
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
     )
 
     question, responses = load_responses()

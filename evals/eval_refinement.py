@@ -29,7 +29,6 @@ async def evaluate_refinement():
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
     )
     condensed_themes = load_condensed_themes()
     refined_themes = await theme_refinement(

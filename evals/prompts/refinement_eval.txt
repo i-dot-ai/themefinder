@@ -19,7 +19,7 @@ ORIGINAL TOPICS:
 NEW TOPICS:
 {new_topics}
 
-Output your response in the following JSON format:
+Output your response in the following format, do not return anything else:
 
 {{
   "Information Retention":  X,

@@ -7,28 +7,12 @@ Your task is to analyze the RESPONSES below and extract TOPICS such that:
 2. Every distinct and relevant point of view in the responses should be captured by a topic 
 3. Each topic has a topic_label which summarizes the topic in a few words
 4. Each topic has a topic_description which gives more detail about the topic in one or two sentences
-5. The position field should just be the sentiment stated, and is either "agreement" or "disagreement" or "unclear"
+5. The position field should just be the sentiment stated, and is either "AGREEMENT" or "DISAGREEMENT" or "UNCLEAR"
 6. There should be no duplicate topics 
 
 The topics identified will be used by policy makers to understand what the public like and don't like about the proposals. 
 
-Here is an example of how to extract topics from some responses
-
-The final output should be in the following JSON format:
-
-{{"responses": [
-    {{
-        "topic_label": "{{label_1}}",
-        "topic_description": "{{description_1}}",
-        "position": "{{position_1}}"
-    }},
-    {{
-        "topic_label": "{{label_2}}",
-        "topic_description": "{{description_2}}",
-        "position": "{{position_2}}"
-    }},
-    // Additional topics as necessary
-]}}
+Here is an example of how to extract topics from some responses:
 
 ## EXAMPLE
 
@@ -42,26 +26,10 @@ RESPONSES
     {{"response": "I hate grapes", "position": "disagreement"}},
 ]
 
-OUTPUTS
-
-{{"responses": [
-    {{
-        "topic_label": "Government overreach",
-        "topic_description": "The proposals would result in government interfering too much with citizen's lives",
-        "position": "disagreement"
-    }},
-    {{
-        "topic_label": "Regressive change",
-        "topic_description": "The change would have a larger negative impact on poorer people",
-        "position": "disagreement"
-    }},
-    {{
-        "topic_label": "Health",
-        "topic_description": "The change would result in people eating healthier diets",
-        "position": "disagreement"
-    }},
-]}}
-
+EXAMPLE OUTPUT (showing the structure)
+- Topic 1: Government overreach (The proposals would result in government interfering too much with citizen's lives) - DISAGREEMENT
+- Topic 2: Regressive change (The change would have a larger negative impact on poorer people) - DISAGREEMENT
+- Topic 3: Health (The change would result in people eating healthier diets) - DISAGREEMENT
 
 QUESTION:
 {question}

@@ -1,17 +1,16 @@
 import asyncio
-import json
 import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Type
+from typing import Any, Optional
 
 import openai
 import pandas as pd
 import tiktoken
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 from tenacity import (
     before,
     before_sleep_log,
@@ -35,8 +34,7 @@ async def batch_and_run(
     llm: Runnable,
     batch_size: int = 10,
     partition_key: str | None = None,
-    validation_check: bool = False,
-    task_validation_model: Optional[Type[BaseModel]] = None,
+    integrity_check: bool = False,
     concurrency: int = 10,
     **kwargs: Any,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -52,11 +50,9 @@ async def batch_and_run(
             Defaults to 10.
         partition_key (str | None, optional): Optional column name to group input rows
             before batching. Defaults to None.
-        validation_check (bool, optional): If True, verifies that all input
-            response IDs are present in LLM output and validates the rows against the validation model,
-            failed rows are retried individually.
+        integrity_check (bool, optional): If True, verifies that all input
+            response IDs are present in LLM output.
             If False, no integrity checking or retrying occurs. Defaults to False.
-        task_validation_model (Optional[Type[BaseModel]]): the pydanctic model to validate each row against
         concurrency (int, optional): Maximum number of simultaneous LLM calls allowed.
             Defaults to 10.
         **kwargs (Any): Additional keyword arguments to pass to the prompt template.
@@ -83,8 +79,7 @@ async def batch_and_run(
     processed_rows, failed_ids = await call_llm(
         batch_prompts=batch_prompts,
         llm=llm,
-        validation_check=validation_check,
-        task_validation_model=task_validation_model,
+        integrity_check=integrity_check,
         concurrency=concurrency,
     )
     processed_results = process_llm_responses(processed_rows, input_df)
@@ -97,8 +92,7 @@ async def batch_and_run(
         retry_results, unprocessable_ids = await call_llm(
             batch_prompts=retry_prompts,
             llm=llm,
-            validation_check=validation_check,
-            task_validation_model=task_validation_model,
+            integrity_check=integrity_check,
             concurrency=concurrency,
         )
         retry_processed_results = process_llm_responses(retry_results, retry_df)
@@ -292,32 +286,9 @@ async def call_llm(
     batch_prompts: list[BatchPrompt],
     llm: Runnable,
     concurrency: int = 10,
-    validation_check: bool = False,
-    task_validation_model: Optional[Type[BaseModel]] = None,
+    integrity_check: bool = False,
 ) -> tuple[list[dict], list[int]]:
-    """Process multiple batches of prompts concurrently through an LLM with retry logic.
-
-    Args:
-        batch_prompts (list[BatchPrompt]): List of BatchPrompt objects, each containing a
-            prompt string and associated response IDs to be processed.
-        llm (Runnable): LangChain Runnable instance that will process the prompts.
-        concurrency (int, optional): Maximum number of simultaneous LLM calls allowed.
-            Defaults to 10.
-        validation_check (bool, optional): If True, verifies that all input
-            response IDs are present in the LLM output. Failed batches are discarded and
-            their IDs are returned for retry. Defaults to False.
-        task_validation_model (Type[BaseModel]): The Pydantic model to check the LLM outputs against
-
-    Returns:
-        tuple[list[dict[str, Any]], set[str]]: A tuple containing:
-            - list of successful LLM responses as dictionaries
-            - set of failed response IDs (empty if no failures or integrity check is False)
-
-    Notes:
-        - Uses exponential backoff retry strategy with up to 6 attempts per batch
-        - Failed batches (when integrity check fails) return None and are filtered out
-        - Concurrency is managed via asyncio.Semaphore to prevent overwhelming the LLM
-    """
+    """Process multiple batches of prompts concurrently through an LLM with retry logic."""
     semaphore = asyncio.Semaphore(concurrency)
 
     @retry(
@@ -331,24 +302,30 @@ async def call_llm(
         async with semaphore:
             try:
                 llm_response = await llm.ainvoke(batch_prompt.prompt_string)
-                all_results = json.loads(llm_response.content)
-            except (openai.BadRequestError, json.JSONDecodeError) as e:
-                failed_ids = batch_prompt.response_ids
+                all_results = (
+                    llm_response.dict()
+                    if hasattr(llm_response, "dict")
+                    else llm_response
+                )
+                responses = (
+                    all_results["responses"]
+                    if isinstance(all_results, dict)
+                    else all_results.responses
+                )
+            except (openai.BadRequestError, ValueError) as e:
                 logger.warning(e)
-                return [], failed_ids
+                return [], batch_prompt.response_ids
+            except ValidationError as e:
+                logger.warning(e)
+                return [], batch_prompt.response_ids
 
-            if validation_check:
+            if integrity_check:
                 failed_ids = get_missing_response_ids(
                     batch_prompt.response_ids, all_results
                 )
-                validated_results, invalid_rows = validate_task_data(
-                    all_results["responses"], task_validation_model
-                )
-                failed_ids.extend([r["response_id"] for r in invalid_rows])
-                return validated_results, failed_ids
+                return responses, failed_ids
             else:
-                # Flatten the list to align with valid output format
-                return [r for r in all_results["responses"]], []
+                return responses, []
 
     results = await asyncio.gather(
         *[async_llm_call(batch_prompt) for batch_prompt in batch_prompts]
@@ -463,33 +440,3 @@ def build_prompt(
     )
     response_ids = input_batch["response_id"].astype(int).to_list()
     return BatchPrompt(prompt_string=prompt, response_ids=response_ids)
-
-
-def validate_task_data(
-    task_data: pd.DataFrame | list[dict], task_validation_model: Type[BaseModel] = None
-) -> tuple[list[dict], list[dict]]:
-    """
-    Validate each row in task_output against the provided Pydantic model.
-
-    Returns:
-        valid: a list of validated records (dicts).
-        invalid: a list of records (dicts) that failed validation.
-    """
-
-    records = (
-        task_data.to_dict(orient="records")
-        if isinstance(task_data, pd.DataFrame)
-        else task_data
-    )
-
-    if task_validation_model:
-        valid_records, invalid_records = [], []
-        for record in records:
-            try:
-                task_validation_model(**record)
-                valid_records.append(record)
-            except ValidationError as e:
-                invalid_records.append(record)
-                logger.info(f"Failed Validation: {e}")
-        return valid_records, invalid_records
-    return records, []

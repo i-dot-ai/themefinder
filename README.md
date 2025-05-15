@@ -18,9 +18,9 @@ ThemeFinder takes as input a [pandas DataFrame](https://pandas.pydata.org/docs/r
 - `response_id`: A unique identifier for each response
 - `response`: The free text survey response
 
-ThemeFinder is compatible with any instantiated [LangChain LLM runnable](https://python.langchain.com/v0.1/docs/integrations/llms/), but you will need to use JSON structured output.
+ThemeFinder now supports a range of language models through structured outputs.
 
-The function `find_themes` identifies common themes in response and labels them, it also outputs results from intermediate steps in the theme finding pipeline.
+The function `find_themes` identifies common themes in responses and labels them, it also outputs results from intermediate steps in the theme finding pipeline.
 
 For this example, import the following Python packages into your virtual environment: `asyncio`, `pandas`, `lanchain`. And import `themefinder` as described above.
 
@@ -50,7 +50,6 @@ load_dotenv()
 llm = AzureChatOpenAI(
     model="gpt-4o",
     temperature=0,
-    model_kwargs={"response_format": {"type": "json_object"}},
 )
 
 # Set up your data
@@ -66,17 +65,14 @@ question = "What do you think of ThemeFinder?"
 # Make the system prompt specific to your use case 
 system_prompt = "You are an AI evaluation tool analyzing survey responses about a Python package."
 
-# Run the function to find themes
-# We use asyncio to query LLM endpoints asynchronously, so we need to await our function
+# Run the function to find themes, we use asyncio to query LLM endpoints asynchronously, so we need to await our function
 async def main():
     result = await find_themes(responses_df, llm, question, system_prompt=system_prompt)
     print(result)
 
 if __name__ == "__main__":
     asyncio.run(main())
-
 ```
-
 
 ## ThemeFinder pipeline
 
@@ -112,6 +108,25 @@ The file `src/themefinder.core.py` contains the function `find_themes` which run
 
 
 **For more detail - see the docs: [https://i-dot-ai.github.io/themefinder/](https://i-dot-ai.github.io/themefinder/).**
+
+
+## Model Compatibility
+
+ThemeFinder's structured output approach makes it compatible with a wide range of language models from various providers. This list is non-exhaustive, and other models may also work effectively:
+
+### OpenAI Models
+- GPT-4, GPT-4o, GPT-4.1
+- All Azure OpenAI deployments
+
+### Google Models
+- Gemini series (1.5 Pro, 2.0 Pro, etc.)
+
+### Anthropic Models
+- Claude series (Claude 3 Opus, Sonnet, Haiku, etc.)
+
+### Open Source Models
+- Llama 2, Llama 3
+- Mistral models (e.g., Mistral 7B, Mixtral)
 
 
 ## License

@@ -32,7 +32,7 @@ PRESERVES RARE TOPICS
 - 1: Rare topic completely lost or unrecognizably merged
 
 
-Return your evaluation in the following JSON format:
+All you should return are the following values, do not return any other description:
 
 {{
  "Compression_Quality": score,
