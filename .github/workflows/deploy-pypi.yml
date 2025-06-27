@@ -7,6 +7,9 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -39,12 +42,10 @@ jobs:
         run: |
           echo "PACKAGE_VERSION=$(poetry run python -c "import toml; print(toml.load('pyproject.toml')['tool']['poetry']['version'])")" >> $GITHUB_ENV
 
-
       - name: Extract tag name
         id: extract_tag
         run: |
           echo "TAG_NAME=${GITHUB_REF_NAME#'v'}" >> $GITHUB_ENV
-
         
       - name: Compare tag with version
         run: |
@@ -56,10 +57,9 @@ jobs:
             exit 1
           fi
 
-      - name: Set Poetry config
-        run: |
-          poetry config pypi-token.pypi ${{ secrets.PYPI_TOKEN }}
+      - name: Package project
+        run: poetry build
 
-      - name: Publish package
-        run: poetry publish --build
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
 

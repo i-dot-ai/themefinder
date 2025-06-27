@@ -5,8 +5,11 @@ on:
     types: [prereleased]
 
 jobs:
-  deploy-test:
+  deploy-test-pypi:
     runs-on: ubuntu-latest
+    environment: test-pypi
+    permissions:
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -46,11 +49,14 @@ jobs:
             exit 1
           fi
 
-      - name: Set Poetry config for testpypi
+      - name: Install dependencies
         run: |
-          poetry config repositories.testpypi https://test.pypi.org/legacy/
-          poetry config pypi-token.testpypi ${{ secrets.TEST_PYPI_API_TOKEN }}
-            
-      - name: Publish package for test pypi
-        run: poetry publish --build -r testpypi
+          poetry install --sync --no-interaction
 
+      - name: Package project
+        run: poetry build
+
+      - name: Publish package distributions to TestPyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
