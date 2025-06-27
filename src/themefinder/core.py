@@ -114,9 +114,7 @@ async def find_themes(
     )
 
     logger.info("Finished finding themes")
-    logger.info(
-        "Provide feedback or report bugs: packages@cabinetoffice.gov.uk"
-    )
+    logger.info("Provide feedback or report bugs: packages@cabinetoffice.gov.uk")
     return {
         "question": question,
         "sentiment": sentiment_df,
