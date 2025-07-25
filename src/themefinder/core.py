@@ -5,16 +5,19 @@ import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain.schema.runnable import RunnableWithFallbacks
 
-from .llm_batch_processor import batch_and_run, load_prompt_from_file
-from .models import (
+from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
+from themefinder.models import (
     SentimentAnalysisResponses,
     ThemeGenerationResponses,
     ThemeCondensationResponses,
     ThemeRefinementResponses,
     ThemeMappingResponses,
     DetailDetectionResponses,
+    HierarchicalClusteringResponse,
+    ThemeNode,
 )
-from .themefinder_logging import logger
+from themefinder.theme_clustering_agent import ThemeClusteringAgent
+from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
 
@@ -305,6 +308,87 @@ async def theme_condensation(
 
     logger.info(f"Final number of condensed themes: {themes_df.shape[0]}")
     return themes_df, _
+
+
+def theme_clustering(
+    themes_df: pd.DataFrame,
+    llm: RunnableWithFallbacks,
+    max_iterations: int = 5,
+    target_themes: int = 10,
+    significance_percentage: float = 10.0,
+    return_all_themes: bool = False,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Perform hierarchical clustering of themes using an agentic approach.
+
+    This function takes a DataFrame of themes and uses the ThemeClusteringAgent
+    to iteratively merge similar themes into a hierarchical structure, then
+    selects the most significant themes based on a threshold.
+
+    Args:
+        themes_df (pd.DataFrame): DataFrame containing themes with columns:
+            - topic_id: Unique identifier for each theme
+            - topic_label: Short descriptive label for the theme
+            - topic_description: Detailed description of the theme
+            - source_topic_count: Number of source responses for this theme
+        llm (RunnableWithFallbacks): Language model instance configured with
+            structured output for HierarchicalClusteringResponse
+        max_iterations (int, optional): Maximum number of clustering iterations.
+            Defaults to 5.
+        target_themes (int, optional): Target number of themes to cluster down to.
+            Defaults to 10.
+        significance_percentage (float, optional): Percentage threshold for
+            selecting significant themes. Defaults to 15.0.
+        return_all_themes (bool, optional): If True, returns all clustered themes.
+            If False, returns only significant themes. Defaults to False.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]:
+            A tuple containing:
+                - DataFrame of clustered themes (all or significant based on return_all_themes)
+                - Empty DataFrame (for consistency with other functions)
+    """
+    logger.info(f"Starting hierarchical clustering of {len(themes_df)} themes")
+
+    # Convert DataFrame to ThemeNode objects
+    initial_themes = [
+        ThemeNode(
+            topic_id=row["topic_id"],
+            topic_label=row["topic_label"],
+            topic_description=row["topic_description"],
+            source_topic_count=row["source_topic_count"],
+        )
+        for _, row in themes_df.iterrows()
+    ]
+
+    # Initialize clustering agent with structured output LLM
+    agent = ThemeClusteringAgent(
+        llm.with_structured_output(HierarchicalClusteringResponse), initial_themes
+    )
+
+    # Perform clustering
+    logger.info(
+        f"Clustering themes with max_iterations={max_iterations}, target_themes={target_themes}"
+    )
+    all_themes_df = agent.cluster_themes(
+        max_iterations=max_iterations, target_themes=target_themes
+    )
+
+    # Return appropriate themes based on parameter
+    if return_all_themes:
+        logger.info(
+            f"Clustering complete: returning all {len(all_themes_df)} clustered themes"
+        )
+        return all_themes_df, pd.DataFrame()
+    else:
+        # Select significant themes
+        logger.info(
+            f"Selecting themes with significance_percentage={significance_percentage}%"
+        )
+        selected_themes_df = agent.select_themes(significance_percentage)
+        logger.info(
+            f"Clustering complete: returning {len(selected_themes_df)} significant themes"
+        )
+        return selected_themes_df, pd.DataFrame()
 
 
 async def theme_refinement(

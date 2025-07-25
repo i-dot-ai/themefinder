@@ -1,0 +1,31 @@
+Analyze these topics and identify which ones should be merged based on semantic similarity.
+Your goal is to significantly reduce the number of topics by creating meaningful parent topics.
+Be aggressive in finding opportunities to merge topics that share any semantic relationship.
+
+TOPICS:
+{themes_json}
+
+For each group of similar topics that should be merged, create a new parent topic.
+
+Guidelines:
+- Each parent topic must have at least 2 children, it can have more than 2 if appropriate
+- Each child topic can have at most 1 parent
+- topic_id should be a simple alphabetic ID (e.g. 'A', 'B', 'C') - the iteration prefix will be added automatically
+- Be creative and look for higher-level abstractions that can combine seemingly different topics
+- When creating parent topics, follow these naming rules:
+    * The label should read naturally as a single coherent topic
+    * Choose labels that can encompass broader categories of topics
+    * If merging different topics, the topic with the higher source_topic_count should dominate the label
+    * Never combine different topics with "and" or "/" in the label
+- topic_description must be 1 or 2 sentences that:
+    * preserves key information from the child topics
+- source_topic_count must be the sum of all child topic counts
+- children must be a list of valid topic_ids from the input
+- should_terminate should only be true if ALL of these conditions are met:
+    * There are fewer than 10 active topics remaining
+    * The remaining topics are fundamentally incompatible semantically
+    * Any further merging would create meaninglessly broad categories
+
+If no topics should be merged in this iteration but future iterations might still yield meaningful merges, set should_terminate to false with an empty parent_themes list.
+
+If no topics should be merged and the termination conditions are met, set should_terminate to true with an empty parent_themes list.
