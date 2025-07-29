@@ -349,3 +349,67 @@ class DetailDetectionResponses(ValidatedModel):
         if len(response_ids) != len(set(response_ids)):
             raise ValueError("Response IDs must be unique")
         return self
+
+
+class ThemeNode(ValidatedModel):
+    """Model for topic nodes created during hierarchical clustering"""
+
+    topic_id: str = Field(
+        ...,
+        description="Short alphabetic ID (e.g. 'A', 'B', 'C') - iteration prefix will be added automatically",
+    )
+    topic_label: str = Field(
+        ..., description="4-5 word label encompassing merged child topics"
+    )
+    topic_description: str = Field(
+        ..., description="1-2 sentences combining key aspects of child topics"
+    )
+    source_topic_count: int = Field(gt=0, description="Sum of all child topic counts")
+    parent_id: Optional[str] = Field(
+        default=None,
+        description="Internal field: ID of parent topic node, managed by clustering agent, not set by LLM",
+    )
+    children: List[str] = Field(
+        default_factory=list, description="List of topic_ids of merged child topics"
+    )
+
+    @model_validator(mode="after")
+    def run_validations(self) -> "ThemeNode":
+        """Validate topic node constraints"""
+        if self.children:
+            # Each parent must have at least 2 children
+            if len(self.children) < 2:
+                raise ValueError("Each topic node must have at least 2 children")
+            # Validate children are unique
+            if len(self.children) != len(set(self.children)):
+                raise ValueError("Child topic IDs must be unique")
+
+        return self
+
+
+class HierarchicalClusteringResponse(ValidatedModel):
+    """Model for hierarchical clustering agent response"""
+
+    parent_themes: List[ThemeNode] = Field(
+        default=[],
+        description="List of parent themes created by merging similar themes",
+    )
+    should_terminate: bool = Field(
+        ...,
+        description="True if no more meaningful clustering is possible, false otherwise",
+    )
+
+    @model_validator(mode="after")
+    def run_validations(self) -> "HierarchicalClusteringResponse":
+        """Validate clustering response constraints"""
+        self.validate_non_empty_fields()
+
+        # Validate that no child appears in multiple parents
+        all_children = []
+        for parent in self.parent_themes:
+            all_children.extend(parent.children)
+
+        if len(all_children) != len(set(all_children)):
+            raise ValueError("Each child theme can have at most one parent")
+
+        return self

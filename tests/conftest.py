@@ -26,6 +26,7 @@ def sample_themes_df():
     """Create a sample DataFrame with themes for testing."""
     df = pd.DataFrame(
         {
+            "topic_id": ["A", "B", "C", "D"],
             "topic_label": ["Theme A", "Theme B", "Theme C", "Theme D"],
             "topic_description": [
                 "Description of theme A",

@@ -19,7 +19,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from .themefinder_logging import logger
+from themefinder.themefinder_logging import logger
 
 
 @dataclass
