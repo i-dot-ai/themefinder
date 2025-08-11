@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from langchain_core.prompts import PromptTemplate
 
 from themefinder import (
@@ -11,6 +11,7 @@ from themefinder import (
     theme_refinement,
     theme_target_alignment,
     find_themes,
+    cross_cutting_themes,
 )
 from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
@@ -23,6 +24,10 @@ from themefinder.models import (
     ThemeGenerationResponses,
     ThemeMappingOutput,
     ThemeMappingResponses,
+    CrossCuttingThemesResponse,
+    CrossCuttingTheme,
+    ConstituentTheme,
+    CrossCuttingThemeReviewResponse,
 )
 
 
@@ -488,3 +493,128 @@ async def test_find_themes(mock_llm, sample_df):
         )
 
         assert mock_call_llm.await_count == 6
+
+
+def test_cross_cutting_themes():
+    """Test cross_cutting_themes function with mock LLM"""
+    # Create mock themes data from multiple questions (new format with topic_id and topic columns)
+    questions_themes = {
+        1: pd.DataFrame(
+            {
+                "topic_id": ["A", "B", "C"],
+                "topic": [
+                    "Test Label 1A: Test description for theme 1A",
+                    "Test Label 1B: Test description for theme 1B",
+                    "Test Label 1C: Test description for theme 1C",
+                ],
+            }
+        ),
+        2: pd.DataFrame(
+            {
+                "topic_id": ["A", "B", "C"],
+                "topic": [
+                    "Test Label 2A: Test description for theme 2A",
+                    "Test Label 2B: Test description for theme 2B",
+                    "Test Label 2C: Test description for theme 2C",
+                ],
+            }
+        ),
+        3: pd.DataFrame(
+            {
+                "topic_id": ["A", "B"],
+                "topic": [
+                    "Test Label 3A: Test description for theme 3A",
+                    "Test Label 3B: Test description for theme 3B",
+                ],
+            }
+        ),
+    }
+
+    # Create mock LLM response
+    mock_response = CrossCuttingThemesResponse(
+        cross_cutting_themes=[
+            CrossCuttingTheme(
+                name="Test Cross-Cutting Theme 1",
+                description="Test description for cross-cutting theme 1",
+                themes=[
+                    ConstituentTheme(question_number=1, theme_key="B"),
+                    ConstituentTheme(question_number=2, theme_key="A"),
+                    ConstituentTheme(question_number=3, theme_key="A"),
+                ],
+            ),
+            CrossCuttingTheme(
+                name="Test Cross-Cutting Theme 2",
+                description="Test description for cross-cutting theme 2",
+                themes=[
+                    ConstituentTheme(question_number=1, theme_key="A"),
+                    ConstituentTheme(question_number=2, theme_key="B"),
+                    ConstituentTheme(question_number=3, theme_key="B"),
+                ],
+            ),
+        ]
+    )
+
+    # Create mock LLM with different responses for different calls
+    mock_llm = Mock()
+    
+    # Mock the different structured output calls the agent makes
+    mock_initial_response = mock_response
+    mock_review_response = CrossCuttingThemeReviewResponse(additions=[])
+    
+    # Set up the mock to return different responses based on call order
+    mock_structured_llm = Mock()
+    mock_structured_llm.invoke.side_effect = [mock_initial_response, mock_review_response]
+    mock_llm.with_structured_output.return_value = mock_structured_llm
+
+    # Call the function
+    result, unprocessed = cross_cutting_themes(questions_themes, mock_llm)
+
+    # Verify the output format is a tuple with DataFrame and empty DataFrame
+    assert isinstance(result, pd.DataFrame)
+    assert isinstance(unprocessed, pd.DataFrame)
+    assert len(unprocessed) == 0  # Should be empty
+    assert len(result) >= 1  # Agent may consolidate groups, so at least 1
+    
+    # Check DataFrame columns
+    assert list(result.columns) == ["name", "description", "themes"]
+
+    # Check that we got at least one cross-cutting theme
+    row0 = result.iloc[0]
+    assert isinstance(row0["name"], str)
+    assert isinstance(row0["description"], str)
+    assert isinstance(row0["themes"], dict)
+    
+    # Check that themes dictionary has the correct structure
+    for q_num, theme_keys in row0["themes"].items():
+        assert isinstance(q_num, int)
+        assert isinstance(theme_keys, list)
+        assert all(isinstance(key, str) for key in theme_keys)
+
+    # Verify LLM was called correctly
+    mock_llm.with_structured_output.assert_called()
+    mock_llm.with_structured_output.return_value.invoke.assert_called()
+
+
+def test_cross_cutting_themes_empty_input():
+    """Test cross_cutting_themes with empty input"""
+    mock_llm = Mock()
+
+    with pytest.raises(ValueError, match="questions_themes cannot be empty"):
+        cross_cutting_themes({}, mock_llm)
+
+
+def test_cross_cutting_themes_missing_columns():
+    """Test cross_cutting_themes with missing required columns"""
+    questions_themes = {
+        1: pd.DataFrame(
+            {
+                "topic_id": ["A"],
+                # Missing topic column
+            }
+        )
+    }
+    mock_llm = Mock()
+
+    # Should raise KeyError when trying to access 'topic' column
+    with pytest.raises(KeyError):
+        cross_cutting_themes(questions_themes, mock_llm)
