@@ -8,6 +8,6 @@ from .theme_clustering_agent import ThemeClusteringAgent
 from .cross_cutting_themes_agent import CrossCuttingThemesAgent
 
 __all__ = [
-    "ThemeClusteringAgent", 
+    "ThemeClusteringAgent",
     "CrossCuttingThemesAgent",
 ]

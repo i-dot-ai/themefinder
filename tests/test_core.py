@@ -556,14 +556,17 @@ def test_cross_cutting_themes():
 
     # Create mock LLM with different responses for different calls
     mock_llm = Mock()
-    
+
     # Mock the different structured output calls the agent makes
     mock_initial_response = mock_response
     mock_review_response = CrossCuttingThemeReviewResponse(additions=[])
-    
+
     # Set up the mock to return different responses based on call order
     mock_structured_llm = Mock()
-    mock_structured_llm.invoke.side_effect = [mock_initial_response, mock_review_response]
+    mock_structured_llm.invoke.side_effect = [
+        mock_initial_response,
+        mock_review_response,
+    ]
     mock_llm.with_structured_output.return_value = mock_structured_llm
 
     # Call the function
@@ -574,7 +577,7 @@ def test_cross_cutting_themes():
     assert isinstance(unprocessed, pd.DataFrame)
     assert len(unprocessed) == 0  # Should be empty
     assert len(result) >= 1  # Agent may consolidate groups, so at least 1
-    
+
     # Check DataFrame columns
     assert list(result.columns) == ["name", "description", "themes"]
 
@@ -583,7 +586,7 @@ def test_cross_cutting_themes():
     assert isinstance(row0["name"], str)
     assert isinstance(row0["description"], str)
     assert isinstance(row0["themes"], dict)
-    
+
     # Check that themes dictionary has the correct structure
     for q_num, theme_keys in row0["themes"].items():
         assert isinstance(q_num, int)

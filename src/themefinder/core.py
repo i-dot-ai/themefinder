@@ -676,14 +676,16 @@ def cross_cutting_themes(
         # Create a new DataFrame with the expected columns
         formatted_df = pd.DataFrame()
         formatted_df["topic_id"] = themes_df["topic_id"]
-        
+
         # Split the topic column on the first colon to get label and description
         topic_parts = themes_df["topic"].str.split(":", n=1, expand=True)
         formatted_df["topic_label"] = topic_parts[0].str.strip()
-        formatted_df["topic_description"] = topic_parts[1].str.strip() if 1 in topic_parts.columns else ""
-        
+        formatted_df["topic_description"] = (
+            topic_parts[1].str.strip() if 1 in topic_parts.columns else ""
+        )
+
         formatted_input[question_num] = {"themes": formatted_df}
-    
+
     # Use the cross-cutting themes agent for the analysis
     agent = CrossCuttingThemesAgent(
         llm=llm,
@@ -691,10 +693,10 @@ def cross_cutting_themes(
         min_themes=min_themes,
         strategy=ConsolidationStrategy.BALANCED,
     )
-    
+
     # Run the analysis
     cross_cutting_groups = agent.analyze(formatted_input)
-    
+
     # Convert to DataFrame format with new structure
     df_data = []
     for cc_theme in cross_cutting_groups:
@@ -705,12 +707,14 @@ def cross_cutting_themes(
             if q_num not in themes_dict:
                 themes_dict[q_num] = []
             themes_dict[q_num].append(theme["theme_key"])
-        
-        df_data.append({
-            "name": cc_theme["name"],
-            "description": cc_theme["description"],
-            "themes": themes_dict
-        })
-    
+
+        df_data.append(
+            {
+                "name": cc_theme["name"],
+                "description": cc_theme["description"],
+                "themes": themes_dict,
+            }
+        )
+
     # Create and return DataFrame with empty unprocessed data for consistency
     return pd.DataFrame(df_data), pd.DataFrame()
