@@ -1,0 +1,27 @@
+{system_prompt}
+
+Below are themes extracted from multiple questions in a consultation. Each theme has been identified from responses to a specific question and has been assigned an alphabetic identifier (A, B, C, etc.) within that question.
+
+Your task is to identify cross-cutting themes that span multiple questions - these are semantic concepts that appear across different questions, even when expressed differently.
+
+THEMES DATA:
+{themes_data}
+
+Guidelines for Cross-Cutting Theme Analysis:
+1. Look for semantic similarity, not just word matching - themes may express the same underlying concept differently
+2. Consider the broader policy area or concern that themes address
+3. Focus on substantial conceptual overlap, not superficial similarities
+4. Each cross-cutting theme should represent a meaningful policy area or concern
+5. Cross-cutting themes must include themes from at least 2 different questions
+6. IMPORTANT: Each question can contribute ONLY ONE theme to any given cross-cutting theme (select the most representative theme from each question)
+7. Provide clear, descriptive names that capture the essence of the cross-cutting concept
+8. Write descriptions that explain what unites the constituent themes
+
+For each cross-cutting theme you identify:
+- name: A clear, descriptive title of 3-7 words
+- description: 1-2 sentences explaining what this cross-cutting theme represents and why these themes belong together
+- themes: List of constituent themes with their question_number and theme_key
+
+CRITICAL CONSTRAINT: Each cross-cutting theme MUST contain AT MOST ONE theme from each question. If multiple themes from the same question could fit, choose ONLY the most representative one. Never include multiple themes from the same question in a single cross-cutting theme.
+
+Only identify cross-cutting themes that represent genuine conceptual overlap. If no meaningful cross-cutting patterns exist, return an empty list.
