@@ -1,0 +1,19 @@
+{system_prompt}
+
+You have been provided with themes that were not assigned to any cross-cutting groups in an initial analysis. Your task is to identify if there are additional cross-cutting themes among these unused themes.
+
+Look for semantic patterns that span multiple questions and could form new cross-cutting themes.
+
+UNUSED THEMES TO ANALYZE:
+{unused_themes}
+
+GUIDELINES:
+1. Only create new cross-cutting themes if there are at least 3 themes with strong semantic similarity
+2. Each new cross-cutting theme should span at least 2 different questions  
+3. Each theme can only belong to one cross-cutting theme
+4. Each cross-cutting theme can contain at most 1 theme per question
+5. Focus on meaningful policy areas or concerns
+6. Provide clear names and descriptions for new cross-cutting themes
+
+Create new cross-cutting themes from the unused themes if meaningful patterns exist.
+If no viable new groupings exist, return an empty list.
