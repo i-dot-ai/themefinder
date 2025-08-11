@@ -16,7 +16,8 @@ from themefinder.models import (
     HierarchicalClusteringResponse,
     ThemeNode,
 )
-from themefinder.theme_clustering_agent import ThemeClusteringAgent
+from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
+from themefinder.advanced_tasks.cross_cutting_themes import analyze_cross_cutting_themes
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -624,3 +625,80 @@ async def detail_detection(
         concurrency=concurrency,
     )
     return detailed, _
+
+
+def cross_cutting_themes(
+    questions_themes: dict[int, pd.DataFrame],
+    llm: RunnableWithFallbacks,
+    system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+    min_themes: int = 5,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Identify cross-cutting themes using a 2-step approach.
+
+    This function analyzes refined themes from multiple questions to identify semantic
+    patterns that span across different questions, creating cross-cutting theme
+    categories that represent common concerns or policy areas.
+
+    The analysis uses a 2-step process:
+    1. Pass all themes to LLM to create initial cross-cutting theme groups
+    2. Review unused themes and assign them to existing groups if appropriate
+
+    Args:
+        questions_themes (dict[int, pd.DataFrame]): Dictionary mapping question numbers
+            to their refined themes DataFrames. Each DataFrame should have columns:
+            - topic_id: Theme identifier (e.g., 'A', 'B', 'C')
+            - topic: String in format "topic_name: topic_description"
+        llm (RunnableWithFallbacks): Language model instance configured for
+            structured output
+        system_prompt (str): System prompt to guide the LLM's behaviour.
+            Defaults to CONSULTATION_SYSTEM_PROMPT.
+        min_themes (int): Minimum number of themes required for a valid
+            cross-cutting theme group. Groups with fewer themes will be discarded.
+            Defaults to 5.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: A tuple containing:
+            - DataFrame with cross-cutting themes with columns:
+                - name: Name of the cross-cutting theme
+                - description: Description of what this theme represents
+                - themes: Dictionary mapping question_number to list of theme_keys
+                  e.g., {1: ["A", "B"], 3: ["C"]}
+            - Empty DataFrame (for consistency with other core functions)
+
+    Raises:
+        ValueError: If questions_themes is empty or contains invalid data
+        KeyError: If required columns are missing from themes DataFrames
+    """
+    # Validate input
+    if not questions_themes:
+        raise ValueError("questions_themes cannot be empty")
+
+    # Use the 2-step analysis
+    cross_cutting_groups = analyze_cross_cutting_themes(
+        questions_themes=questions_themes,
+        llm=llm,
+        system_prompt=system_prompt,
+        min_themes=min_themes,
+    )
+
+    # Convert to DataFrame format with expected structure
+    df_data = []
+    for cc_theme in cross_cutting_groups:
+        # Group themes by question_number into dictionary format
+        themes_dict = {}
+        for theme in cc_theme["themes"]:
+            q_num = theme["question_number"]
+            if q_num not in themes_dict:
+                themes_dict[q_num] = []
+            themes_dict[q_num].append(theme["theme_key"])
+
+        df_data.append(
+            {
+                "name": cc_theme["name"],
+                "description": cc_theme["description"],
+                "themes": themes_dict,
+            }
+        )
+
+    # Create and return DataFrame with empty unprocessed data for consistency
+    return pd.DataFrame(df_data), pd.DataFrame()
