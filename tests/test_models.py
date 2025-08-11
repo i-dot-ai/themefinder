@@ -13,6 +13,9 @@ from themefinder.models import (
     ThemeRefinementResponses,
     DetailDetectionOutput,
     DetailDetectionResponses,
+    ConstituentTheme,
+    CrossCuttingTheme,
+    CrossCuttingThemesResponse,
 )
 
 
@@ -292,5 +295,122 @@ class TestDetailDetectionResponses:
                         response_id=1, evidence_rich=EvidenceRich.YES
                     ),
                     DetailDetectionOutput(response_id=1, evidence_rich=EvidenceRich.NO),
+                ]
+            )
+
+
+class TestConstituentTheme:
+    def test_valid_theme(self):
+        theme = ConstituentTheme(question_number=1, theme_key="A")
+        assert theme.question_number == 1
+        assert theme.theme_key == "A"
+
+    def test_invalid_question_number(self):
+        with pytest.raises(ValidationError):
+            ConstituentTheme(question_number=0, theme_key="A")
+
+    def test_empty_theme_key(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            ConstituentTheme(question_number=1, theme_key="")
+
+
+class TestCrossCuttingTheme:
+    def test_valid_cross_cutting_theme(self):
+        theme = CrossCuttingTheme(
+            name="Digital Accessibility",
+            description="Themes related to digital inclusion",
+            themes=[
+                ConstituentTheme(question_number=1, theme_key="A"),
+                ConstituentTheme(question_number=2, theme_key="B"),
+            ],
+        )
+        assert theme.name == "Digital Accessibility"
+        assert len(theme.themes) == 2
+
+    def test_minimum_themes_requirement(self):
+        with pytest.raises(
+            ValueError, match="must include at least 2 constituent themes"
+        ):
+            CrossCuttingTheme(
+                name="Test Theme",
+                description="Test description",
+                themes=[ConstituentTheme(question_number=1, theme_key="A")],
+            )
+
+    def test_duplicate_theme_combinations(self):
+        with pytest.raises(
+            ValueError, match="Duplicate question_number and theme_key combinations"
+        ):
+            CrossCuttingTheme(
+                name="Test Theme",
+                description="Test description",
+                themes=[
+                    ConstituentTheme(question_number=1, theme_key="A"),
+                    ConstituentTheme(question_number=1, theme_key="A"),
+                ],
+            )
+
+    def test_empty_name(self):
+        with pytest.raises(ValueError, match="cannot be empty"):
+            CrossCuttingTheme(
+                name="",
+                description="Test description",
+                themes=[
+                    ConstituentTheme(question_number=1, theme_key="A"),
+                    ConstituentTheme(question_number=2, theme_key="B"),
+                ],
+            )
+
+
+class TestCrossCuttingThemesResponse:
+    def test_valid_response(self):
+        response = CrossCuttingThemesResponse(
+            cross_cutting_themes=[
+                CrossCuttingTheme(
+                    name="Theme 1",
+                    description="Description 1",
+                    themes=[
+                        ConstituentTheme(question_number=1, theme_key="A"),
+                        ConstituentTheme(question_number=2, theme_key="B"),
+                    ],
+                ),
+                CrossCuttingTheme(
+                    name="Theme 2",
+                    description="Description 2",
+                    themes=[
+                        ConstituentTheme(question_number=3, theme_key="C"),
+                        ConstituentTheme(question_number=4, theme_key="D"),
+                    ],
+                ),
+            ]
+        )
+        assert len(response.cross_cutting_themes) == 2
+
+    def test_empty_list_is_valid(self):
+        response = CrossCuttingThemesResponse(cross_cutting_themes=[])
+        assert len(response.cross_cutting_themes) == 0
+
+    def test_duplicate_names(self):
+        with pytest.raises(
+            ValueError, match="Cross-cutting theme names must be unique"
+        ):
+            CrossCuttingThemesResponse(
+                cross_cutting_themes=[
+                    CrossCuttingTheme(
+                        name="Same Name",
+                        description="Description 1",
+                        themes=[
+                            ConstituentTheme(question_number=1, theme_key="A"),
+                            ConstituentTheme(question_number=2, theme_key="B"),
+                        ],
+                    ),
+                    CrossCuttingTheme(
+                        name="Same Name",
+                        description="Description 2",
+                        themes=[
+                            ConstituentTheme(question_number=3, theme_key="C"),
+                            ConstituentTheme(question_number=4, theme_key="D"),
+                        ],
+                    ),
                 ]
             )
