@@ -1,8 +1,6 @@
 """Tests for cross_cutting_themes module."""
 
-import json
 from unittest.mock import MagicMock, patch
-from typing import List, Dict
 
 import pandas as pd
 import pytest

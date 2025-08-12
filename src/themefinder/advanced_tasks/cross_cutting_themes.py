@@ -5,7 +5,6 @@ This module provides a 2-step approach to identifying cross-cutting themes:
 2. Review unused themes and assign them to existing groups if appropriate
 """
 
-import logging
 from typing import Dict, List, Set, Tuple
 
 import pandas as pd
