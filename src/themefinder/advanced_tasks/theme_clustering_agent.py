@@ -18,9 +18,9 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from .models import ThemeNode
-from .llm_batch_processor import load_prompt_from_file
-from .themefinder_logging import logger
+from themefinder.models import ThemeNode
+from themefinder.llm_batch_processor import load_prompt_from_file
+from themefinder.themefinder_logging import logger
 
 
 class ThemeClusteringAgent:

@@ -413,3 +413,90 @@ class HierarchicalClusteringResponse(ValidatedModel):
             raise ValueError("Each child theme can have at most one parent")
 
         return self
+
+
+class ConstituentTheme(ValidatedModel):
+    """Model for a theme that contributes to a cross-cutting theme"""
+
+    question_number: int = Field(
+        gt=0, description="Question number where this theme was found"
+    )
+    theme_key: str = Field(..., description="Theme identifier (e.g., 'A', 'B', 'C')")
+
+
+class CrossCuttingTheme(ValidatedModel):
+    """Model for a cross-cutting theme that spans multiple questions"""
+
+    name: str = Field(..., description="Name of the cross-cutting theme")
+    description: str = Field(
+        ..., description="Description of what this cross-cutting theme represents"
+    )
+    themes: List[ConstituentTheme] = Field(
+        ..., description="List of constituent themes from different questions"
+    )
+
+    @model_validator(mode="after")
+    def run_validations(self) -> "CrossCuttingTheme":
+        """Validate cross-cutting theme constraints"""
+        self.validate_non_empty_fields()
+
+        # Ensure we have at least 2 themes to be "cross-cutting"
+        if len(self.themes) < 2:
+            raise ValueError(
+                "Cross-cutting theme must include at least 2 constituent themes"
+            )
+
+        # Validate that theme combinations are unique
+        theme_combinations = [
+            (theme.question_number, theme.theme_key) for theme in self.themes
+        ]
+        if len(theme_combinations) != len(set(theme_combinations)):
+            raise ValueError(
+                "Duplicate question_number and theme_key combinations found"
+            )
+
+        return self
+
+
+class CrossCuttingThemeAddition(BaseModel):
+    """Model for adding a theme to an existing cross-cutting theme group"""
+
+    cross_cutting_theme_name: str = Field(
+        ..., description="Name of existing cross-cutting theme to add to"
+    )
+    question_number: int = Field(gt=0, description="Question number of theme to add")
+    theme_key: str = Field(..., description="Theme key to add")
+    justification: str = Field(..., description="Brief justification for addition")
+
+
+class CrossCuttingThemeReviewResponse(BaseModel):
+    """Response model for reviewing unused themes against existing cross-cutting groups"""
+
+    additions: List[CrossCuttingThemeAddition] = Field(
+        default=[], description="Themes to add to existing groups"
+    )
+
+
+class CrossCuttingThemesResponse(ValidatedModel):
+    """Container for all cross-cutting themes"""
+
+    cross_cutting_themes: List[CrossCuttingTheme] = Field(
+        default=[],
+        description="List of cross-cutting themes identified across questions",
+    )
+
+    @model_validator(mode="after")
+    def run_validations(self) -> "CrossCuttingThemesResponse":
+        """Validate cross-cutting themes response constraints"""
+        # Skip validation for empty lists - it's valid to have no cross-cutting themes
+        if not self.cross_cutting_themes:
+            return self
+
+        self.validate_non_empty_fields()
+
+        # Validate that cross-cutting theme names are unique
+        names = [theme.name for theme in self.cross_cutting_themes]
+        if len(names) != len(set(names)):
+            raise ValueError("Cross-cutting theme names must be unique")
+
+        return self
