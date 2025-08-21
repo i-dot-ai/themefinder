@@ -1,4 +1,4 @@
-from .core import (
+from .tasks import (
     find_themes,
     sentiment_analysis,
     theme_clustering,
@@ -8,6 +8,7 @@ from .core import (
     theme_refinement,
     theme_target_alignment,
     detail_detection,
+    cross_cutting_themes,
 )
 
 __all__ = [
@@ -20,5 +21,6 @@ __all__ = [
     "theme_refinement",
     "theme_target_alignment",
     "detail_detection",
+    "cross_cutting_themes",
 ]
 __version__ = "0.1.0"

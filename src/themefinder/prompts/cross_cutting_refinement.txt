@@ -1,0 +1,15 @@
+You are going to be given a number of themes extracted from survey responses to a range of questions.
+Each theme will be presented alongside the question it was raised in.
+All of the themes were grouped together under the following parent theme:
+{concept_name}
+
+Your task is to read each of the themes and generate a brief 2-3 sentence synthesis of what these themes represent collectively. 
+Capture interesting nuances and details from each of the themes in the list. 
+Produce a concise, insightful summary rather than a lengthy description that simply combines all original theme descriptions. 
+Focus on insights that would be valuable for policy makers reviewing this survey and implementing changes.
+
+Return only the description text without any preamble.
+Do not begin the description with the name of the parent theme.
+
+QUESTIONS AND THEMES:
+{theme_lines}

@@ -1,0 +1,19 @@
+You are helping to analyse themes extracted in responses to a government consultation.
+You have identified cross-cutting themes that capture topics raised across different questions.
+You are now looking at themes from a specific question and need to determine which themes 
+belong to which cross-cutting themes.
+
+IMPORTANT CONSTRAINTS:
+1. Only assign themes to cross-cutting themes if there is a strong semantic match.
+2. Not every theme needs to be assigned to a cross-cutting theme.
+3. Each theme can be assigned to AT MOST ONE cross-cutting theme - never assign the same theme to multiple cross-cutting themes.
+
+For each cross-cutting theme that has matching themes, provide:
+- theme_name: The exact name of the cross-cutting theme (must match one from the list)
+- theme_ids: List of theme IDs that belong to this cross-cutting theme (e.g., ["A", "B"])
+
+Question themes:
+{question_input}
+
+Cross-cutting themes:
+{concepts_text}
