@@ -10,7 +10,6 @@ from .tasks import (
     detail_detection,
     cross_cutting_themes,
 )
-from .advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
 
 __all__ = [
     "find_themes",
@@ -23,6 +22,5 @@ __all__ = [
     "theme_target_alignment",
     "detail_detection",
     "cross_cutting_themes",
-    "ThemeClusteringAgent",
 ]
 __version__ = "0.1.0"
