@@ -186,7 +186,7 @@ async def theme_generation(
     llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 50,
-    partition_key: str | None = "position",
+    partition_key: str | None = None,
     prompt_template: str | Path | PromptTemplate = "theme_generation",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
