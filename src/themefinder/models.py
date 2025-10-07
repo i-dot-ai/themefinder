@@ -288,10 +288,6 @@ class ThemeMappingOutput(ValidatedModel):
 
     response_id: int = Field(gt=0, description="Response ID, must be greater than 0")
     labels: List[str] = Field(..., description="List of theme labels")
-    reasons: List[str] = Field(..., description="List of reasons for mapping")
-    stances: List[Stance] = Field(
-        ..., description="List of stances (POSITIVE or NEGATIVE)"
-    )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeMappingOutput":
@@ -299,7 +295,6 @@ class ThemeMappingOutput(ValidatedModel):
         Run all validations for ThemeMappingOutput.
         """
         self.validate_non_empty_fields()
-        self.validate_equal_lengths("stances", "labels", "reasons")
         self.validate_unique_items("labels")
         return self
 

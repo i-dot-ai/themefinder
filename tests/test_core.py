@@ -335,15 +335,11 @@ async def test_theme_mapping(mock_llm, sample_sentiment_df):
         responses=[
             ThemeMappingOutput(
                 response_id=1,
-                reasons=["reason1"],
                 labels=["label1"],
-                stances=["POSITIVE"],
             ),
             ThemeMappingOutput(
                 response_id=2,
-                reasons=["reason2"],
                 labels=["label2"],
-                stances=["NEGATIVE"],
             ),
         ]
     )
@@ -369,9 +365,7 @@ async def test_theme_mapping(mock_llm, sample_sentiment_df):
 
         assert isinstance(result, pd.DataFrame)
         assert "response_id" in result.columns
-        assert "reasons" in result.columns
         assert "labels" in result.columns
-        assert "stances" in result.columns
         assert mock_call_llm.await_count == 1
 
 
