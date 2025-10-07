@@ -170,24 +170,14 @@ class TestThemeCondensationResponses:
 class TestRefinedTheme:
     def test_valid_refined_theme(self):
         theme = RefinedTheme(
-            topic_id="A",
             topic="Healthcare: Access to affordable healthcare services",
             source_topic_count=3,
         )
-        assert theme.topic_id == "A"
-
-    def test_invalid_topic_id_format(self):
-        with pytest.raises(ValueError, match="must be uppercase letters only"):
-            RefinedTheme(
-                topic_id="1",
-                topic="Healthcare: Description",
-                source_topic_count=1,
-            ).validate_topic_id_format()
+        assert theme.topic == "Healthcare: Access to affordable healthcare services"
 
     def test_invalid_topic_format(self):
         with pytest.raises(ValueError, match="must contain a label and description"):
             RefinedTheme(
-                topic_id="A",
                 topic="Healthcare without separator",
                 source_topic_count=1,
             ).validate_topic_format()
@@ -195,7 +185,6 @@ class TestRefinedTheme:
     def test_topic_label_too_long(self):
         with pytest.raises(ValueError, match="must be under 10 words"):
             RefinedTheme(
-                topic_id="A",
                 topic="This is a very long topic label that exceeds the limit of ten words: Description",
                 source_topic_count=1,
             ).validate_topic_format()
@@ -219,34 +208,15 @@ class TestThemeRefinementResponses:
         )
         assert len(model.responses) == 2
 
-    def test_duplicate_topic_ids(self):
-        with pytest.raises(ValueError, match="Duplicate topic_ids detected"):
-            ThemeRefinementResponses(
-                responses=[
-                    RefinedTheme(
-                        topic_id="A",
-                        topic="Healthcare: Description 1",
-                        source_topic_count=1,
-                    ),
-                    RefinedTheme(
-                        topic_id="A",
-                        topic="Education: Description 2",
-                        source_topic_count=2,
-                    ),
-                ]
-            )
-
     def test_duplicate_topics(self):
         with pytest.raises(ValueError, match="Duplicate topics detected"):
             ThemeRefinementResponses(
                 responses=[
                     RefinedTheme(
-                        topic_id="A",
                         topic="Healthcare: Description",
                         source_topic_count=1,
                     ),
                     RefinedTheme(
-                        topic_id="B",
                         topic="Healthcare: Description",
                         source_topic_count=2,
                     ),

@@ -217,9 +217,6 @@ class ThemeCondensationResponses(ValidatedModel):
 class RefinedTheme(ValidatedModel):
     """Model for a single refined theme"""
 
-    topic_id: str = Field(
-        ..., description="Single uppercase letter ID (A-Z, then AA, AB, etc.)"
-    )
     topic: str = Field(
         ..., description="Topic label and description combined with a colon separator"
     )
@@ -231,17 +228,7 @@ class RefinedTheme(ValidatedModel):
     def run_validations(self) -> "RefinedTheme":
         """Run all validations for RefinedTheme"""
         self.validate_non_empty_fields()
-        self.validate_topic_id_format()
         self.validate_topic_format()
-        return self
-
-    def validate_topic_id_format(self) -> "RefinedTheme":
-        """
-        Validate that topic_id follows the expected format (A-Z, then AA, AB, etc.).
-        """
-        topic_id = self.topic_id.strip()
-        if not topic_id.isupper() or not topic_id.isalpha():
-            raise ValueError(f"topic_id must be uppercase letters only: {topic_id}")
         return self
 
     def validate_topic_format(self) -> "RefinedTheme":
@@ -273,9 +260,6 @@ class ThemeRefinementResponses(ValidatedModel):
     def run_validations(self) -> "ThemeRefinementResponses":
         """Ensure there are no duplicate themes"""
         self.validate_non_empty_fields()
-        topic_ids = [theme.topic_id for theme in self.responses]
-        if len(topic_ids) != len(set(topic_ids)):
-            raise ValueError("Duplicate topic_ids detected")
         topics = [theme.topic.lower().strip() for theme in self.responses]
         if len(topics) != len(set(topics)):
             raise ValueError("Duplicate topics detected")

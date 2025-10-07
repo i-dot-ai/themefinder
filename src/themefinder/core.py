@@ -470,8 +470,7 @@ async def theme_refinement(
                 ids.append(s)
             return ids
 
-        if not df.empty and "topic_id" in df.columns:
-            df = df.copy()
+        if not df.empty:
             df["topic_id"] = alpha_ids(len(df))
         return df
 
