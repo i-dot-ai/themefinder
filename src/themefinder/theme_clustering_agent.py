@@ -22,6 +22,8 @@ from .models import ThemeNode
 from .llm_batch_processor import load_prompt_from_file
 from .themefinder_logging import logger
 
+CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
+
 
 class ThemeClusteringAgent:
     """Agent for performing hierarchical clustering of topics using language models.
@@ -41,8 +43,8 @@ class ThemeClusteringAgent:
         self,
         llm: Runnable,
         themes: List[ThemeNode],
-        system_prompt: str,
-        target_themes: int,
+        system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+        target_themes: int = 10,
     ) -> None:
         """Initialize the clustering agent with an LLM and initial themes.
 
@@ -51,7 +53,7 @@ class ThemeClusteringAgent:
                 for HierarchicalClusteringResponse
             themes: List of ThemeNode objects to be clustered
             system_prompt: System prompt to guide the LLM's behavior
-            target_themes: Target number of themes to cluster down to
+            target_themes: Target number of themes to cluster down to (default 10)
         """
         self.llm = llm
         self.themes: Dict[str, ThemeNode] = {}
@@ -115,11 +117,9 @@ class ThemeClusteringAgent:
         """
         prompt = self._format_prompt()
         response = self.llm.invoke(prompt)
-        # The response is already a parsed dictionary when using with_structured_output
-        result = response
-        for i, parent in enumerate(result["parent_themes"]):
+        for i, parent in enumerate(response.parent_themes):
             new_theme_id = f"{chr(65 + i)}_{self.current_iteration}"
-            children = [c for c in parent["children"] if c in self.active_themes]
+            children = [c for c in parent.children if c in self.active_themes]
             for child in children:
                 self.themes[child].parent_id = new_theme_id
             total_source_count = sum(
@@ -127,8 +127,8 @@ class ThemeClusteringAgent:
             )
             new_theme = ThemeNode(
                 topic_id=new_theme_id,
-                topic_label=parent["topic_label"],
-                topic_description=parent["topic_description"],
+                topic_label=parent.topic_label,
+                topic_description=parent.topic_description,
                 source_topic_count=total_source_count,
                 children=children,
             )
