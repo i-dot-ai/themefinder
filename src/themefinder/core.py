@@ -444,6 +444,33 @@ async def theme_refinement(
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
+
+    def assign_sequential_topic_ids(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Assigns sequential alphabetic topic_ids (A, B, ..., Z, AA, AB, ...) to the DataFrame.
+        """
+
+        def alpha_ids(n: int) -> list[str]:
+            ids = []
+            for i in range(n):
+                s = ""
+                x = i
+                while True:
+                    x, r = divmod(x, 26)
+                    s = chr(65 + r) + s
+                    if x == 0:
+                        break
+                    x -= 1
+                ids.append(s)
+            return ids
+
+        if not df.empty and "topic_id" in df.columns:
+            df = df.copy()
+            df["topic_id"] = alpha_ids(len(df))
+        return df
+
+    refined_themes = assign_sequential_topic_ids(refined_themes)
+
     return refined_themes, _
 
 

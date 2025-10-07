@@ -7,7 +7,7 @@ You will receive a list of TOPICS. These topics explicitly tie opinions to wheth
 
 ## Output
 You will produce a list of CLEAR STANCE TOPICS based on the input. Each topic should have four parts:
-1. A topic_id that is an uppercase letter (starting from 'A', for the 27th element use AA)
+1. A topic_id that is an unique uppercase letter for each topic in the final list (starting from 'A', for the 27th element use AA)
 2. A brief, clear topic label (3-7 words)
 3. A more detailed topic description (1-2 sentences)
 4. The source_topic_count field should be included for each topic and should reflect the number of original source topics that were merged to create this refined topic. If multiple source topics were combined, sum their individual counts. If only one source topic was used, simply retain its original count value.
