@@ -118,7 +118,18 @@ class ThemeClusteringAgent:
         prompt = self._format_prompt()
         response = self.llm.invoke(prompt)
         for i, parent in enumerate(response.parent_themes):
-            new_theme_id = f"{chr(65 + i)}_{self.current_iteration}"
+
+            def to_alpha(idx: int) -> str:
+                """Convert 0-based integer to Excel-style column name (A, B, ..., Z, AA, AB, ...) without divmod."""
+                idx += 1  # 1-based for Excel logic
+                result = []
+                while idx > 0:
+                    rem = (idx - 1) % 26
+                    result.append(chr(65 + rem))
+                    idx = (idx - 1) // 26
+                return "".join(reversed(result))
+
+            new_theme_id = f"{to_alpha(i)}_{self.current_iteration}"
             children = [c for c in parent.children if c in self.active_themes]
             for child in children:
                 self.themes[child].parent_id = new_theme_id
