@@ -37,13 +37,21 @@ class ThemeClusteringAgent:
         current_iteration: Current iteration number in the clustering process
     """
 
-    def __init__(self, llm: Runnable, themes: List[ThemeNode]) -> None:
+    def __init__(
+        self,
+        llm: Runnable,
+        themes: List[ThemeNode],
+        system_prompt: str,
+        target_themes: int,
+    ) -> None:
         """Initialize the clustering agent with an LLM and initial themes.
 
         Args:
             llm: Language model instance configured with structured output
                 for HierarchicalClusteringResponse
             themes: List of ThemeNode objects to be clustered
+            system_prompt: System prompt to guide the LLM's behavior
+            target_themes: Target number of themes to cluster down to
         """
         self.llm = llm
         self.themes: Dict[str, ThemeNode] = {}
@@ -51,6 +59,8 @@ class ThemeClusteringAgent:
             self.themes[theme.topic_id] = theme
         self.active_themes = set(self.themes.keys())
         self.current_iteration = 0
+        self.system_prompt = system_prompt
+        self.target_themes = target_themes
 
     def _format_prompt(self) -> str:
         """Format the clustering prompt with current active themes.
@@ -74,7 +84,10 @@ class ThemeClusteringAgent:
         # Load the clustering prompt template
         prompt_template = load_prompt_from_file("agentic_theme_clustering")
         return prompt_template.format(
-            themes_json=themes_json, iteration=self.current_iteration
+            themes_json=themes_json,
+            iteration=self.current_iteration,
+            system_prompt=self.system_prompt,
+            target_themes=self.target_themes,
         )
 
     @retry(
