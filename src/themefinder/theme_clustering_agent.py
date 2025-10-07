@@ -22,6 +22,8 @@ from .models import ThemeNode
 from .llm_batch_processor import load_prompt_from_file
 from .themefinder_logging import logger
 
+CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
+
 
 class ThemeClusteringAgent:
     """Agent for performing hierarchical clustering of topics using language models.
@@ -37,13 +39,21 @@ class ThemeClusteringAgent:
         current_iteration: Current iteration number in the clustering process
     """
 
-    def __init__(self, llm: Runnable, themes: List[ThemeNode]) -> None:
+    def __init__(
+        self,
+        llm: Runnable,
+        themes: List[ThemeNode],
+        system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+        target_themes: int = 10,
+    ) -> None:
         """Initialize the clustering agent with an LLM and initial themes.
 
         Args:
             llm: Language model instance configured with structured output
                 for HierarchicalClusteringResponse
             themes: List of ThemeNode objects to be clustered
+            system_prompt: System prompt to guide the LLM's behavior
+            target_themes: Target number of themes to cluster down to (default 10)
         """
         self.llm = llm
         self.themes: Dict[str, ThemeNode] = {}
@@ -51,6 +61,8 @@ class ThemeClusteringAgent:
             self.themes[theme.topic_id] = theme
         self.active_themes = set(self.themes.keys())
         self.current_iteration = 0
+        self.system_prompt = system_prompt
+        self.target_themes = target_themes
 
     def _format_prompt(self) -> str:
         """Format the clustering prompt with current active themes.
@@ -74,7 +86,10 @@ class ThemeClusteringAgent:
         # Load the clustering prompt template
         prompt_template = load_prompt_from_file("agentic_theme_clustering")
         return prompt_template.format(
-            themes_json=themes_json, iteration=self.current_iteration
+            themes_json=themes_json,
+            iteration=self.current_iteration,
+            system_prompt=self.system_prompt,
+            target_themes=self.target_themes,
         )
 
     @retry(
@@ -102,11 +117,20 @@ class ThemeClusteringAgent:
         """
         prompt = self._format_prompt()
         response = self.llm.invoke(prompt)
-        # The response is already a parsed dictionary when using with_structured_output
-        result = response
-        for i, parent in enumerate(result["parent_themes"]):
-            new_theme_id = f"{chr(65 + i)}_{self.current_iteration}"
-            children = [c for c in parent["children"] if c in self.active_themes]
+        for i, parent in enumerate(response.parent_themes):
+
+            def to_alpha(idx: int) -> str:
+                """Convert 0-based integer to Excel-style column name (A, B, ..., Z, AA, AB, ...) without divmod."""
+                idx += 1  # 1-based for Excel logic
+                result = []
+                while idx > 0:
+                    rem = (idx - 1) % 26
+                    result.append(chr(65 + rem))
+                    idx = (idx - 1) // 26
+                return "".join(reversed(result))
+
+            new_theme_id = f"{to_alpha(i)}_{self.current_iteration}"
+            children = [c for c in parent.children if c in self.active_themes]
             for child in children:
                 self.themes[child].parent_id = new_theme_id
             total_source_count = sum(
@@ -114,8 +138,8 @@ class ThemeClusteringAgent:
             )
             new_theme = ThemeNode(
                 topic_id=new_theme_id,
-                topic_label=parent["topic_label"],
-                topic_description=parent["topic_description"],
+                topic_label=parent.topic_label,
+                topic_description=parent.topic_description,
                 source_topic_count=total_source_count,
                 children=children,
             )

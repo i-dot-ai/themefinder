@@ -186,7 +186,7 @@ async def theme_generation(
     llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 50,
-    partition_key: str | None = "position",
+    partition_key: str | None = None,
     prompt_template: str | Path | PromptTemplate = "theme_generation",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
@@ -317,6 +317,7 @@ def theme_clustering(
     target_themes: int = 10,
     significance_percentage: float = 10.0,
     return_all_themes: bool = False,
+    system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Perform hierarchical clustering of themes using an agentic approach.
 
@@ -340,6 +341,8 @@ def theme_clustering(
             selecting significant themes. Defaults to 10.0.
         return_all_themes (bool, optional): If True, returns all clustered themes.
             If False, returns only significant themes. Defaults to False.
+        system_prompt (str): System prompt to guide the LLM's behavior.
+            Defaults to CONSULTATION_SYSTEM_PROMPT.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]:
@@ -362,7 +365,10 @@ def theme_clustering(
 
     # Initialize clustering agent with structured output LLM
     agent = ThemeClusteringAgent(
-        llm.with_structured_output(HierarchicalClusteringResponse), initial_themes
+        llm.with_structured_output(HierarchicalClusteringResponse),
+        initial_themes,
+        system_prompt,
+        target_themes,
     )
 
     # Perform clustering
@@ -444,6 +450,32 @@ async def theme_refinement(
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
+
+    def assign_sequential_topic_ids(df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Assigns sequential alphabetic topic_ids (A, B, ..., Z, AA, AB, ...) to the DataFrame.
+        """
+
+        def alpha_ids(n: int) -> list[str]:
+            ids = []
+            for i in range(n):
+                s = ""
+                x = i
+                while True:
+                    x, r = divmod(x, 26)
+                    s = chr(65 + r) + s
+                    if x == 0:
+                        break
+                    x -= 1
+                ids.append(s)
+            return ids
+
+        if not df.empty:
+            df["topic_id"] = alpha_ids(len(df))
+        return df
+
+    refined_themes = assign_sequential_topic_ids(refined_themes)
+
     return refined_themes, _
 
 

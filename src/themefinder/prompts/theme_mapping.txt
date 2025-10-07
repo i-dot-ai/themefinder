@@ -16,10 +16,6 @@ Your task is to analyze each response and decide which topics are present. Guide
     - Each response can be assigned to multiple topics if it matches more than one topic from the TOPIC LIST.
     - Each topic can only be assigned once per response, if the topic is mentioned more than once use the first mention for reasoning and stance.
     - There is no limit on how many topics can be assigned to a response.
-    - For each assignment provide a single rationale for why you have chosen the label.
-    - For each topic identified in a response, indicate whether the response expresses a positive or negative stance toward that topic (options: 'POSITIVE' or 'NEGATIVE')
-    - You MUST use either 'POSITIVE' or 'NEGATIVE'
-    - The order of reasons and stances must align with the order of labels (e.g., stance_a applies to topic_a)
 
 You MUST include every response ID in the output.
 If the response can not be labelled return empty sections where appropriate but you MUST return an entry
