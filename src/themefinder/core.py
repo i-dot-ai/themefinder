@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
-from langchain.schema.runnable import RunnableWithFallbacks
+from langchain_core.runnables import RunnableWithFallbacks
 
 from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
 from themefinder.models import (
