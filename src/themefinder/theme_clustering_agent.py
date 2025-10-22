@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Any
 
 import pandas as pd
-from langchain.schema.runnable import Runnable
+from langchain_core.runnables import Runnable
 from tenacity import (
     before,
     before_sleep_log,
