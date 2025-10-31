@@ -5,19 +5,21 @@ import pandas as pd
 from langchain.schema.runnable import RunnableWithFallbacks
 from langchain_core.prompts import PromptTemplate
 
-from themefinder.advanced_tasks.cross_cutting_themes_agent import \
-    CrossCuttingThemesAgent
-from themefinder.advanced_tasks.theme_clustering_agent import \
-    ThemeClusteringAgent
-from themefinder.llm_batch_processor import (batch_and_run,
-                                             load_prompt_from_file)
-from themefinder.models import (DetailDetectionResponses,
-                                HierarchicalClusteringResponse,
-                                SentimentAnalysisResponses,
-                                ThemeCondensationResponses,
-                                ThemeGenerationResponses,
-                                ThemeMappingResponses, ThemeNode,
-                                ThemeRefinementResponses)
+from themefinder.advanced_tasks.cross_cutting_themes_agent import (
+    CrossCuttingThemesAgent,
+)
+from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
+from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
+from themefinder.models import (
+    DetailDetectionResponses,
+    HierarchicalClusteringResponse,
+    SentimentAnalysisResponses,
+    ThemeCondensationResponses,
+    ThemeGenerationResponses,
+    ThemeMappingResponses,
+    ThemeNode,
+    ThemeRefinementResponses,
+)
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -630,8 +632,8 @@ async def detail_detection(
 def cross_cutting_themes(
     questions_themes: dict[int, pd.DataFrame],
     llm: RunnableWithFallbacks,
+    n_concepts: int = 5,
     min_themes: int = 5,
-    n_concepts: int = 5
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Identify cross-cutting themes using a single-pass agent approach.
 
@@ -651,6 +653,7 @@ def cross_cutting_themes(
             - topic: String in format "topic_name: topic_description"
         llm (RunnableWithFallbacks): Language model instance configured for
             structured output
+        n_concepts (int): The target number of cross-cutting themes to generate
         min_themes (int): Minimum number of themes required for a valid
             cross-cutting theme group. Groups with fewer themes will be discarded.
             Defaults to 5.
