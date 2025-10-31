@@ -7,6 +7,8 @@ Not every question theme has to belong to one of these concepts but the concepts
 
 These high level concepts should be the type of take homes that policy maker should consider while trying to implement a policy related to this consultation.
 
+IMPORTANT: Each cross-cutting concept should be distinct and non-overlapping. When designing these concepts, ensure that themes would naturally belong to only one concept, not multiple. Avoid creating concepts that could capture the same themes.
+
 You should output a short name of each concept and a 2 sentence description of the concept.
 
 Questions and topics:
