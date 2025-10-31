@@ -2,24 +2,22 @@ import logging
 from pathlib import Path
 
 import pandas as pd
-from langchain_core.prompts import PromptTemplate
 from langchain.schema.runnable import RunnableWithFallbacks
+from langchain_core.prompts import PromptTemplate
 
-from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
-from themefinder.models import (
-    SentimentAnalysisResponses,
-    ThemeGenerationResponses,
-    ThemeCondensationResponses,
-    ThemeRefinementResponses,
-    ThemeMappingResponses,
-    DetailDetectionResponses,
-    HierarchicalClusteringResponse,
-    ThemeNode,
-)
-from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
-from themefinder.advanced_tasks.cross_cutting_themes_agent import (
-    CrossCuttingThemesAgent,
-)
+from themefinder.advanced_tasks.cross_cutting_themes_agent import \
+    CrossCuttingThemesAgent
+from themefinder.advanced_tasks.theme_clustering_agent import \
+    ThemeClusteringAgent
+from themefinder.llm_batch_processor import (batch_and_run,
+                                             load_prompt_from_file)
+from themefinder.models import (DetailDetectionResponses,
+                                HierarchicalClusteringResponse,
+                                SentimentAnalysisResponses,
+                                ThemeCondensationResponses,
+                                ThemeGenerationResponses,
+                                ThemeMappingResponses, ThemeNode,
+                                ThemeRefinementResponses)
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -633,6 +631,7 @@ def cross_cutting_themes(
     questions_themes: dict[int, pd.DataFrame],
     llm: RunnableWithFallbacks,
     min_themes: int = 5,
+    n_concepts: int = 5
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Identify cross-cutting themes using a single-pass agent approach.
 
@@ -675,7 +674,7 @@ def cross_cutting_themes(
 
     # Use the CrossCuttingThemesAgent with external prompt files
     agent = CrossCuttingThemesAgent(
-        llm=llm, questions_themes=questions_themes, n_concepts=5
+        llm=llm, questions_themes=questions_themes, n_concepts=n_concepts
     )
 
     # Run the analysis
