@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "themefinder"
-version = "0.7.0"
+version = "0.7.3"
 description = "A topic modelling Python package designed for analysing one-to-many question-answer data eg free-text survey responses."
 authors = ["i.AI <packages@cabinetoffice.gov.uk>"]
 packages = [{include = "themefinder", from = "src"}]
@@ -19,7 +19,7 @@ classifiers = [
 [tool.poetry.dependencies]
 python = ">=3.10,<3.13"
 langchain = "*"
-langchain-openai = "0.1.17"
+langchain-openai = "*"
 pandas = "^2.2.2"
 python-dotenv = "^1.0.1"
 langfuse = "2.29.1"

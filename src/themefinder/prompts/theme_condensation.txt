@@ -1,11 +1,15 @@
 {system_prompt}
 
-Below is a question and a list of topics extracted from answers to that question. Each topic has a topic_label, topic_description, and may have a source_topic_count field indicating how many original topics it represents.
+Below is a question and a list of topics extracted from answers to that question. 
+
+This list contains a large number of duplicate and redundant topics that present the same concept with different phrasing.
+
+Each topic has a topic_label, topic_description, and may have a source_topic_count field indicating how many original topics it represents.
 
 Your task is to analyze these topics and produce a refined list that:
-1. Identifies and preserves core themes that appear frequently
-2. Combines redundant topics while maintaining nuanced differences
-3. Ensures the final list represents the full spectrum of viewpoints present in the original data
+1. Significantly reduces the total number of topics
+2. Identifies and preserves core themes that appear frequently
+3. Combines redundant topics
 4. Tracks the total number of original topics combined into each new topic
 
 Guidelines for Topic Analysis:

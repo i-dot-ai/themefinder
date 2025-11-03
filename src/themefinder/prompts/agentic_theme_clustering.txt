@@ -1,3 +1,5 @@
+{system_prompt}
+
 Analyze these topics and identify which ones should be merged based on semantic similarity.
 Your goal is to significantly reduce the number of topics by creating meaningful parent topics.
 Be aggressive in finding opportunities to merge topics that share any semantic relationship.
@@ -22,10 +24,11 @@ Guidelines:
 - source_topic_count must be the sum of all child topic counts
 - children must be a list of valid topic_ids from the input
 - should_terminate should only be true if ALL of these conditions are met:
-    * There are fewer than 10 active topics remaining
+    * There are fewer than {target_themes} active topics remaining
     * The remaining topics are fundamentally incompatible semantically
     * Any further merging would create meaninglessly broad categories
 
 If no topics should be merged in this iteration but future iterations might still yield meaningful merges, set should_terminate to false with an empty parent_themes list.
-
 If no topics should be merged and the termination conditions are met, set should_terminate to true with an empty parent_themes list.
+
+N.B. Under no circumstances should you create a parent theme with a single child. You do not need to return all of the original themes, if they don't belong to a newly created parent feel free to omit them. 
