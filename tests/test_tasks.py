@@ -653,8 +653,8 @@ def test_theme_clustering():
         should_terminate=True,
     )
 
-    # Return as dict since that's what the agent expects
-    mock_structured_llm.invoke.return_value = mock_response.model_dump()
+    # Return the response object (not dict)
+    mock_structured_llm.invoke.return_value = mock_response
     mock_llm.with_structured_output.return_value = mock_structured_llm
 
     # Call theme_clustering
