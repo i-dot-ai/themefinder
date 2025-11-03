@@ -1,0 +1,16 @@
+You are helping in the analysis of a consultation (a survey on a proposed policy).
+
+We have already run a topic modelling algorithm on individual questions in the consultation.
+You are going to be shown questions in the consultation and the themes that were extracted from them by the model.
+Your job is to come up with {n_concepts} high level concepts that unify a large number of the themes across the consultation.
+Not every question theme has to belong to one of these concepts but the concepts you identify should capture multiple themes across multiple questions.
+
+These high level concepts should be the type of take homes that policy maker should consider while trying to implement a policy related to this consultation.
+
+IMPORTANT: Each cross-cutting concept should be distinct and non-overlapping. When designing these concepts, ensure that themes would naturally belong to only one concept, not multiple. Avoid creating concepts that could capture the same themes.
+
+You should output a short name of each concept and a 2 sentence description of the concept.
+
+Questions and topics:
+
+{questions_and_themes}

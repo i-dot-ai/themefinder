@@ -1,6 +1,6 @@
 import pandas as pd
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 from langchain_core.prompts import PromptTemplate
 
 from themefinder import (
@@ -11,6 +11,7 @@ from themefinder import (
     theme_refinement,
     theme_target_alignment,
     find_themes,
+    cross_cutting_themes,
 )
 from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
@@ -23,6 +24,10 @@ from themefinder.models import (
     ThemeGenerationResponses,
     ThemeMappingOutput,
     ThemeMappingResponses,
+    CrossCuttingThemeIdentificationResponse,
+    CrossCuttingThemeDefinition,
+    CrossCuttingThemeMappingResponse,
+    CrossCuttingThemeMapping,
 )
 
 
@@ -482,3 +487,227 @@ async def test_find_themes(mock_llm, sample_df):
         )
 
         assert mock_call_llm.await_count == 6
+
+
+def test_cross_cutting_themes():
+    """Test cross_cutting_themes function with mock LLM"""
+    # Create mock themes data from multiple questions (new format with topic_id and topic columns)
+    questions_themes = {
+        1: pd.DataFrame(
+            {
+                "topic_id": ["A", "B", "C"],
+                "topic": [
+                    "Test Label 1A: Test description for theme 1A",
+                    "Test Label 1B: Test description for theme 1B",
+                    "Test Label 1C: Test description for theme 1C",
+                ],
+            }
+        ),
+        2: pd.DataFrame(
+            {
+                "topic_id": ["A", "B", "C"],
+                "topic": [
+                    "Test Label 2A: Test description for theme 2A",
+                    "Test Label 2B: Test description for theme 2B",
+                    "Test Label 2C: Test description for theme 2C",
+                ],
+            }
+        ),
+        3: pd.DataFrame(
+            {
+                "topic_id": ["A", "B"],
+                "topic": [
+                    "Test Label 3A: Test description for theme 3A",
+                    "Test Label 3B: Test description for theme 3B",
+                ],
+            }
+        ),
+    }
+
+    # Create mock LLM responses for the new agent-based approach
+    mock_identification_response = CrossCuttingThemeIdentificationResponse(
+        themes=[
+            CrossCuttingThemeDefinition(
+                name="Test Cross-Cutting Theme 1",
+                description="Test description for cross-cutting theme 1",
+            ),
+            CrossCuttingThemeDefinition(
+                name="Test Cross-Cutting Theme 2",
+                description="Test description for cross-cutting theme 2",
+            ),
+        ]
+    )
+
+    mock_mapping_response = CrossCuttingThemeMappingResponse(
+        mappings=[
+            CrossCuttingThemeMapping(
+                theme_name="Test Cross-Cutting Theme 1", theme_ids=["A", "B"]
+            ),
+            CrossCuttingThemeMapping(
+                theme_name="Test Cross-Cutting Theme 2", theme_ids=["C"]
+            ),
+        ]
+    )
+
+    mock_refinement_response = "Refined description for the cross-cutting theme"
+
+    # Create mock LLM
+    mock_llm = Mock()
+    mock_structured_llm = Mock()
+
+    # Set up the mock to return different responses for different structured output calls
+    mock_structured_llm.invoke.side_effect = [
+        mock_identification_response,  # First call for identification
+        mock_mapping_response,  # Mapping calls for each question
+        mock_mapping_response,
+        mock_mapping_response,
+    ]
+
+    # Mock the regular invoke for refinement
+    mock_refinement_llm = Mock()
+    mock_refinement_llm.invoke.return_value = Mock(content=mock_refinement_response)
+
+    # Return appropriate mock based on call
+    def mock_with_structured_output(schema):
+        if schema.__name__ in [
+            "CrossCuttingThemeIdentificationResponse",
+            "CrossCuttingThemeMappingResponse",
+        ]:
+            return mock_structured_llm
+        return mock_refinement_llm
+
+    mock_llm.with_structured_output.side_effect = mock_with_structured_output
+    mock_llm.invoke.return_value = Mock(content=mock_refinement_response)
+
+    # Call the function with min_themes=1 since we want to test basic functionality
+    result, unprocessed = cross_cutting_themes(questions_themes, mock_llm, min_themes=1)
+
+    # Verify the output format is a tuple with DataFrame and empty DataFrame
+    assert isinstance(result, pd.DataFrame)
+    assert isinstance(unprocessed, pd.DataFrame)
+    assert len(unprocessed) == 0  # Should be empty
+
+    # Check DataFrame columns
+    expected_columns = ["name", "description", "themes", "n_themes", "n_questions"]
+    assert all(col in result.columns for col in expected_columns)
+
+    # Verify LLM was called correctly
+    mock_llm.with_structured_output.assert_called()
+
+
+def test_cross_cutting_themes_empty_input():
+    """Test cross_cutting_themes with empty input"""
+    mock_llm = Mock()
+
+    with pytest.raises(ValueError, match="questions_themes cannot be empty"):
+        cross_cutting_themes({}, mock_llm)
+
+
+def test_cross_cutting_themes_missing_columns():
+    """Test cross_cutting_themes with missing required columns"""
+    questions_themes = {
+        1: pd.DataFrame(
+            {
+                # Missing both topic_id and topic columns
+                "some_other_column": ["A"],
+            }
+        )
+    }
+    mock_llm = Mock()
+
+    # Should raise KeyError when trying to access 'topic_id' column
+    with pytest.raises(KeyError):
+        cross_cutting_themes(questions_themes, mock_llm)
+
+
+def test_theme_clustering():
+    """Test theme_clustering function"""
+    from themefinder import theme_clustering
+    from themefinder.models import HierarchicalClusteringResponse, ThemeNode
+
+    # Create test themes DataFrame
+    themes_df = pd.DataFrame(
+        {
+            "topic_id": ["1", "2", "3"],
+            "topic_label": ["Theme A", "Theme B", "Theme C"],
+            "topic_description": ["Description A", "Description B", "Description C"],
+            "source_topic_count": [10, 20, 30],
+        }
+    )
+
+    # Create mock LLM that returns a clustering response
+    mock_llm = Mock()
+    mock_structured_llm = Mock()
+
+    # Create a mock response for the clustering
+    mock_response = HierarchicalClusteringResponse(
+        parent_themes=[
+            ThemeNode(
+                topic_id="parent_1",
+                topic_label="Combined Theme",
+                topic_description="Combined description",
+                source_topic_count=30,
+                children=["1", "2"],
+            )
+        ],
+        should_terminate=True,
+    )
+
+    # Return the response object (not dict)
+    mock_structured_llm.invoke.return_value = mock_response
+    mock_llm.with_structured_output.return_value = mock_structured_llm
+
+    # Call theme_clustering
+    result, _ = theme_clustering(
+        themes_df,
+        mock_llm,
+        max_iterations=1,
+        target_themes=2,
+        significance_percentage=10.0,
+        return_all_themes=False,
+    )
+
+    # Verify the result
+    assert isinstance(result, pd.DataFrame)
+    assert len(result) >= 0  # Can be 0 if nothing meets significance threshold
+
+    # Test with return_all_themes=True
+    result_all, _ = theme_clustering(
+        themes_df,
+        mock_llm,
+        max_iterations=1,
+        target_themes=2,
+        significance_percentage=10.0,
+        return_all_themes=True,
+    )
+
+    assert isinstance(result_all, pd.DataFrame)
+
+
+def test_hierarchical_clustering_response_validation():
+    """Test validation of HierarchicalClusteringResponse model."""
+    from themefinder.models import HierarchicalClusteringResponse, ThemeNode
+
+    # Test that duplicate children in different parents raises error
+    with pytest.raises(
+        ValueError, match="Each child theme can have at most one parent"
+    ):
+        HierarchicalClusteringResponse(
+            parent_themes=[
+                ThemeNode(
+                    topic_id="parent_1",
+                    topic_label="Theme 1",
+                    topic_description="Description 1",
+                    source_topic_count=10,
+                    children=["child_1", "child_2"],
+                ),
+                ThemeNode(
+                    topic_id="parent_2",
+                    topic_label="Theme 2",
+                    topic_description="Description 2",
+                    source_topic_count=20,
+                    children=["child_2", "child_3"],  # child_2 appears in both parents
+                ),
+            ],
+            should_terminate=False,
+        )

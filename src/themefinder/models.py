@@ -392,3 +392,47 @@ class HierarchicalClusteringResponse(ValidatedModel):
             raise ValueError("Each child theme can have at most one parent")
 
         return self
+
+
+# Cross-Cutting Theme Identification Models
+
+
+class CrossCuttingThemeDefinition(BaseModel):
+    """Model for a high-level cross-cutting theme."""
+
+    name: str = Field(
+        ...,
+        description="Short, descriptive name for the cross-cutting theme (3-7 words)",
+    )
+    description: str = Field(
+        ...,
+        description="2-sentence description of what this cross-cutting theme represents",
+    )
+
+
+class CrossCuttingThemeIdentificationResponse(BaseModel):
+    """Response model for identifying cross-cutting themes."""
+
+    themes: List[CrossCuttingThemeDefinition] = Field(
+        default=[], description="List of identified cross-cutting themes"
+    )
+
+
+class CrossCuttingThemeMapping(BaseModel):
+    """Model for mapping individual themes to a cross-cutting theme."""
+
+    theme_name: str = Field(
+        ..., description="Name of the cross-cutting theme this theme belongs to"
+    )
+    theme_ids: List[str] = Field(
+        ...,
+        description="List of theme IDs that belong to this cross-cutting theme (e.g., ['A', 'B', 'C'])",
+    )
+
+
+class CrossCuttingThemeMappingResponse(BaseModel):
+    """Response model for mapping question themes to cross-cutting themes."""
+
+    mappings: List[CrossCuttingThemeMapping] = Field(
+        default=[], description="List of cross-cutting theme mappings for this question"
+    )

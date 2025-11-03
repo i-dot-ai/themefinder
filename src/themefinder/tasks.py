@@ -5,18 +5,21 @@ import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableWithFallbacks
 
+from themefinder.advanced_tasks.cross_cutting_themes_agent import (
+    CrossCuttingThemesAgent,
+)
+from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
 from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
 from themefinder.models import (
-    SentimentAnalysisResponses,
-    ThemeGenerationResponses,
-    ThemeCondensationResponses,
-    ThemeRefinementResponses,
-    ThemeMappingResponses,
     DetailDetectionResponses,
     HierarchicalClusteringResponse,
+    SentimentAnalysisResponses,
+    ThemeCondensationResponses,
+    ThemeGenerationResponses,
+    ThemeMappingResponses,
     ThemeNode,
+    ThemeRefinementResponses,
 )
-from themefinder.theme_clustering_agent import ThemeClusteringAgent
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -656,3 +659,68 @@ async def detail_detection(
         concurrency=concurrency,
     )
     return detailed, _
+
+
+def cross_cutting_themes(
+    questions_themes: dict[int, pd.DataFrame],
+    llm: RunnableWithFallbacks,
+    n_concepts: int = 5,
+    min_themes: int = 5,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Identify cross-cutting themes using a single-pass agent approach.
+
+    This function analyzes refined themes from multiple questions to identify semantic
+    patterns that span across different questions, creating cross-cutting theme
+    categories that represent common concerns or policy areas.
+
+    The analysis uses a single-pass process:
+    1. Identify high-level cross-cutting themes across all questions
+    2. Map individual themes to the identified cross-cutting themes
+    3. Refine descriptions based on assigned themes
+
+    Args:
+        questions_themes (dict[int, pd.DataFrame]): Dictionary mapping question numbers
+            to their refined themes DataFrames. Each DataFrame should have columns:
+            - topic_id: Theme identifier (e.g., 'A', 'B', 'C')
+            - topic: String in format "topic_name: topic_description"
+        llm (RunnableWithFallbacks): Language model instance configured for
+            structured output
+        n_concepts (int): The target number of cross-cutting themes to generate
+        min_themes (int): Minimum number of themes required for a valid
+            cross-cutting theme group. Groups with fewer themes will be discarded.
+            Defaults to 5.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: A tuple containing:
+            - DataFrame with cross-cutting themes with columns:
+                - name: Name of the cross-cutting theme
+                - description: Description of what this theme represents
+                - themes: Dictionary mapping question_number to list of theme_keys
+                  e.g., {1: ["A", "B"], 3: ["C"]}
+            - Empty DataFrame (for consistency with other core functions)
+
+    Raises:
+        ValueError: If questions_themes is empty or contains invalid data
+        KeyError: If required columns are missing from themes DataFrames
+    """
+    # Validate input
+    if not questions_themes:
+        raise ValueError("questions_themes cannot be empty")
+
+    # Use the CrossCuttingThemesAgent with external prompt files
+    agent = CrossCuttingThemesAgent(
+        llm=llm, questions_themes=questions_themes, n_concepts=n_concepts
+    )
+
+    # Run the analysis
+    agent.analyze()
+
+    # Get results as DataFrame using the agent's method
+    df_results = agent.get_results_as_dataframe()
+
+    # Apply minimum themes filter
+    if min_themes > 0:
+        df_results = df_results[df_results["n_themes"] >= min_themes]
+
+    # Create and return DataFrame with empty unprocessed data for consistency
+    return df_results.reset_index(drop=True), pd.DataFrame()
