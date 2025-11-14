@@ -143,6 +143,7 @@ class SentimentAnalysisResponses(ValidatedModel):
     """Container for all sentiment analysis responses"""
 
     responses: List[SentimentAnalysisOutput]
+    output_tokens: int
 
     @model_validator(mode="after")
     def run_validations(self) -> "SentimentAnalysisResponses":
@@ -173,6 +174,7 @@ class ThemeGenerationResponses(ValidatedModel):
     """Container for all extracted themes"""
 
     responses: List[Theme] = Field(..., description="List of extracted themes")
+    output_tokens: int
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
@@ -203,6 +205,7 @@ class ThemeCondensationResponses(ValidatedModel):
     """Container for all condensed themes"""
 
     responses: List[CondensedTheme] = Field(..., description="List of condensed themes")
+    output_tokens: int
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
@@ -255,6 +258,7 @@ class ThemeRefinementResponses(ValidatedModel):
     """Container for all refined themes"""
 
     responses: List[RefinedTheme] = Field(..., description="List of refined themes")
+    output_tokens: int
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeRefinementResponses":
@@ -289,6 +293,7 @@ class ThemeMappingResponses(ValidatedModel):
     responses: List[ThemeMappingOutput] = Field(
         ..., description="List of theme mapping outputs"
     )
+    output_tokens: int
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeMappingResponses":
@@ -317,6 +322,7 @@ class DetailDetectionResponses(ValidatedModel):
     responses: List[DetailDetectionOutput] = Field(
         ..., description="List of detail detection outputs"
     )
+    output_tokens: int
 
     @model_validator(mode="after")
     def run_validations(self) -> "DetailDetectionResponses":

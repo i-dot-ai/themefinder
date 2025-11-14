@@ -28,6 +28,7 @@ scikit-learn = "*"
 openpyxl = "^3.1.5"
 pyarrow = "^15.0.0" 
 toml = "^0.10.2"
+ecologits = "0.9.1"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "*"

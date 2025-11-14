@@ -2,12 +2,14 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+import time
 from pathlib import Path
 from typing import Any, Optional
 
 import openai
 import pandas as pd
 import tiktoken
+from ecologits.tracers.utils import llm_impacts
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import Runnable
 from pydantic import ValidationError
@@ -301,17 +303,38 @@ async def call_llm(
     async def async_llm_call(batch_prompt) -> tuple[list[dict], list[int]]:
         async with semaphore:
             try:
+                start = time.time()
                 llm_response = await llm.ainvoke(batch_prompt.prompt_string)
+                end = time.time()
+                length = end - start
+                # impacts = llm_impacts(
+                #     provider="openai",
+                #     model_name="gpt-4o",  # Use the actual model name
+                #     output_token_count=llm_response,
+                #     request_latency=length,  # Optional: request duration in seconds
+                #     electricity_mix_zone="SWE",  # World average, or use specific zone like "USA", "FRA", etc.
+                #     # input_token_count=input_tokens
+                # )
                 all_results = (
                     llm_response.dict()
                     if hasattr(llm_response, "dict")
                     else llm_response
                 )
+                
+                # Extract usage metadata if available
+                # usage_metadata = llm_response["raw"].usage_metadata
+                
                 responses = (
                     all_results["responses"]
                     if isinstance(all_results, dict)
                     else all_results.responses
                 )
+                
+                # Add usage metadata to each response if available
+                # if usage_metadata and isinstance(responses, list):
+                #     for response in responses:
+                #         if isinstance(response, dict):
+                #             response["usage_metadata"] = usage_metadata
             except (openai.BadRequestError, ValueError) as e:
                 logger.warning(e)
                 return [], batch_prompt.response_ids
