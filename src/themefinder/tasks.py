@@ -5,21 +5,19 @@ import pandas as pd
 from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableWithFallbacks
 
-from themefinder.advanced_tasks.cross_cutting_themes_agent import (
-    CrossCuttingThemesAgent,
-)
-from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
-from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
-from themefinder.models import (
-    DetailDetectionResponses,
-    HierarchicalClusteringResponse,
-    SentimentAnalysisResponses,
-    ThemeCondensationResponses,
-    ThemeGenerationResponses,
-    ThemeMappingResponses,
-    ThemeNode,
-    ThemeRefinementResponses,
-)
+from themefinder.advanced_tasks.cross_cutting_themes_agent import \
+    CrossCuttingThemesAgent
+from themefinder.advanced_tasks.theme_clustering_agent import \
+    ThemeClusteringAgent
+from themefinder.llm_batch_processor import (batch_and_run,
+                                             load_prompt_from_file)
+from themefinder.models import (DetailDetectionResponses,
+                                HierarchicalClusteringResponse,
+                                SentimentAnalysisResponses,
+                                ThemeCondensationResponses,
+                                ThemeGenerationResponses,
+                                ThemeMappingResponses, ThemeNode,
+                                ThemeRefinementResponses)
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -480,67 +478,6 @@ async def theme_refinement(
     refined_themes = assign_sequential_topic_ids(refined_themes)
 
     return refined_themes, _
-
-
-async def theme_target_alignment(
-    refined_themes_df: pd.DataFrame,
-    llm: RunnableWithFallbacks,
-    question: str,
-    target_n_themes: int = 10,
-    batch_size: int = 10000,
-    prompt_template: str | Path | PromptTemplate = "theme_target_alignment",
-    system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
-    concurrency: int = 10,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Align themes to target number using an LLM.
-
-    This function processes refined themes to consolidate them into a target number of
-    distinct categories while preserving all significant details and perspectives.
-    It transforms the output format for improved readability by transposing the
-    results into a single-row DataFrame where columns represent individual themes.
-
-    Args:
-        refined_themes_df (pd.DataFrame): DataFrame containing the refined themes
-            from the previous pipeline stage.
-        llm (RunnableWithFallbacks): Language model instance to use for theme alignment.
-        question (str): The survey question.
-        target_n_themes (int, optional): Target number of themes to consolidate to.
-            Defaults to 10.
-        batch_size (int, optional): Number of themes to process in each batch.
-            Defaults to 10000.
-        prompt_template (str | Path | PromptTemplate, optional): Template for structuring
-            the prompt to the LLM. Can be a string identifier, path to template file,
-            or PromptTemplate instance. Defaults to "theme_target_alignment".
-        system_prompt (str): System prompt to guide the LLM's behavior.
-            Defaults to CONSULTATION_SYSTEM_PROMPT.
-        concurrency (int): Number of concurrent API calls to make. Defaults to 10.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]:
-            A tuple containing two DataFrames:
-                - The first DataFrame contains the rows that were successfully processed by the LLM
-                - The second DataFrame contains the rows that could not be processed by the LLM
-
-    Note:
-        The function adds sequential response_ids to the input DataFrame and
-        transposes the output for improved readability and easier downstream
-        processing.
-    """
-    logger.info(
-        f"Running theme target alignment on {len(refined_themes_df)} themes compressing to {target_n_themes} themes"
-    )
-    refined_themes_df["response_id"] = refined_themes_df.index + 1
-    aligned_themes, _ = await batch_and_run(
-        refined_themes_df,
-        prompt_template,
-        llm.with_structured_output(ThemeRefinementResponses),
-        batch_size=batch_size,
-        question=question,
-        system_prompt=system_prompt,
-        target_n_themes=target_n_themes,
-        concurrency=concurrency,
-    )
-    return aligned_themes, _
 
 
 async def theme_mapping(
