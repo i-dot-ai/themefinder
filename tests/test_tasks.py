@@ -1,21 +1,25 @@
+from unittest.mock import AsyncMock, Mock, patch
+
 import pandas as pd
 import pytest
-from unittest.mock import AsyncMock, Mock, patch
 from langchain_core.prompts import PromptTemplate
 
 from themefinder import (
+    cross_cutting_themes,
+    find_themes,
     sentiment_analysis,
     theme_condensation,
     theme_generation,
     theme_mapping,
     theme_refinement,
-    theme_target_alignment,
-    find_themes,
-    cross_cutting_themes,
 )
 from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
     CondensedTheme,
+    CrossCuttingThemeDefinition,
+    CrossCuttingThemeIdentificationResponse,
+    CrossCuttingThemeMapping,
+    CrossCuttingThemeMappingResponse,
     Position,
     SentimentAnalysisOutput,
     SentimentAnalysisResponses,
@@ -24,10 +28,6 @@ from themefinder.models import (
     ThemeGenerationResponses,
     ThemeMappingOutput,
     ThemeMappingResponses,
-    CrossCuttingThemeIdentificationResponse,
-    CrossCuttingThemeDefinition,
-    CrossCuttingThemeMappingResponse,
-    CrossCuttingThemeMapping,
 )
 
 
@@ -298,40 +298,6 @@ async def test_theme_refinement(mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_theme_target_alignment(mock_llm):
-    """Test theme target alignment with mocked LLM responses."""
-    refined_df = pd.DataFrame({"topic_id": ["1", "2"], "topic": ["theme1", "theme2"]})
-
-    mock_response = {
-        "responses": [
-            {"topic_id": "1", "topic": "aligned_theme1"},
-            {"topic_id": "2", "topic": "aligned_theme2"},
-        ]
-    }
-
-    with patch(
-        "themefinder.llm_batch_processor.call_llm", new_callable=AsyncMock
-    ) as mock_call_llm:
-        mock_call_llm.return_value = (
-            [mock_response["responses"][0], mock_response["responses"][1]],
-            [],
-        )
-
-        result, _ = await theme_target_alignment(
-            refined_df,
-            mock_llm,
-            question="test question",
-            target_n_themes=2,
-            batch_size=2,
-        )
-
-        assert isinstance(result, pd.DataFrame)
-        assert "topic_id" in result.columns
-        assert "topic" in result.columns
-        assert mock_call_llm.await_count == 1
-
-
-@pytest.mark.asyncio
 async def test_theme_mapping(mock_llm, sample_sentiment_df):
     """Test theme mapping with mocked LLM responses."""
     refined_df = pd.DataFrame({"topic_id": ["1", "2"], "topic": ["theme1", "theme2"]})
@@ -412,8 +378,6 @@ async def test_find_themes(mock_llm, sample_df):
 
     theme_refinement_responses = [{"topic_id": "1", "topic": "Refined Theme"}]
 
-    theme_alignment_responses = [{"topic_id": "1", "topic": "Aligned Theme"}]
-
     theme_mapping_responses = [
         ThemeMappingOutput(
             response_id=1, reasons=["reason1"], labels=["label1"], stances=["POSITIVE"]
@@ -440,7 +404,6 @@ async def test_find_themes(mock_llm, sample_df):
             (theme_generation_responses, []),
             (theme_condensation_responses, []),
             (theme_refinement_responses, []),
-            (theme_alignment_responses, []),
             (theme_mapping_responses, []),
             (detail_detection_responses, []),
         ]
@@ -449,11 +412,10 @@ async def test_find_themes(mock_llm, sample_df):
             input_df,
             mock_llm,
             question="test question",
-            target_n_themes=1,
             verbose=False,
         )
 
-        assert mock_call_llm.await_count == 7
+        assert mock_call_llm.await_count == 6
 
         expected_keys = [
             "question",
@@ -482,7 +444,6 @@ async def test_find_themes(mock_llm, sample_df):
             input_df,
             mock_llm,
             question="test question",
-            target_n_themes=None,
             verbose=False,
         )
 
