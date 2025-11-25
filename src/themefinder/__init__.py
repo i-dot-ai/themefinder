@@ -6,7 +6,6 @@ from .tasks import (
     theme_generation,
     theme_mapping,
     theme_refinement,
-    theme_target_alignment,
     detail_detection,
     cross_cutting_themes,
 )
@@ -19,7 +18,6 @@ __all__ = [
     "theme_generation",
     "theme_mapping",
     "theme_refinement",
-    "theme_target_alignment",
     "detail_detection",
     "cross_cutting_themes",
 ]
