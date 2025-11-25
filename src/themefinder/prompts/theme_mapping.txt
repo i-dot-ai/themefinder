@@ -18,8 +18,8 @@ Your task is to analyze each response and decide which topics are present. Guide
     - There is no limit on how many topics can be assigned to a response.
 
 You MUST include every response ID in the output.
-If the response can not be labelled return empty sections where appropriate but you MUST return an entry
-with the correct response ID for each input object.
+If none of the themes are relevant to the response then use the fallback themes provided at the end of the list such as None of the Above or Other
+You MUST return an entry with the correct response ID for each input object.
 You must only return the alphabetic topic_ids in the labels section.
 
 
