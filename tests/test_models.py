@@ -65,7 +65,7 @@ class TestTheme:
             topic_description="Access to affordable healthcare services",
             position=Position.AGREEMENT,
         )
-        assert theme.topic_label == "Healthcare"
+        assert theme.topic_label == "healthcare"
         assert theme.position == Position.AGREEMENT
 
     def test_invalid_position(self):
@@ -96,21 +96,28 @@ class TestThemeGenerationResponses:
         assert len(model.responses) == 2
 
     def test_duplicate_topics(self):
-        with pytest.raises(ValueError, match="Duplicate topic labels detected"):
-            ThemeGenerationResponses(
-                responses=[
-                    Theme(
-                        topic_label="Healthcare",
-                        topic_description="Description 1",
-                        position=Position.AGREEMENT,
-                    ),
-                    Theme(
-                        topic_label="healthcare",
-                        topic_description="Description 2",
-                        position=Position.DISAGREEMENT,
-                    ),
-                ]
-            )
+        theme_generation_responses = ThemeGenerationResponses(
+            responses=[
+                Theme(
+                    topic_label="Healthcare",
+                    topic_description="Description 1",
+                    position=Position.AGREEMENT,
+                ),
+                Theme(
+                    topic_label="healthcare",
+                    topic_description="Description 2",
+                    position=Position.DISAGREEMENT,
+                ),
+            ]
+        )
+
+        assert len(theme_generation_responses.responses) == 1
+        response = theme_generation_responses.responses[0]
+        assert response.topic_label == "healthcare"
+        assert set(response.topic_description.split("\n")) == {
+            "Description 1",
+            "Description 2",
+        }
 
 
 class TestCondensedTheme:
@@ -150,21 +157,29 @@ class TestThemeCondensationResponses:
         assert len(model.responses) == 2
 
     def test_duplicate_topics(self):
-        with pytest.raises(ValueError, match="Duplicate topic labels detected"):
-            ThemeCondensationResponses(
-                responses=[
-                    CondensedTheme(
-                        topic_label="Healthcare",
-                        topic_description="Description 1",
-                        source_topic_count=1,
-                    ),
-                    CondensedTheme(
-                        topic_label="healthcare",
-                        topic_description="Description 2",
-                        source_topic_count=2,
-                    ),
-                ]
-            )
+        theme_condensation_responses = ThemeCondensationResponses(
+            responses=[
+                CondensedTheme(
+                    topic_label="Healthcare",
+                    topic_description="Description 1",
+                    source_topic_count=1,
+                ),
+                CondensedTheme(
+                    topic_label="healthcare",
+                    topic_description="Description 2",
+                    source_topic_count=2,
+                ),
+            ]
+        )
+
+        assert len(theme_condensation_responses.responses) == 1
+        response = theme_condensation_responses.responses[0]
+        assert response.topic_label == "healthcare"
+        assert set(response.topic_description.split("\n")) == {
+            "Description 1",
+            "Description 2",
+        }
+        assert response.source_topic_count == 3
 
 
 class TestRefinedTheme:
