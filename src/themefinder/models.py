@@ -440,17 +440,3 @@ class CrossCuttingThemeMappingResponse(BaseModel):
     mappings: List[CrossCuttingThemeMapping] = Field(
         default=[], description="List of cross-cutting theme mappings for this question"
     )
-
-
-class SelectedTheme(ValidatedModel):
-    """Model for a single user-selected theme"""
-
-    id: str = Field(
-        ..., description="Short alphabetic ID (e.g. 'A', 'B', 'C') - iteration prefix will be added automatically"
-    )
-    name: str = Field(
-        ..., description="Name of this selected theme"
-    )
-    description: str = Field(
-        ..., description="Name of the selected theme"
-    )
