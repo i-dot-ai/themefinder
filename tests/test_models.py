@@ -151,19 +151,19 @@ class TestThemeCondensationResponses:
 
     def test_duplicate_topics(self):
         theme_condensation_responses = ThemeCondensationResponses(
-                responses=[
-                    CondensedTheme(
-                        topic_label="Healthcare",
-                        topic_description="Description 1",
-                        source_topic_count=1,
-                    ),
-                    CondensedTheme(
-                        topic_label="healthcare",
-                        topic_description="Description 2",
-                        source_topic_count=2,
-                    ),
-                ]
-            )
+            responses=[
+                CondensedTheme(
+                    topic_label="Healthcare",
+                    topic_description="Description 1",
+                    source_topic_count=1,
+                ),
+                CondensedTheme(
+                    topic_label="healthcare",
+                    topic_description="Description 2",
+                    source_topic_count=2,
+                ),
+            ]
+        )
 
         assert len(theme_condensation_responses.responses) == 1
         response = theme_condensation_responses.responses[0]
