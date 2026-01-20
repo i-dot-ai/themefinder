@@ -69,35 +69,6 @@ class ValidatedModel(BaseModel):
             raise ValueError(f"'{field_name}' must contain unique values")
         return self
 
-    def validate_unique_attribute_in_list(
-        self, list_field: str, attr_name: str
-    ) -> "ValidatedModel":
-        """
-        Validate that an attribute across all objects in a list field is unique.
-
-        Args:
-            list_field: The name of the list field containing objects
-            attr_name: The attribute within each object to check for uniqueness
-        """
-        if not hasattr(self, list_field):
-            raise ValueError(f"Field '{list_field}' does not exist")
-
-        items = getattr(self, list_field)
-        if not isinstance(items, list):
-            raise ValueError(f"Field '{list_field}' is not a list")
-
-        attr_values = []
-        for item in items:
-            if not hasattr(item, attr_name):
-                raise ValueError(
-                    f"Item in '{list_field}' does not have attribute '{attr_name}'"
-                )
-            attr_values.append(getattr(item, attr_name))
-        if len(attr_values) != len(set(attr_values)):
-            raise ValueError(
-                f"'{attr_name}' must be unique across all items in '{list_field}'"
-            )
-        return self
 
 
     @model_validator(mode="after")

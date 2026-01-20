@@ -16,39 +16,6 @@ from themefinder.models import (
 )
 
 
-class TestValidatedModelAdditional:
-    class NestedModel(ValidatedModel):
-        attr: str
-
-    class ContainerModel(ValidatedModel):
-        items: list["TestValidatedModelAdditional.NestedModel"]
-        other_list: list[str]
-
-    class MockModel(ValidatedModel):
-        field1: str
-        field2: list[str] | None = None
-        field3: list[str] | None = None
-
-    def test_validate_unique_attribute_in_list(self):
-        model = self.ContainerModel(
-            items=[
-                self.NestedModel(attr="value1"),
-                self.NestedModel(attr="value2"),
-            ],
-            other_list=["a", "b"],
-        )
-        model.validate_unique_attribute_in_list("items", "attr")
-
-        model = self.ContainerModel(
-            items=[
-                self.NestedModel(attr="same"),
-                self.NestedModel(attr="same"),
-            ],
-            other_list=["a", "b"],
-        )
-        with pytest.raises(ValueError, match="must be unique across all items"):
-            model.validate_unique_attribute_in_list("items", "attr")
-
 
 
 class TestTheme:
