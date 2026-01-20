@@ -197,7 +197,7 @@ class ThemeGenerationResponses(BaseModel):
             topic_description = ", ".join(t.topic_description for t in themes)
             logger.warning("compressing themes:" + topic_description)
             return Theme(
-                topic_label=themes[0].topic_label,
+                topic_label=themes[0].topic_label.lower().strip(),
                 topic_description="\n".join(t.topic_description for t in themes),
                 position=themes[0].position,
             )

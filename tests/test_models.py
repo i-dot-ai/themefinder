@@ -113,6 +113,8 @@ class TestThemeGenerationResponses:
 
         assert len(theme_generation_responses.responses) == 1
         response = theme_generation_responses.responses[0]
+        assert response.topic_label == "healthcare"
+        assert response.topic_description == "Description 1\nDescription 2"
 
 
 class TestCondensedTheme:
