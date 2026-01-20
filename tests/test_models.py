@@ -15,8 +15,6 @@ from themefinder.models import (
 )
 
 
-
-
 class TestTheme:
     def test_valid_theme(self):
         theme = Theme(

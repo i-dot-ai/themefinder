@@ -1,6 +1,6 @@
 from typing import List, Optional
 from enum import Enum
-from pydantic import BaseModel, Field, model_validator, conlist
+from pydantic import BaseModel, Field, model_validator
 
 
 class Position(str, Enum):
@@ -23,10 +23,6 @@ class EvidenceRich(str, Enum):
 
     YES = "YES"
     NO = "NO"
-
-
-
-
 
 
 class SentimentAnalysisOutput(BaseModel):
@@ -68,7 +64,9 @@ class Theme(BaseModel):
 class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: List[Theme] = Field(..., description="List of extracted themes", min_length=1)
+    responses: List[Theme] = Field(
+        ..., description="List of extracted themes", min_length=1
+    )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
@@ -97,7 +95,9 @@ class CondensedTheme(BaseModel):
 class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: List[CondensedTheme] = Field(..., description="List of condensed themes", min_length=1)
+    responses: List[CondensedTheme] = Field(
+        ..., description="List of condensed themes", min_length=1
+    )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
@@ -112,7 +112,9 @@ class RefinedTheme(BaseModel):
     """Model for a single refined theme"""
 
     topic: str = Field(
-        ..., description="Topic label and description combined with a colon separator", min_length=1
+        ...,
+        description="Topic label and description combined with a colon separator",
+        min_length=1,
     )
     source_topic_count: int = Field(
         ..., gt=0, description="Count of source topics combined"
@@ -147,7 +149,9 @@ class RefinedTheme(BaseModel):
 class ThemeRefinementResponses(BaseModel):
     """Container for all refined themes"""
 
-    responses: List[RefinedTheme] = Field(..., description="List of refined themes", min_length=1)
+    responses: List[RefinedTheme] = Field(
+        ..., description="List of refined themes", min_length=1
+    )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeRefinementResponses":
@@ -164,7 +168,6 @@ class ThemeMappingOutput(BaseModel):
 
     response_id: int = Field(gt=0, description="Response ID, must be greater than 0")
     labels: set[str] = Field(..., description="List of theme labels", min_length=1)
-
 
 
 class ThemeMappingResponses(BaseModel):
@@ -253,11 +256,11 @@ class HierarchicalClusteringResponse(BaseModel):
 
     parent_themes: List[ThemeNode] = Field(
         description="List of parent themes created by merging similar themes",
-        min_length=1
+        min_length=1,
     )
     should_terminate: bool = Field(
         ...,
-        description="True if no more meaningful clustering is possible, false otherwise"
+        description="True if no more meaningful clustering is possible, false otherwise",
     )
 
     @model_validator(mode="after")
