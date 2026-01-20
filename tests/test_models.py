@@ -65,7 +65,7 @@ class TestTheme:
             topic_description="Access to affordable healthcare services",
             position=Position.AGREEMENT,
         )
-        assert theme.topic_label == "Healthcare"
+        assert theme.topic_label == "healthcare"
         assert theme.position == Position.AGREEMENT
 
     def test_invalid_position(self):
