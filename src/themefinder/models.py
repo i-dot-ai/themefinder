@@ -1,6 +1,9 @@
-from typing import List, Optional
+import logging
+from typing import List, Optional, Annotated
 from enum import Enum
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, AfterValidator
+
+logger = logging.getLogger(__file__)
 
 
 class Position(str, Enum):
@@ -46,10 +49,14 @@ class SentimentAnalysisResponses(BaseModel):
         return self
 
 
-class Theme(BaseModel):
+def lower_case_strip_str(value: str) -> str:
+    return value.lower().strip()
+
+
+class Theme(ValidatedModel):
     """Model for a single extracted theme"""
 
-    topic_label: str = Field(
+    topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
         ..., description="Short label summarizing the topic in a few words"
     )
     topic_description: str = Field(
@@ -60,27 +67,49 @@ class Theme(BaseModel):
         description="SENTIMENT ABOUT THIS TOPIC (AGREEMENT, DISAGREEMENT, OR UNCLEAR)",
     )
 
+    class Config:
+        frozen = True
+
 
 class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: List[Theme] = Field(
+    responses: set[Theme] = Field(
         ..., description="List of extracted themes", min_length=1
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
         """Ensure there are no duplicate themes"""
-        labels = [theme.topic_label.lower().strip() for theme in self.responses]
-        if len(labels) != len(set(labels)):
-            raise ValueError("Duplicate topic labels detected")
+        labels = {theme.topic_label for theme in self.responses}
+
+        def _reduce(topic_label: str):
+            themes = list(
+                filter(
+                    lambda x: x.topic_label == topic_label,
+                    self.responses,
+                )
+            )
+            if len(themes) == 1:
+                return themes[0]
+
+            topic_description = ", ".join(t.topic_description for t in themes)
+            logger.warning("compressing themes:" + topic_description)
+            return Theme(
+                topic_label=themes[0].topic_label,
+                topic_description="\n".join(t.topic_description for t in themes),
+                position=themes[0].position,
+            )
+
+        self.responses = [_reduce(label) for label in labels]
+
         return self
 
 
 class CondensedTheme(BaseModel):
     """Model for a single condensed theme"""
 
-    topic_label: str = Field(
+    topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
         ..., description="Representative label for the condensed topic"
     )
     topic_description: str = Field(
@@ -91,20 +120,42 @@ class CondensedTheme(BaseModel):
         ..., gt=0, description="Sum of source_topic_counts from combined topics"
     )
 
+    class Config:
+        frozen = True
+
 
 class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: List[CondensedTheme] = Field(
+    responses: set[CondensedTheme] = Field(
         ..., description="List of condensed themes", min_length=1
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
-        labels = [theme.topic_label.lower().strip() for theme in self.responses]
-        if len(labels) != len(set(labels)):
-            raise ValueError("Duplicate topic labels detected")
+        labels = {theme.topic_label for theme in self.responses}
+
+        def _reduce(topic_label: str) -> CondensedTheme:
+            themes = list(
+                filter(
+                    lambda x: x.topic_label == topic_label,
+                    self.responses,
+                )
+            )
+            if len(themes) == 1:
+                return themes[0]
+
+            topic_description = "\n".join(t.topic_description for t in themes)
+            logger.warning("compressing themes: " + topic_description)
+            return CondensedTheme(
+                topic_label=themes[0].topic_label,
+                topic_description="\n".join(t.topic_description for t in themes),
+                source_topic_count=sum(t.source_topic_count for t in themes),
+            )
+
+        self.responses = [_reduce(label) for label in labels]
+
         return self
 
 
