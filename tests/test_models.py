@@ -49,13 +49,6 @@ class TestValidatedModelAdditional:
         with pytest.raises(ValueError, match="must be unique across all items"):
             model.validate_unique_attribute_in_list("items", "attr")
 
-    def test_validate_equal_lengths(self):
-        model = self.MockModel(field1="test", field2=["a", "b"], field3=["x", "y"])
-        model.validate_equal_lengths("field2", "field3")
-
-        model = self.MockModel(field1="test", field2=["a", "b"], field3=["x"])
-        with pytest.raises(ValueError, match="must all have the same length"):
-            model.validate_equal_lengths("field2", "field3")
 
 
 class TestTheme:

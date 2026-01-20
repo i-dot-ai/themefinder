@@ -99,30 +99,6 @@ class ValidatedModel(BaseModel):
             )
         return self
 
-    def validate_equal_lengths(self, *field_names) -> "ValidatedModel":
-        """
-        Validate that multiple list fields have the same length.
-
-        Args:
-            *field_names: Variable number of field names to check for equal lengths
-        """
-        if len(field_names) < 2:
-            return self
-        lengths = []
-        for field_name in field_names:
-            if not hasattr(self, field_name):
-                raise ValueError(f"Field '{field_name}' does not exist")
-
-            items = getattr(self, field_name)
-            if not isinstance(items, list):
-                raise ValueError(f"Field '{field_name}' is not a list")
-
-            lengths.append(len(items))
-        if len(set(lengths)) > 1:
-            raise ValueError(
-                f"Fields {', '.join(field_names)} must all have the same length"
-            )
-        return self
 
     @model_validator(mode="after")
     def run_validations(self) -> "ValidatedModel":
