@@ -4,7 +4,6 @@ from pydantic import ValidationError
 from themefinder.models import (
     Position,
     EvidenceRich,
-    ValidatedModel,
     Theme,
     ThemeGenerationResponses,
     CondensedTheme,
