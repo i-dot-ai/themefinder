@@ -114,7 +114,10 @@ class TestThemeGenerationResponses:
         assert len(theme_generation_responses.responses) == 1
         response = theme_generation_responses.responses[0]
         assert response.topic_label == "healthcare"
-        assert response.topic_description == "Description 1\nDescription 2"
+        assert set(response.topic_description.split("\n")) == {
+            "Description 1",
+            "Description 2",
+        }
 
 
 class TestCondensedTheme:
@@ -172,7 +175,10 @@ class TestThemeCondensationResponses:
         assert len(theme_condensation_responses.responses) == 1
         response = theme_condensation_responses.responses[0]
         assert response.topic_label == "healthcare"
-        assert response.topic_description == "Description 1\nDescription 2"
+        assert set(response.topic_description.split("\n")) == {
+            "Description 1",
+            "Description 2",
+        }
         assert response.source_topic_count == 3
 
 

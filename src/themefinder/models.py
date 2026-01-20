@@ -175,11 +175,14 @@ class Theme(ValidatedModel):
         description="SENTIMENT ABOUT THIS TOPIC (AGREEMENT, DISAGREEMENT, OR UNCLEAR)",
     )
 
+    class Config:
+        frozen = True
+
 
 class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: list[Theme] = Field(
+    responses: set[Theme] = Field(
         ..., description="List of extracted themes", min_length=1
     )
 
@@ -225,11 +228,14 @@ class CondensedTheme(ValidatedModel):
         ..., gt=0, description="Sum of source_topic_counts from combined topics"
     )
 
+    class Config:
+        frozen = True
+
 
 class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: list[CondensedTheme] = Field(
+    responses: set[CondensedTheme] = Field(
         ..., description="List of condensed themes", min_length=1
     )
 
