@@ -1,6 +1,6 @@
-from typing import List, Optional
+from typing import List, Optional, Annotated
 from enum import Enum
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, AfterValidator
 
 
 class Position(str, Enum):
@@ -184,10 +184,14 @@ class ThemeGenerationResponses(ValidatedModel):
         return self
 
 
+def lower_stripped_topic_label(value: str) -> str:
+    return value.lower().strip()
+
+
 class CondensedTheme(ValidatedModel):
     """Model for a single condensed theme"""
 
-    topic_label: str = Field(
+    topic_label: Annotated[str, AfterValidator(lower_stripped_topic_label)] = Field(
         ..., description="Representative label for the condensed topic"
     )
     topic_description: str = Field(
@@ -198,19 +202,19 @@ class CondensedTheme(ValidatedModel):
         ..., gt=0, description="Sum of source_topic_counts from combined topics"
     )
 
+def unique_responses(responses: list[CondensedTheme]) -> list[CondensedTheme]:
+    topic_labels = {theme.topic_label for theme in responses}
+    return [next(response for response in responses if response.topic_label == topic_label) for topic_label in topic_labels]
 
 class ThemeCondensationResponses(ValidatedModel):
     """Container for all condensed themes"""
 
-    responses: List[CondensedTheme] = Field(..., description="List of condensed themes")
+    responses: Annotated[List[CondensedTheme], AfterValidator(unique_responses)] = Field(..., description="List of condensed themes")
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
         self.validate_non_empty_fields()
-        labels = [theme.topic_label.lower().strip() for theme in self.responses]
-        if len(labels) != len(set(labels)):
-            raise ValueError("Duplicate topic labels detected")
         return self
 
 
