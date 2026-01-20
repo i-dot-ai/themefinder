@@ -1,6 +1,9 @@
+import logging
 from typing import List, Optional
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__file__)
 
 
 class Position(str, Enum):
@@ -169,20 +172,26 @@ class Theme(ValidatedModel):
     )
 
 
-class ThemeGenerationResponses(ValidatedModel):
+class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: List[Theme] = Field(..., description="List of extracted themes")
+    responses: list[Theme] = Field(
+        ..., description="List of extracted themes", min_length=1
+    )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
         """Ensure there are no duplicate themes"""
-        self.validate_non_empty_fields()
-        labels = [theme.topic_label.lower().strip() for theme in self.responses]
-        if len(labels) != len(set(labels)):
-            raise ValueError("Duplicate topic labels detected")
-        return self
+        labels = {theme.topic_label.lower().strip() for theme in self.responses}
+        grouped_themes = [[response for response in self.responses if response.topic_label.lower().strip() == label] for label in labels]
+        def _reduce(themes: list[Theme]):
+            topic_description = ", ".join(t.topic_description for t in themes)
+            logger.warning("compressing themes:" + topic_description)
+            return Theme(topic_label=themes[0].topic_label, topic_description="\n".join(t.topic_description for t in themes), position=themes[0].position)
 
+        self.responses = list(map(_reduce, grouped_themes))
+
+        return self
 
 class CondensedTheme(ValidatedModel):
     """Model for a single condensed theme"""
@@ -199,18 +208,31 @@ class CondensedTheme(ValidatedModel):
     )
 
 
-class ThemeCondensationResponses(ValidatedModel):
+class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: List[CondensedTheme] = Field(..., description="List of condensed themes")
+    responses: list[CondensedTheme] = Field(
+        ..., description="List of condensed themes", min_length=1
+    )
+
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
-        self.validate_non_empty_fields()
-        labels = [theme.topic_label.lower().strip() for theme in self.responses]
-        if len(labels) != len(set(labels)):
-            raise ValueError("Duplicate topic labels detected")
+        labels = {theme.topic_label.lower().strip() for theme in self.responses}
+        grouped_themes = [[response for response in self.responses if response.topic_label.lower().strip() == label] for label in labels]
+
+        def _reduce(themes: list[Theme]):
+            topic_description = "\n".join(t.topic_description for t in themes)
+            logger.warning("compressing themes:" + topic_description)
+            return CondensedTheme(
+                topic_label=themes[0].topic_label,
+                topic_description="\n".join(t.topic_description for t in themes),
+                source_topic_count=sum(t.source_topic_count for t in themes),
+            )
+
+        self.responses = list(map(_reduce, grouped_themes))
+
         return self
 
 
