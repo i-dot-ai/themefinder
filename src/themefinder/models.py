@@ -202,9 +202,17 @@ class CondensedTheme(ValidatedModel):
         ..., gt=0, description="Sum of source_topic_counts from combined topics"
     )
 
+def get_response_with_max_topic_count(responses: list[CondensedTheme], topic_label: str) -> CondensedTheme:
+    topic_responses = filter(lambda x: x.topic_label == topic_label, responses)
+    return max(topic_responses, key=lambda x: x.source_topic_count)
+
 def unique_responses(responses: list[CondensedTheme]) -> list[CondensedTheme]:
     topic_labels = {theme.topic_label for theme in responses}
-    return [next(response for response in responses if response.topic_label == topic_label) for topic_label in topic_labels]
+
+    return [
+        get_response_with_max_topic_count(responses, topic_label)
+        for topic_label in topic_labels
+    ]
 
 class ThemeCondensationResponses(ValidatedModel):
     """Container for all condensed themes"""

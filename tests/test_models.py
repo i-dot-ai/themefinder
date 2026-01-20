@@ -166,7 +166,10 @@ class TestThemeCondensationResponses:
             )
 
         assert len(theme_condensation_responses.responses) == 1
-        assert theme_condensation_responses.responses[0].topic_label == "healthcare"
+        response = theme_condensation_responses.responses[0]
+        assert response.topic_label == "healthcare"
+        assert response.source_topic_count == 2
+        assert response.topic_description == "Description 2"
 
 
 class TestRefinedTheme:
