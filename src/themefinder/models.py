@@ -183,15 +183,29 @@ class ThemeGenerationResponses(BaseModel):
     def run_validations(self) -> "ThemeGenerationResponses":
         """Ensure there are no duplicate themes"""
         labels = {theme.topic_label.lower().strip() for theme in self.responses}
-        grouped_themes = [[response for response in self.responses if response.topic_label.lower().strip() == label] for label in labels]
-        def _reduce(themes: list[Theme]):
+
+        def _reduce(topic_label: str):
+            themes = list(
+                filter(
+                    lambda x: x.topic_label.lower().strip() == topic_label,
+                    self.responses,
+                )
+            )
+            if len(themes) == 1:
+                return themes[0]
+
             topic_description = ", ".join(t.topic_description for t in themes)
             logger.warning("compressing themes:" + topic_description)
-            return Theme(topic_label=themes[0].topic_label, topic_description="\n".join(t.topic_description for t in themes), position=themes[0].position)
+            return Theme(
+                topic_label=themes[0].topic_label,
+                topic_description="\n".join(t.topic_description for t in themes),
+                position=themes[0].position,
+            )
 
-        self.responses = list(map(_reduce, grouped_themes))
+        self.responses = [_reduce(label) for label in labels]
 
         return self
+
 
 class CondensedTheme(ValidatedModel):
     """Model for a single condensed theme"""
@@ -215,23 +229,30 @@ class ThemeCondensationResponses(BaseModel):
         ..., description="List of condensed themes", min_length=1
     )
 
-
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
         labels = {theme.topic_label.lower().strip() for theme in self.responses}
-        grouped_themes = [[response for response in self.responses if response.topic_label.lower().strip() == label] for label in labels]
 
-        def _reduce(themes: list[Theme]):
+        def _reduce(topic_label: str) -> CondensedTheme:
+            themes = list(
+                filter(
+                    lambda x: x.topic_label.lower().strip() == topic_label,
+                    self.responses,
+                )
+            )
+            if len(themes) == 1:
+                return themes[0]
+
             topic_description = "\n".join(t.topic_description for t in themes)
-            logger.warning("compressing themes:" + topic_description)
+            logger.warning("compressing themes: " + topic_description)
             return CondensedTheme(
-                topic_label=themes[0].topic_label,
+                topic_label=themes[0].topic_label.lower().strip(),
                 topic_description="\n".join(t.topic_description for t in themes),
                 source_topic_count=sum(t.source_topic_count for t in themes),
             )
 
-        self.responses = list(map(_reduce, grouped_themes))
+        self.responses = [_reduce(label) for label in labels]
 
         return self
 
