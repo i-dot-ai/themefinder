@@ -272,6 +272,7 @@ async def theme_condensation(
         logger.info(
             f"{n_themes} larger than batch size, using recursive theme condensation"
         )
+        original_count = len(themes_df)
         themes_df, _ = await batch_and_run(
             themes_df,
             prompt_template,
@@ -282,6 +283,8 @@ async def theme_condensation(
             concurrency=concurrency,
             **kwargs,
         )
+        compressed = len(themes_df)
+        logger.info(f"compressed {original_count} -> {compressed}")
         themes_df = themes_df.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
         if len(themes_df) == n_themes:

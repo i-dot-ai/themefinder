@@ -182,35 +182,14 @@ class Theme(ValidatedModel):
 class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: set[Theme] = Field(
-        ..., description="List of extracted themes", min_length=1
+    responses: list[str] = Field(
+        ..., description="List of extracted themes", min_length=1, max_length=100
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
         """Ensure there are no duplicate themes"""
-        labels = {theme.topic_label for theme in self.responses}
-
-        def _reduce(topic_label: str):
-            themes = list(
-                filter(
-                    lambda x: x.topic_label == topic_label,
-                    self.responses,
-                )
-            )
-            if len(themes) == 1:
-                return themes[0]
-
-            topic_description = ", ".join(t.topic_description for t in themes)
-            logger.warning("compressing themes:" + topic_description)
-            return Theme(
-                topic_label=themes[0].topic_label,
-                topic_description="\n".join(t.topic_description for t in themes),
-                position=themes[0].position,
-            )
-
-        self.responses = [_reduce(label) for label in labels]
-
+        self.responses = list(set(self.responses))
         return self
 
 
@@ -235,13 +214,19 @@ class CondensedTheme(ValidatedModel):
 class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: set[CondensedTheme] = Field(
-        ..., description="List of condensed themes", min_length=1
+    responses: list[CondensedTheme] = Field(
+        ..., description="List of condensed themes", min_length=1, max_length=100
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
+        # 1. perform a naive dedupe (yes, the llm gets this wrong)
+        self.responses = list(set(self.responses))
+
+        # 2
+        # 743, 510, 356, 287, 268, 251, 241, 217, 158, 138, 137
+        # 798, 619,
         labels = {theme.topic_label for theme in self.responses}
 
         def _reduce(topic_label: str) -> CondensedTheme:
@@ -254,13 +239,9 @@ class ThemeCondensationResponses(BaseModel):
             if len(themes) == 1:
                 return themes[0]
 
-            topic_description = "\n".join(t.topic_description for t in themes)
+            topic_description = " ".join({t.topic_description for t in themes})
             logger.warning("compressing themes: " + topic_description)
-            return CondensedTheme(
-                topic_label=themes[0].topic_label,
-                topic_description="\n".join(t.topic_description for t in themes),
-                source_topic_count=sum(t.source_topic_count for t in themes),
-            )
+            return themes[0]
 
         self.responses = [_reduce(label) for label in labels]
 

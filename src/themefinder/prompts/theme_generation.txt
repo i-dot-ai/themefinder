@@ -31,6 +31,8 @@ EXAMPLE OUTPUT (showing the structure)
 - Topic 2: Regressive change (The change would have a larger negative impact on poorer people) - DISAGREEMENT
 - Topic 3: Health (The change would result in people eating healthier diets) - DISAGREEMENT
 
+You should output no more than 50 themes, combine them where necessary.
+
 QUESTION:
 {question}
 

@@ -27,6 +27,8 @@ For each topic in your output:
 2. Write a concise description that incorporates key insights from all constituent topics, this should only be a single sentence
 3. Include the total count of original topics combined by summing the source_topic_counts of merged topics (or 1 for topics without a count)
 
+You expect to halve the number of themes, combine them where necessary.
+
 QUESTION:
 {question}
 
