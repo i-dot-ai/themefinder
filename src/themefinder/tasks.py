@@ -287,9 +287,6 @@ async def theme_condensation(
         logger.info(f"compressed {original_count} -> {compressed}")
         themes_df = themes_df.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
-        if len(themes_df) == n_themes:
-            logger.info("Themes no longer being condensed")
-            break
         n_themes = themes_df.shape[0]
 
     themes_df, _ = await batch_and_run(

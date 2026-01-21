@@ -8,7 +8,7 @@ Your task is to analyze the RESPONSES below and extract TOPICS such that:
 3. Each topic has a topic_label which summarizes the topic in a few words
 4. Each topic has a topic_description which gives more detail about the topic in one or two sentences
 5. The position field should just be the sentiment stated, and is either "AGREEMENT" or "DISAGREEMENT" or "UNCLEAR"
-6. There should be no duplicate topics 
+6. There should be no duplicate topics
 
 The topics identified will be used by policy makers to understand what the public like and don't like about the proposals. 
 
@@ -30,8 +30,6 @@ EXAMPLE OUTPUT (showing the structure)
 - Topic 1: Government overreach (The proposals would result in government interfering too much with citizen's lives) - DISAGREEMENT
 - Topic 2: Regressive change (The change would have a larger negative impact on poorer people) - DISAGREEMENT
 - Topic 3: Health (The change would result in people eating healthier diets) - DISAGREEMENT
-
-You should output no more than 50 themes, combine them where necessary.
 
 QUESTION:
 {question}

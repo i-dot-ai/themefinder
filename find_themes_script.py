@@ -48,7 +48,9 @@ def download_s3_subdir(subdir: str) -> None:
     inputs_prefix = str(Path(BASE_PREFIX) / subdir / "inputs").rstrip("/") + "/"
     logger.info("S3 inputs prefix: %s", inputs_prefix)
     pages = paginator.paginate(Bucket=BUCKET_NAME, Prefix=inputs_prefix)
-    logger.info("Created paginator for bucket: %s with prefix: %s", BUCKET_NAME, inputs_prefix)
+    logger.info(
+        "Created paginator for bucket: %s with prefix: %s", BUCKET_NAME, inputs_prefix
+    )
 
     for page in pages:
         contents = page.get("Contents", [])
@@ -76,7 +78,9 @@ def upload_directory_to_s3(local_path: str) -> None:
             local_file_path = Path(root) / file
             s3_key = str(Path(BASE_PREFIX) / local_file_path).replace("\\", "/")
             s3.upload_file(str(local_file_path), BUCKET_NAME, s3_key)
-            logger.info("Uploaded %s to s3://%s/%s", local_file_path, BUCKET_NAME, s3_key)
+            logger.info(
+                "Uploaded %s to s3://%s/%s", local_file_path, BUCKET_NAME, s3_key
+            )
 
 
 def load_question(consultation_dir: str, question_dir: str) -> tuple:
@@ -91,7 +95,9 @@ def load_question(consultation_dir: str, question_dir: str) -> tuple:
         tuple: (question text, dataframe of responses)
     """
     question_path = Path(consultation_dir) / "inputs" / question_dir / "question.json"
-    responses_path = Path(consultation_dir) / "inputs" / question_dir / "responses.jsonl"
+    responses_path = (
+        Path(consultation_dir) / "inputs" / question_dir / "responses.jsonl"
+    )
 
     with question_path.open() as f:
         question = json.load(f)["question_text"]
@@ -102,7 +108,9 @@ def load_question(consultation_dir: str, question_dir: str) -> tuple:
         for line in f:
             responses.append(json.loads(line))
     responses_df = pd.DataFrame(responses)
-    responses = responses_df.rename(columns={"themefinder_id": "response_id", "text": "response"})
+    responses = responses_df.rename(
+        columns={"themefinder_id": "response_id", "text": "response"}
+    )
     return question, responses
 
 
@@ -117,7 +125,9 @@ async def generate_themes(question: str, responses_df):
     Returns:
         pd.DataFrame: DataFrame containing refined themes
     """
-    theme_df, _ = await theme_generation(responses_df, llm, question=question, partition_key=None)
+    theme_df, _ = await theme_generation(
+        responses_df, llm, question=question, partition_key=None
+    )
 
     condensed_theme_df, _ = await theme_condensation(
         theme_df,
@@ -158,9 +168,9 @@ def agentic_theme_clustering(
     pd.DataFrame
         All themes from clustering
     """
-    refined_themes_df[["topic_label", "topic_description"]] = refined_themes_df["topic"].str.split(
-        ":", n=1, expand=True
-    )
+    refined_themes_df[["topic_label", "topic_description"]] = refined_themes_df[
+        "topic"
+    ].str.split(":", n=1, expand=True)
 
     initial_themes = [
         ThemeNode(
@@ -219,7 +229,11 @@ async def process_consultation(consultation_dir: str, llm) -> str:
             try:
                 # Create question-specific directory in the datestamped folder
                 question_output_dir = (
-                    Path(consultation_dir) / "outputs" / "sign_off" / date / question_dir
+                    Path(consultation_dir)
+                    / "outputs"
+                    / "sign_off"
+                    / date
+                    / question_dir
                 )
                 if not question_output_dir.exists():
                     question_output_dir.mkdir(parents=True, exist_ok=True)
@@ -246,7 +260,9 @@ async def process_consultation(consultation_dir: str, llm) -> str:
                 if len(refined_themes_df) > 20:
                     all_themes_df = agentic_theme_clustering(refined_themes_df, llm)
                     if all_themes_df is not None:
-                        all_themes_list = [ThemeNode(**row) for _, row in all_themes_df.iterrows()]
+                        all_themes_list = [
+                            ThemeNode(**row) for _, row in all_themes_df.iterrows()
+                        ]
                     else:
                         logger.info("Clustering failed, using unclustered themes")
                         all_themes_list = [
@@ -256,14 +272,21 @@ async def process_consultation(consultation_dir: str, llm) -> str:
                 else:
                     logger.info("Fewer than 20 themes, clustering not required")
                     all_themes_list = [
-                        refined_themes_to_theme_node(row) for _, row in refined_themes_df.iterrows()
+                        refined_themes_to_theme_node(row)
+                        for _, row in refined_themes_df.iterrows()
                     ]
 
-                with open(os.path.join(question_output_dir, "clustered_themes.json"), "w") as f:
-                    f.write(ThemeNodeList(theme_nodes=all_themes_list).model_dump_json())
+                with open(
+                    os.path.join(question_output_dir, "clustered_themes.json"), "w"
+                ) as f:
+                    f.write(
+                        ThemeNodeList(theme_nodes=all_themes_list).model_dump_json()
+                    )
 
                 logger.info(
-                    "Completed processing %s, saved to %s", question_dir, question_output_dir
+                    "Completed processing %s, saved to %s",
+                    question_dir,
+                    question_output_dir,
                 )
             except Exception:
                 logger.exception("Error processing %s", question_dir)

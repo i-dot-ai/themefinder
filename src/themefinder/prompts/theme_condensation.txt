@@ -6,8 +6,8 @@ This list contains a large number of duplicate and redundant topics that present
 
 Each topic has a topic_label, topic_description, and may have a source_topic_count field indicating how many original topics it represents.
 
-Your task is to analyze these topics and produce a refined list that:
-1. Significantly reduces the total number of topics
+Your task is to analyze these topics and produce a compressed list that:
+1. Is at least half the length of the original
 2. Identifies and preserves core themes that appear frequently
 3. Combines redundant topics
 4. Tracks the total number of original topics combined into each new topic
@@ -26,8 +26,6 @@ For each topic in your output:
 1. Choose a clear, representative label that captures the essence of the combined or preserved topic
 2. Write a concise description that incorporates key insights from all constituent topics, this should only be a single sentence
 3. Include the total count of original topics combined by summing the source_topic_counts of merged topics (or 1 for topics without a count)
-
-You expect to halve the number of themes, combine them where necessary.
 
 QUESTION:
 {question}
