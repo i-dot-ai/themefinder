@@ -285,8 +285,19 @@ async def theme_condensation(
         themes_df = themes_df.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
 
+    themes_df, _ = await batch_and_run(
+        themes_df,
+        prompt_template,
+        llm.with_structured_output(ThemeCondensationResponses),
+        batch_size=batch_size,
+        question=question,
+        system_prompt=system_prompt,
+        concurrency=concurrency,
+        **kwargs,
+    )
+
     logger.info(f"Final number of condensed themes: {themes_df.shape[0]}")
-    return themes_df, pd.DataFrame()
+    return themes_df, _
 
 
 def theme_clustering(
