@@ -286,7 +286,7 @@ async def theme_condensation(
         themes_df["response_id"] = themes_df.index + 1
 
     logger.info(f"Final number of condensed themes: {themes_df.shape[0]}")
-    return themes_df, _
+    return themes_df, None
 
 
 def theme_clustering(
