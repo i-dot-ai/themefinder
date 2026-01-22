@@ -53,7 +53,7 @@ def lower_case_strip_str(value: str) -> str:
     return value.lower().strip()
 
 
-class Theme(ValidatedModel):
+class Theme(BaseModel):
     """Model for a single extracted theme"""
 
     topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
@@ -74,13 +74,15 @@ class Theme(ValidatedModel):
 class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: set[Theme] = Field(
+    responses: list[Theme] = Field(
         ..., description="List of extracted themes", min_length=1
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
         """Ensure there are no duplicate themes"""
+        self.responses = list(set(self.responses))
+
         labels = {theme.topic_label for theme in self.responses}
 
         def _reduce(topic_label: str):
@@ -127,13 +129,15 @@ class CondensedTheme(BaseModel):
 class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: set[CondensedTheme] = Field(
+    responses: list[CondensedTheme] = Field(
         ..., description="List of condensed themes", min_length=1
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
+        self.responses = list(set(self.responses))
+
         labels = {theme.topic_label for theme in self.responses}
 
         def _reduce(topic_label: str) -> CondensedTheme:
