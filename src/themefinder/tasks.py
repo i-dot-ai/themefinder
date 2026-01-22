@@ -288,9 +288,11 @@ async def theme_condensation(
         themes_df["response_id"] = themes_df.index + 1
 
         if len(themes_df) == original_theme_count:
-            retry +=1
+            retry += 1
             if retry > 3:
-                logging.warning("failed to reduce the number of themes after 3 attempts")
+                logging.warning(
+                    "failed to reduce the number of themes after 3 attempts"
+                )
                 break
         else:
             retry = 0
