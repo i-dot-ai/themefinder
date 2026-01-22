@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "themefinder"
-version = "0.7.5"
+version = "0.7.7"
 description = "A topic modelling Python package designed for analysing one-to-many question-answer data eg free-text survey responses."
 authors = ["i.AI <packages@cabinetoffice.gov.uk>"]
 packages = [{include = "themefinder", from = "src"}]
