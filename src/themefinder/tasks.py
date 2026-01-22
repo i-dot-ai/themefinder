@@ -267,10 +267,12 @@ async def theme_condensation(
     logger.info(f"Running theme condensation on {len(themes_df)} themes")
     themes_df["response_id"] = themes_df.index + 1
 
-    n_themes = themes_df.shape[0]
-    while n_themes > batch_size:
+    target = 50
+    retry = 0
+    while len(themes_df) > target:
+        original_theme_count = len(themes_df)
         logger.info(
-            f"{n_themes} larger than batch size, using recursive theme condensation"
+            f"{len(themes_df)} larger than {target}, using recursive theme condensation"
         )
         themes_df, _ = await batch_and_run(
             themes_df,
@@ -284,10 +286,16 @@ async def theme_condensation(
         )
         themes_df = themes_df.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
-        if len(themes_df) == n_themes:
-            logger.info("Themes no longer being condensed")
-            break
-        n_themes = themes_df.shape[0]
+
+        if len(themes_df) == original_theme_count:
+            retry += 1
+            if retry > 3:
+                logging.warning(
+                    "failed to reduce the number of themes after 3 attempts"
+                )
+                break
+        else:
+            retry = 0
 
     themes_df, _ = await batch_and_run(
         themes_df,

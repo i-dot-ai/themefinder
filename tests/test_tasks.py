@@ -218,7 +218,7 @@ async def test_theme_condensation_recursive(mock_llm):
 
         assert isinstance(result_df, pd.DataFrame)
         assert len(result_df) == 25
-        assert mock_call_llm.await_count == 3
+        assert mock_call_llm.await_count == 2
 
 
 @pytest.mark.asyncio
@@ -260,7 +260,7 @@ async def test_theme_condensation_no_further_reduction(mock_llm):
             themes_df, mock_llm, question="test question", batch_size=2
         )
 
-        assert mock_call_llm.await_count == 2
+        assert mock_call_llm.await_count == 1
         assert len(result_df) == 3
         original_labels = set(themes_df["topic_label"])
         result_labels = set(result_df["topic_label"])

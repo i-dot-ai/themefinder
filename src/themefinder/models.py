@@ -182,13 +182,15 @@ class Theme(ValidatedModel):
 class ThemeGenerationResponses(BaseModel):
     """Container for all extracted themes"""
 
-    responses: set[Theme] = Field(
+    responses: list[Theme] = Field(
         ..., description="List of extracted themes", min_length=1
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
         """Ensure there are no duplicate themes"""
+        self.responses = list(set(self.responses))
+
         labels = {theme.topic_label for theme in self.responses}
 
         def _reduce(topic_label: str):
@@ -201,7 +203,7 @@ class ThemeGenerationResponses(BaseModel):
             if len(themes) == 1:
                 return themes[0]
 
-            topic_description = ", ".join(t.topic_description for t in themes)
+            topic_description = " ".join(t.topic_description for t in themes)
             logger.warning("compressing themes:" + topic_description)
             return Theme(
                 topic_label=themes[0].topic_label,
@@ -235,13 +237,15 @@ class CondensedTheme(ValidatedModel):
 class ThemeCondensationResponses(BaseModel):
     """Container for all condensed themes"""
 
-    responses: set[CondensedTheme] = Field(
+    responses: list[CondensedTheme] = Field(
         ..., description="List of condensed themes", min_length=1
     )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeCondensationResponses":
         """Ensure there are no duplicate themes"""
+        self.responses = list(set(self.responses))
+
         labels = {theme.topic_label for theme in self.responses}
 
         def _reduce(topic_label: str) -> CondensedTheme:
@@ -254,7 +258,7 @@ class ThemeCondensationResponses(BaseModel):
             if len(themes) == 1:
                 return themes[0]
 
-            topic_description = "\n".join(t.topic_description for t in themes)
+            topic_description = " ".join(t.topic_description for t in themes)
             logger.warning("compressing themes: " + topic_description)
             return CondensedTheme(
                 topic_label=themes[0].topic_label,
