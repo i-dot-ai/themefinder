@@ -28,129 +28,21 @@ class EvidenceRich(str, Enum):
     NO = "NO"
 
 
-class ValidatedModel(BaseModel):
-    """Base model with common validation methods"""
-
-    def validate_non_empty_fields(self) -> "ValidatedModel":
-        """
-        Validate that all string fields are non-empty and all list fields are not empty.
-        """
-        for field_name, value in self.__dict__.items():
-            if isinstance(value, str) and not value.strip():
-                raise ValueError(f"{field_name} cannot be empty or only whitespace")
-            if isinstance(value, list) and not value:
-                raise ValueError(f"{field_name} cannot be an empty list")
-            if isinstance(value, list):
-                for i, item in enumerate(value):
-                    if isinstance(item, str) and not item.strip():
-                        raise ValueError(
-                            f"Item {i} in {field_name} cannot be empty or only whitespace"
-                        )
-        return self
-
-    def validate_unique_items(
-        self, field_name: str, transform_func: Optional[callable] = None
-    ) -> "ValidatedModel":
-        """
-        Validate that a field contains unique values.
-
-        Args:
-            field_name: The name of the field to check for uniqueness
-            transform_func: Optional function to transform items before checking uniqueness
-                           (e.g., lowercasing strings)
-        """
-        if not hasattr(self, field_name):
-            raise ValueError(f"Field '{field_name}' does not exist")
-        items = getattr(self, field_name)
-        if not isinstance(items, list):
-            raise ValueError(f"Field '{field_name}' is not a list")
-        if transform_func:
-            transformed_items = [transform_func(item) for item in items]
-        else:
-            transformed_items = items
-        if len(transformed_items) != len(set(transformed_items)):
-            raise ValueError(f"'{field_name}' must contain unique values")
-        return self
-
-    def validate_unique_attribute_in_list(
-        self, list_field: str, attr_name: str
-    ) -> "ValidatedModel":
-        """
-        Validate that an attribute across all objects in a list field is unique.
-
-        Args:
-            list_field: The name of the list field containing objects
-            attr_name: The attribute within each object to check for uniqueness
-        """
-        if not hasattr(self, list_field):
-            raise ValueError(f"Field '{list_field}' does not exist")
-
-        items = getattr(self, list_field)
-        if not isinstance(items, list):
-            raise ValueError(f"Field '{list_field}' is not a list")
-
-        attr_values = []
-        for item in items:
-            if not hasattr(item, attr_name):
-                raise ValueError(
-                    f"Item in '{list_field}' does not have attribute '{attr_name}'"
-                )
-            attr_values.append(getattr(item, attr_name))
-        if len(attr_values) != len(set(attr_values)):
-            raise ValueError(
-                f"'{attr_name}' must be unique across all items in '{list_field}'"
-            )
-        return self
-
-    def validate_equal_lengths(self, *field_names) -> "ValidatedModel":
-        """
-        Validate that multiple list fields have the same length.
-
-        Args:
-            *field_names: Variable number of field names to check for equal lengths
-        """
-        if len(field_names) < 2:
-            return self
-        lengths = []
-        for field_name in field_names:
-            if not hasattr(self, field_name):
-                raise ValueError(f"Field '{field_name}' does not exist")
-
-            items = getattr(self, field_name)
-            if not isinstance(items, list):
-                raise ValueError(f"Field '{field_name}' is not a list")
-
-            lengths.append(len(items))
-        if len(set(lengths)) > 1:
-            raise ValueError(
-                f"Fields {', '.join(field_names)} must all have the same length"
-            )
-        return self
-
-    @model_validator(mode="after")
-    def run_validations(self) -> "ValidatedModel":
-        """
-        Run common validations. Override in subclasses to add specific validations.
-        """
-        return self.validate_non_empty_fields()
-
-
-class SentimentAnalysisOutput(ValidatedModel):
+class SentimentAnalysisOutput(BaseModel):
     """Model for sentiment analysis output"""
 
     response_id: int = Field(gt=0)
     position: Position
 
 
-class SentimentAnalysisResponses(ValidatedModel):
+class SentimentAnalysisResponses(BaseModel):
     """Container for all sentiment analysis responses"""
 
-    responses: List[SentimentAnalysisOutput]
+    responses: List[SentimentAnalysisOutput] = Field(min_length=1)
 
     @model_validator(mode="after")
     def run_validations(self) -> "SentimentAnalysisResponses":
         """Validate that response_ids are unique"""
-        self.validate_non_empty_fields()
         response_ids = [resp.response_id for resp in self.responses]
         if len(response_ids) != len(set(response_ids)):
             raise ValueError("Response IDs must be unique")
@@ -161,7 +53,7 @@ def lower_case_strip_str(value: str) -> str:
     return value.lower().strip()
 
 
-class Theme(ValidatedModel):
+class Theme(BaseModel):
     """Model for a single extracted theme"""
 
     topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
@@ -216,7 +108,7 @@ class ThemeGenerationResponses(BaseModel):
         return self
 
 
-class CondensedTheme(ValidatedModel):
+class CondensedTheme(BaseModel):
     """Model for a single condensed theme"""
 
     topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
@@ -271,11 +163,13 @@ class ThemeCondensationResponses(BaseModel):
         return self
 
 
-class RefinedTheme(ValidatedModel):
+class RefinedTheme(BaseModel):
     """Model for a single refined theme"""
 
     topic: str = Field(
-        ..., description="Topic label and description combined with a colon separator"
+        ...,
+        description="Topic label and description combined with a colon separator",
+        min_length=1,
     )
     source_topic_count: int = Field(
         ..., gt=0, description="Count of source topics combined"
@@ -284,7 +178,6 @@ class RefinedTheme(ValidatedModel):
     @model_validator(mode="after")
     def run_validations(self) -> "RefinedTheme":
         """Run all validations for RefinedTheme"""
-        self.validate_non_empty_fields()
         self.validate_topic_format()
         return self
 
@@ -308,15 +201,16 @@ class RefinedTheme(ValidatedModel):
         return self
 
 
-class ThemeRefinementResponses(ValidatedModel):
+class ThemeRefinementResponses(BaseModel):
     """Container for all refined themes"""
 
-    responses: List[RefinedTheme] = Field(..., description="List of refined themes")
+    responses: List[RefinedTheme] = Field(
+        ..., description="List of refined themes", min_length=1
+    )
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeRefinementResponses":
         """Ensure there are no duplicate themes"""
-        self.validate_non_empty_fields()
         topics = [theme.topic.lower().strip() for theme in self.responses]
         if len(topics) != len(set(topics)):
             raise ValueError("Duplicate topics detected")
@@ -324,27 +218,18 @@ class ThemeRefinementResponses(ValidatedModel):
         return self
 
 
-class ThemeMappingOutput(ValidatedModel):
+class ThemeMappingOutput(BaseModel):
     """Model for theme mapping output"""
 
     response_id: int = Field(gt=0, description="Response ID, must be greater than 0")
-    labels: List[str] = Field(..., description="List of theme labels")
-
-    @model_validator(mode="after")
-    def run_validations(self) -> "ThemeMappingOutput":
-        """
-        Run all validations for ThemeMappingOutput.
-        """
-        self.validate_non_empty_fields()
-        self.validate_unique_items("labels")
-        return self
+    labels: set[str] = Field(..., description="List of theme labels", min_length=1)
 
 
-class ThemeMappingResponses(ValidatedModel):
+class ThemeMappingResponses(BaseModel):
     """Container for all theme mapping responses"""
 
     responses: List[ThemeMappingOutput] = Field(
-        ..., description="List of theme mapping outputs"
+        ..., description="List of theme mapping outputs", min_length=1
     )
 
     @model_validator(mode="after")
@@ -352,14 +237,13 @@ class ThemeMappingResponses(ValidatedModel):
         """
         Validate that response_ids are unique.
         """
-        self.validate_non_empty_fields()
         response_ids = [resp.response_id for resp in self.responses]
         if len(response_ids) != len(set(response_ids)):
             raise ValueError("Response IDs must be unique")
         return self
 
 
-class DetailDetectionOutput(ValidatedModel):
+class DetailDetectionOutput(BaseModel):
     """Model for detail detection output"""
 
     response_id: int = Field(gt=0, description="Response ID, must be greater than 0")
@@ -368,11 +252,11 @@ class DetailDetectionOutput(ValidatedModel):
     )
 
 
-class DetailDetectionResponses(ValidatedModel):
+class DetailDetectionResponses(BaseModel):
     """Container for all detail detection responses"""
 
     responses: List[DetailDetectionOutput] = Field(
-        ..., description="List of detail detection outputs"
+        ..., description="List of detail detection outputs", min_length=1
     )
 
     @model_validator(mode="after")
@@ -380,14 +264,13 @@ class DetailDetectionResponses(ValidatedModel):
         """
         Validate that response_ids are unique.
         """
-        self.validate_non_empty_fields()
         response_ids = [resp.response_id for resp in self.responses]
         if len(response_ids) != len(set(response_ids)):
             raise ValueError("Response IDs must be unique")
         return self
 
 
-class ThemeNode(ValidatedModel):
+class ThemeNode(BaseModel):
     """Model for topic nodes created during hierarchical clustering"""
 
     topic_id: str = Field(
@@ -423,12 +306,12 @@ class ThemeNode(ValidatedModel):
         return self
 
 
-class HierarchicalClusteringResponse(ValidatedModel):
+class HierarchicalClusteringResponse(BaseModel):
     """Model for hierarchical clustering agent response"""
 
     parent_themes: List[ThemeNode] = Field(
-        default=[],
         description="List of parent themes created by merging similar themes",
+        min_length=1,
     )
     should_terminate: bool = Field(
         ...,
@@ -438,7 +321,6 @@ class HierarchicalClusteringResponse(ValidatedModel):
     @model_validator(mode="after")
     def run_validations(self) -> "HierarchicalClusteringResponse":
         """Validate clustering response constraints"""
-        self.validate_non_empty_fields()
 
         # Validate that no child appears in multiple parents
         all_children = []
