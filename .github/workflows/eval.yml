@@ -3,6 +3,7 @@ name: LLM Evaluation
 on:
   schedule:
     - cron: '0 3 * * *'  # 3am UTC daily
+  pull_request:
   workflow_dispatch:
     inputs:
       eval_type:
