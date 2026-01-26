@@ -233,6 +233,8 @@ async def theme_condensation(
     llm: RunnableWithFallbacks,
     question: str,
     batch_size: int = 75,
+    target_themes: int = 50,
+    max_retries: int = 3,
     prompt_template: str | Path | PromptTemplate = "theme_condensation",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
@@ -249,7 +251,11 @@ async def theme_condensation(
         llm (RunnableWithFallbacks): Language model instance to use for theme condensation.
         question (str): The survey question.
         batch_size (int, optional): Number of themes to process in each batch.
-            Defaults to 100.
+            Defaults to 75.
+        target_themes (int, optional): Target number of themes to condense to.
+            Defaults to 50.
+        max_retries (int, optional): Maximum retry attempts when condensation stalls.
+            Defaults to 3.
         prompt_template (str | Path | PromptTemplate, optional): Template for structuring
             the prompt to the LLM. Can be a string identifier, path to template file,
             or PromptTemplate instance. Defaults to "theme_condensation".
@@ -267,12 +273,11 @@ async def theme_condensation(
     logger.info(f"Running theme condensation on {len(themes_df)} themes")
     themes_df["response_id"] = themes_df.index + 1
 
-    target = 50
     retry = 0
-    while len(themes_df) > target:
+    while len(themes_df) > target_themes:
         original_theme_count = len(themes_df)
         logger.info(
-            f"{len(themes_df)} larger than {target}, using recursive theme condensation"
+            f"{len(themes_df)} larger than {target_themes}, using recursive theme condensation"
         )
         themes_df, _ = await batch_and_run(
             themes_df,
@@ -289,9 +294,9 @@ async def theme_condensation(
 
         if len(themes_df) == original_theme_count:
             retry += 1
-            if retry > 3:
+            if retry > max_retries:
                 logging.warning(
-                    "failed to reduce the number of themes after 3 attempts"
+                    f"Failed to reduce themes after {max_retries} attempts"
                 )
                 break
         else:
