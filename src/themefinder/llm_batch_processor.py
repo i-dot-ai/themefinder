@@ -396,6 +396,7 @@ def process_llm_responses(
 def calculate_string_token_length(input_text: str, model: str = None) -> int:
     """
     Calculates the number of tokens in a given string using the specified model's tokenizer.
+    Falls back to character-based estimation for non-OpenAI models.
 
     Args:
         input_text (str): The input string to tokenize.
@@ -405,11 +406,13 @@ def calculate_string_token_length(input_text: str, model: str = None) -> int:
     Returns:
         int: The number of tokens in the input string.
     """
-    # Use the MODEL_NAME env var if no model is provided; otherwise default to "gpt-4o"
     model = model or os.environ.get("MODEL_NAME", "gpt-4o")
-    tokenizer_encoding = tiktoken.encoding_for_model(model)
-    number_of_tokens = len(tokenizer_encoding.encode(input_text))
-    return number_of_tokens
+    try:
+        tokenizer_encoding = tiktoken.encoding_for_model(model)
+        return len(tokenizer_encoding.encode(input_text))
+    except KeyError:
+        # Fallback for non-OpenAI models: ~4 characters per token
+        return len(input_text) // 4
 
 
 def build_prompt(
