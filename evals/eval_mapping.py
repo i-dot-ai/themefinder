@@ -47,7 +47,7 @@ def load_mapped_responses(
 async def evaluate_mapping(question_num: int | None = None):
     dotenv.load_dotenv()
     llm = AzureChatOpenAI(
-        model_name="gpt-4o",
+        azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
     )
     questions_to_process = [question_num] if question_num is not None else range(1, 4)

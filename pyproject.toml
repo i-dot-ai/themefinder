@@ -1,43 +1,50 @@
-[tool.poetry]
+[project]
 name = "themefinder"
 version = "0.7.7"
 description = "A topic modelling Python package designed for analysing one-to-many question-answer data eg free-text survey responses."
-authors = ["i.AI <packages@cabinetoffice.gov.uk>"]
-packages = [{include = "themefinder", from = "src"}]
 readme = "README.md"
 license = "MIT"
-repository = "https://github.com/i-dot-ai/themefinder/"
-documentation = "https://i-dot-ai.github.io/themefinder/"
+requires-python = ">=3.10,<3.13"
+authors = [
+    {name = "i.AI", email = "packages@cabinetoffice.gov.uk"}
+]
 classifiers = [
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
     "Topic :: Text Processing :: Linguistic",
 ]
+dependencies = [
+    "langchain>=1.0.0",
+    "langchain-openai>=1.0.0",
+    "pandas>=2.2.2",
+    "python-dotenv>=1.0.1",
+    "langfuse==2.29.1",
+    "boto3>=1.29",
+    "scikit-learn",
+    "openpyxl>=3.1.5",
+    "pyarrow>=15.0.0",
+    "toml>=0.10.2",
+]
 
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio>=0.24.0",
+    "coverage>=7.6.10",
+]
+docs = [
+    "mkdocs>=1.6.1",
+    "mkdocstrings[python]>=0.27.0",
+    "mkdocs-material>=9.5.50",
+]
 
-[tool.poetry.dependencies]
-python = ">=3.10,<3.13"
-langchain = "*"
-langchain-openai = "*"
-pandas = "^2.2.2"
-python-dotenv = "^1.0.1"
-langfuse = "2.29.1"
-boto3 = "^1.29"
-scikit-learn = "*"
-openpyxl = "^3.1.5"
-pyarrow = "^15.0.0" 
-toml = "^0.10.2"
+[project.urls]
+Repository = "https://github.com/i-dot-ai/themefinder/"
+Documentation = "https://i-dot-ai.github.io/themefinder/"
 
-[tool.poetry.group.dev.dependencies]
-pytest = "*"
-pytest-asyncio = "^0.24.0"
-coverage = "^7.6.10"
-
-[tool.poetry.group.docs.dependencies]
-mkdocs = "^1.6.1"
-mkdocstrings = {extras = ["python"], version = "^0.27.0"}
-mkdocs-material = "^9.5.50"
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.pytest.ini_options]
 pythonpath = "."
@@ -45,5 +52,5 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
