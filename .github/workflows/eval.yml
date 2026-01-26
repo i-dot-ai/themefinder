@@ -86,7 +86,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*ThemeFinder Nightly Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n• Precision: ${{ steps.eval.outputs.precision }}/5\n• Recall: ${{ steps.eval.outputs.recall }}/5\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                    "text": "✅ *ThemeFinder Nightly Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n• Precision: ${{ steps.eval.outputs.precision }}/5\n• Recall: ${{ steps.eval.outputs.recall }}/5\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
                   }
                 }
               ]
@@ -106,7 +106,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*ThemeFinder Eval Failed*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                    "text": "⚠️ *ThemeFinder Eval Failed*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
                   }
                 }
               ]
