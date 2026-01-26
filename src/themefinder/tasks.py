@@ -295,9 +295,7 @@ async def theme_condensation(
         if len(themes_df) == original_theme_count:
             retry += 1
             if retry > max_retries:
-                logging.warning(
-                    f"Failed to reduce themes after {max_retries} attempts"
-                )
+                logging.warning(f"Failed to reduce themes after {max_retries} attempts")
                 break
         else:
             retry = 0

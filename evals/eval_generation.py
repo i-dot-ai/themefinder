@@ -23,6 +23,7 @@ def load_responses_and_framework() -> tuple[pd.DataFrame, str, dict]:
 async def evaluate_generation():
     dotenv.load_dotenv()
     import os
+
     llm = AzureChatOpenAI(
         azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
