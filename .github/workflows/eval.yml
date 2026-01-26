@@ -1,0 +1,111 @@
+name: LLM Evaluation
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # 3am UTC daily
+  workflow_dispatch:
+    inputs:
+      eval_type:
+        description: 'Which eval to run'
+        type: choice
+        options:
+          - generation
+          - all
+        default: 'generation'
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    environment: eval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: '.python-version'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip sync requirements-dev.txt
+          uv pip install -e .
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Run generation eval
+        id: eval
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          DEPLOYMENT_NAME: ${{ secrets.DEPLOYMENT_NAME }}
+        run: |
+          cd evals
+          uv run python eval_generation.py 2>&1 | tee results.txt
+
+          # Extract key metrics for Slack
+          if grep -q "Precision Average Groundedness" results.txt; then
+            echo "eval_success=true" >> $GITHUB_OUTPUT
+            PRECISION=$(grep -oP "Precision Average Groundedness.*?np.float64\(\K[0-9.]+" results.txt | tail -1)
+            RECALL=$(grep -oP "Recall Average topic Representation.*?np.float64\(\K[0-9.]+" results.txt | tail -1)
+            echo "precision=$PRECISION" >> $GITHUB_OUTPUT
+            echo "recall=$RECALL" >> $GITHUB_OUTPUT
+          else
+            echo "eval_success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: evals/results.txt
+          retention-days: 90
+
+      - name: Notify Slack on success
+        if: steps.eval.outputs.eval_success == 'true'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "✅ ThemeFinder Eval Complete",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*ThemeFinder Nightly Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n• Precision: ${{ steps.eval.outputs.precision }}/5\n• Recall: ${{ steps.eval.outputs.recall }}/5\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack on failure
+        if: failure() || steps.eval.outputs.eval_success == 'false'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "⚠️ ThemeFinder Eval Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*ThemeFinder Eval Failed*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                  }
+                }
+              ]
+            }
