@@ -48,7 +48,7 @@ jobs:
         env:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
-          AZURE_OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
           DEPLOYMENT_NAME: ${{ secrets.DEPLOYMENT_NAME }}
         run: |
           cd evals
