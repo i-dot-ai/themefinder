@@ -31,7 +31,7 @@ def load_generated_themes() -> tuple[str, pd.DataFrame]:
 async def evaluate_condensation():
     dotenv.load_dotenv()
     llm = AzureChatOpenAI(
-        model_name="gpt-4o",
+        azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
     )
     themes, question = load_generated_themes()
