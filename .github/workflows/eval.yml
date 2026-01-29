@@ -10,11 +10,19 @@ on:
       - '.github/workflows/eval.yml'
   workflow_dispatch:
     inputs:
+      dataset:
+        description: 'Dataset identifier (e.g., gambling_XS, healthcare_M)'
+        type: string
+        default: 'gambling_XS'
       eval_type:
         description: 'Which eval to run'
         type: choice
         options:
           - generation
+          - sentiment
+          - mapping
+          - condensation
+          - refinement
           - all
         default: 'generation'
 
@@ -61,7 +69,7 @@ jobs:
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
-      - name: Run generation eval
+      - name: Run eval
         id: eval
         env:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
@@ -71,17 +79,32 @@ jobs:
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
           LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          THEMEFINDER_S3_BUCKET_NAME: ${{ secrets.THEMEFINDER_S3_BUCKET_NAME }}
+          ENVIRONMENT: production
+          DATASET: ${{ github.event.inputs.dataset || 'gambling_XS' }}
+          EVAL_TYPE: ${{ github.event.inputs.eval_type || 'generation' }}
         run: |
           cd evals
-          uv run python eval_generation.py 2>&1 | tee results.txt
 
-          # Extract key metrics for Slack
+          if [ "$EVAL_TYPE" = "all" ]; then
+            echo "Running all evals for $DATASET..."
+            uv run python eval_generation.py --dataset "$DATASET" 2>&1 | tee results.txt
+            uv run python eval_sentiment.py --dataset "$DATASET" 2>&1 | tee -a results.txt
+            uv run python eval_mapping.py --dataset "$DATASET" 2>&1 | tee -a results.txt
+          else
+            echo "Running $EVAL_TYPE eval for $DATASET..."
+            uv run python "eval_${EVAL_TYPE}.py" --dataset "$DATASET" 2>&1 | tee results.txt
+          fi
+
+          # Extract key metrics for Slack (generation eval)
           if grep -q "Precision Average Groundedness" results.txt; then
             echo "eval_success=true" >> $GITHUB_OUTPUT
             PRECISION=$(grep -oP "Precision Average Groundedness.*?np.float64\(\K[0-9.]+" results.txt | tail -1)
             RECALL=$(grep -oP "Recall Average topic Representation.*?np.float64\(\K[0-9.]+" results.txt | tail -1)
             echo "precision=$PRECISION" >> $GITHUB_OUTPUT
             echo "recall=$RECALL" >> $GITHUB_OUTPUT
+          elif grep -q "AI Agreement Accuracy\|Langfuse experiment" results.txt; then
+            echo "eval_success=true" >> $GITHUB_OUTPUT
           else
             echo "eval_success=false" >> $GITHUB_OUTPUT
           fi
@@ -107,7 +130,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "✅ *ThemeFinder Nightly Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n• Precision: ${{ steps.eval.outputs.precision }}/5\n• Recall: ${{ steps.eval.outputs.recall }}/5\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                    "text": "✅ *ThemeFinder Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n*Dataset:* ${{ github.event.inputs.dataset || 'gambling_XS' }} · *Type:* ${{ github.event.inputs.eval_type || 'generation' }}\n• Precision: ${{ steps.eval.outputs.precision }}/5\n• Recall: ${{ steps.eval.outputs.recall }}/5\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
                   }
                 }
               ]

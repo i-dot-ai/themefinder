@@ -25,6 +25,7 @@ dependencies = [
     "openpyxl>=3.1.5",
     "pyarrow>=15.0.0",
     "toml>=0.10.2",
+    "nest-asyncio>=1.6.0",
 ]
 
 [project.optional-dependencies]
