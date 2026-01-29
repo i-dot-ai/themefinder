@@ -51,13 +51,14 @@ async def main() -> None:
         print(str(e))
         return
 
-    # Initialise LLM for response generation (gpt-5-mini with low reasoning)
+    # Initialise LLM for response generation (gpt-5-nano with medium reasoning)
+    # Medium reasoning ≈ o1 performance, 2x faster throughput than mini/low
     llm = AzureChatOpenAI(
-        azure_deployment="gpt-5-mini",
+        azure_deployment="gpt-5-nano",
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        reasoning_effort="low",
+        reasoning_effort="medium",
     )
 
     # Optional Langfuse tracking

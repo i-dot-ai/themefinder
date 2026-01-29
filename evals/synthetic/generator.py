@@ -24,7 +24,7 @@ from synthetic.writers import DatasetWriter
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 30  # Responses per LLM batch
+BATCH_SIZE = 100  # Responses per LLM batch (optimised for gpt-5-nano rate limits)
 
 
 class SyntheticDatasetGenerator:
