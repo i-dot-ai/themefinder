@@ -78,3 +78,10 @@ MANIFEST
 
 # Ignore mkdocs site
 site/
+
+# Synthetic datasets (generated locally, not committed)
+# Keep gambling_XS as reference dataset
+evals/data/*
+!evals/data/gambling_XS/
+!evals/data/generation/
+!evals/data/condensation/

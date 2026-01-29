@@ -4,7 +4,7 @@ Provides dataset configuration, naming conventions, and local fallback loading
 for evaluation datasets.
 
 Dataset naming: eval/{dataset}/{stage}
-Where dataset is a descriptor like "gambling_XS", "healthcare_M", "tuition_L"
+Where dataset is a descriptor like "gambling_100", "healthcare_500", "tuition_1000"
 """
 
 import json
@@ -28,7 +28,7 @@ class DatasetConfig:
     """Configuration for a Langfuse dataset.
 
     Attributes:
-        dataset: Dataset identifier (e.g., "gambling_XS", "healthcare_M")
+        dataset: Dataset identifier (e.g., "gambling_100", "healthcare_500")
         stage: Evaluation stage (generation, sentiment, mapping, condensation, refinement)
     """
 
@@ -38,7 +38,9 @@ class DatasetConfig:
     def __post_init__(self) -> None:
         """Validate configuration."""
         if self.stage not in VALID_STAGES:
-            raise ValueError(f"Invalid stage '{self.stage}'. Must be one of: {VALID_STAGES}")
+            raise ValueError(
+                f"Invalid stage '{self.stage}'. Must be one of: {VALID_STAGES}"
+            )
 
     @property
     def name(self) -> str:
@@ -75,7 +77,9 @@ def get_or_create_dataset(client: Any, config: DatasetConfig) -> Any:
         )
 
 
-def _load_responses(config: DatasetConfig, question_part: str = "question_part_1") -> pd.DataFrame:
+def _load_responses(
+    config: DatasetConfig, question_part: str = "question_part_1"
+) -> pd.DataFrame:
     """Load responses from JSONL.
 
     Args:
@@ -89,7 +93,9 @@ def _load_responses(config: DatasetConfig, question_part: str = "question_part_1
     return pd.read_json(responses_path, lines=True)
 
 
-def _load_question(config: DatasetConfig, question_part: str = "question_part_1") -> str:
+def _load_question(
+    config: DatasetConfig, question_part: str = "question_part_1"
+) -> str:
     """Load question text.
 
     Args:
@@ -105,7 +111,9 @@ def _load_question(config: DatasetConfig, question_part: str = "question_part_1"
     return data["question_text"]
 
 
-def _load_themes(config: DatasetConfig, question_part: str = "question_part_1") -> list[dict]:
+def _load_themes(
+    config: DatasetConfig, question_part: str = "question_part_1"
+) -> list[dict]:
     """Load themes.
 
     Args:
@@ -126,7 +134,9 @@ def _load_themes(config: DatasetConfig, question_part: str = "question_part_1") 
         return json.load(f)
 
 
-def _load_sentiment(config: DatasetConfig, question_part: str = "question_part_1") -> dict[str, str]:
+def _load_sentiment(
+    config: DatasetConfig, question_part: str = "question_part_1"
+) -> dict[str, str]:
     """Load sentiment labels.
 
     Args:
@@ -147,7 +157,9 @@ def _load_sentiment(config: DatasetConfig, question_part: str = "question_part_1
     return dict(zip(df["response_id"].astype(str), df["position"]))
 
 
-def _load_mapping(config: DatasetConfig, question_part: str = "question_part_1") -> dict[str, list[str]]:
+def _load_mapping(
+    config: DatasetConfig, question_part: str = "question_part_1"
+) -> dict[str, list[str]]:
     """Load theme mappings.
 
     Args:
@@ -178,7 +190,13 @@ def _get_question_parts(config: DatasetConfig) -> list[str]:
         List of question part directory names
     """
     inputs_dir = config.local_path / "inputs"
-    return sorted([d.name for d in inputs_dir.iterdir() if d.is_dir() and d.name.startswith("question_part")])
+    return sorted(
+        [
+            d.name
+            for d in inputs_dir.iterdir()
+            if d.is_dir() and d.name.startswith("question_part")
+        ]
+    )
 
 
 def load_local_generation_data(config: DatasetConfig) -> list[dict]:
@@ -196,14 +214,18 @@ def load_local_generation_data(config: DatasetConfig) -> list[dict]:
         responses = _load_responses(config, question_part)
         themes = _load_themes(config, question_part)
 
-        items.append({
-            "input": {
-                "question": question,
-                "responses": responses[["response_id", "response"]].to_dict(orient="records"),
-            },
-            "expected_output": {"themes": themes},
-            "metadata": {"question_part": question_part},
-        })
+        items.append(
+            {
+                "input": {
+                    "question": question,
+                    "responses": responses[["response_id", "response"]].to_dict(
+                        orient="records"
+                    ),
+                },
+                "expected_output": {"themes": themes},
+                "metadata": {"question_part": question_part},
+            }
+        )
 
     return items
 
@@ -223,14 +245,18 @@ def load_local_sentiment_data(config: DatasetConfig) -> list[dict]:
         responses = _load_responses(config, question_part)
         positions = _load_sentiment(config, question_part)
 
-        items.append({
-            "input": {
-                "question": question,
-                "responses": responses[["response_id", "response"]].to_dict(orient="records"),
-            },
-            "expected_output": {"positions": positions},
-            "metadata": {"question_part": question_part},
-        })
+        items.append(
+            {
+                "input": {
+                    "question": question,
+                    "responses": responses[["response_id", "response"]].to_dict(
+                        orient="records"
+                    ),
+                },
+                "expected_output": {"positions": positions},
+                "metadata": {"question_part": question_part},
+            }
+        )
 
     return items
 
@@ -251,15 +277,19 @@ def load_local_mapping_data(config: DatasetConfig) -> list[dict]:
         themes = _load_themes(config, question_part)
         mappings = _load_mapping(config, question_part)
 
-        items.append({
-            "input": {
-                "question": question,
-                "topics": themes,
-                "responses": responses[["response_id", "response"]].to_dict(orient="records"),
-            },
-            "expected_output": {"mappings": mappings},
-            "metadata": {"question_part": question_part},
-        })
+        items.append(
+            {
+                "input": {
+                    "question": question,
+                    "topics": themes,
+                    "responses": responses[["response_id", "response"]].to_dict(
+                        orient="records"
+                    ),
+                },
+                "expected_output": {"mappings": mappings},
+                "metadata": {"question_part": question_part},
+            }
+        )
 
     return items
 
@@ -280,14 +310,22 @@ def load_local_condensation_data(config: DatasetConfig) -> list[dict]:
         question = _load_question(config, question_part)
         themes = _load_themes(config, question_part)
 
-        items.append({
-            "input": {
-                "question": question,
-                "themes": [{"topic_label": t["topic_label"], "topic_description": t["topic_description"]} for t in themes],
-            },
-            "expected_output": None,  # Qualitative evaluation
-            "metadata": {"question_part": question_part},
-        })
+        items.append(
+            {
+                "input": {
+                    "question": question,
+                    "themes": [
+                        {
+                            "topic_label": t["topic_label"],
+                            "topic_description": t["topic_description"],
+                        }
+                        for t in themes
+                    ],
+                },
+                "expected_output": None,  # Qualitative evaluation
+                "metadata": {"question_part": question_part},
+            }
+        )
 
     return items
 
@@ -308,14 +346,22 @@ def load_local_refinement_data(config: DatasetConfig) -> list[dict]:
         question = _load_question(config, question_part)
         themes = _load_themes(config, question_part)
 
-        items.append({
-            "input": {
-                "question": question,
-                "themes": [{"topic_label": t["topic_label"], "topic_description": t["topic_description"]} for t in themes],
-            },
-            "expected_output": None,  # Qualitative evaluation
-            "metadata": {"question_part": question_part},
-        })
+        items.append(
+            {
+                "input": {
+                    "question": question,
+                    "themes": [
+                        {
+                            "topic_label": t["topic_label"],
+                            "topic_description": t["topic_description"],
+                        }
+                        for t in themes
+                    ],
+                },
+                "expected_output": None,  # Qualitative evaluation
+                "metadata": {"question_part": question_part},
+            }
+        )
 
     return items
 
