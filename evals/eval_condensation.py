@@ -1,44 +1,52 @@
+"""Theme condensation evaluation with Langfuse dataset and experiment support.
+
+Evaluates the theme condensation task that reduces a large set of themes
+to a smaller, more manageable set.
+"""
+
+import argparse
 import asyncio
-import io
 import os
 from datetime import datetime
-from pathlib import Path
+
+import nest_asyncio
+
+# Allow nested asyncio.run() calls for Langfuse experiment runner
+nest_asyncio.apply()
 
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
 
 import langfuse_utils
+from datasets import DatasetConfig, load_local_data
 from themefinder import theme_condensation
-from utils import download_file_from_bucket, read_and_render
+from utils import read_and_render
 
 
-def load_generated_themes() -> tuple[str, pd.DataFrame]:
-    dotenv.load_dotenv()
-    bucket_name = os.getenv("THEMEFINDER_S3_BUCKET_NAME")
-    condensed_themes = pd.read_csv(
-        io.BytesIO(
-            download_file_from_bucket(
-                "app_data/evals/theme_refinement/eval_condensed_topics.csv",
-                bucket_name=bucket_name,
-            )
-        )
-    )
-    data_dir = Path(__file__).parent / "data/condensation"
-    with (data_dir / "expanded_question.txt").open() as f:
-        question = f.read()
-    return condensed_themes, question
+async def evaluate_condensation(
+    dataset: str = "gambling_XS",
+) -> dict:
+    """Run condensation evaluation.
 
+    Args:
+        dataset: Dataset identifier (e.g., "gambling_S", "healthcare_M")
 
-async def evaluate_condensation():
+    Returns:
+        Dict containing evaluation results
+    """
     dotenv.load_dotenv()
 
-    # Langfuse setup
-    session_id = f"eval_condensation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    config = DatasetConfig(dataset=dataset, stage="condensation")
+    session_id = f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
         eval_type="condensation",
+        metadata={"dataset": dataset},
+        tags=[dataset],
     )
+
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 
     llm = AzureChatOpenAI(
@@ -47,29 +55,116 @@ async def evaluate_condensation():
         callbacks=callbacks,
     )
 
-    themes, question = load_generated_themes()
+    # Branch: Langfuse dataset vs local fallback
+    if langfuse_ctx.is_enabled:
+        result = await _run_with_langfuse(langfuse_ctx, config, llm, callbacks)
+    else:
+        result = await _run_local_fallback(config, llm, callbacks)
 
-    # Wrap all LLM calls in trace_context to propagate tags/metadata
-    with langfuse_utils.trace_context(langfuse_ctx):
-        condensed_themes, _ = await theme_condensation(
-            themes,
-            llm=llm,
-            question=question,
+    langfuse_utils.flush(langfuse_ctx)
+    return result
+
+
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -> dict:
+    """Run experiment using Langfuse dataset.
+
+    Note: Condensation uses qualitative LLM evaluation, so we run it
+    but don't use numeric evaluators.
+
+    Args:
+        ctx: LangfuseContext
+        config: DatasetConfig
+        llm: LangChain LLM instance
+        callbacks: LangChain callbacks list
+
+    Returns:
+        Experiment result dict
+    """
+    try:
+        dataset = ctx.client.get_dataset(config.name)
+    except Exception as e:
+        print(f"Dataset {config.name} not found in Langfuse, falling back to local: {e}")
+        return await _run_local_fallback(config, llm, callbacks)
+
+    def task(*, item, **kwargs) -> dict:
+        """Task function for experiment runner."""
+        themes_df = pd.DataFrame(item.input["themes"])
+        question = item.input["question"]
+
+        # Run condensation
+        condensed_df = asyncio.run(
+            theme_condensation(
+                themes_df,
+                llm=llm,
+                question=question,
+            )
         )
-        condensed_themes = condensed_themes[
-            ["topic_label", "topic_description"]
-        ].to_dict(orient="records")
+
+        # Handle tuple return
+        if isinstance(condensed_df, tuple):
+            condensed_df = condensed_df[0]
+
+        return {"condensed_themes": condensed_df.to_dict(orient="records")}
+
+    with langfuse_utils.trace_context(ctx):
+        result = dataset.run_experiment(
+            name=ctx.session_id,
+            task=task,
+            evaluators=[],  # Qualitative evaluation done separately
+            max_concurrency=1,
+        )
+
+    print(f"Condensation Eval Results (Langfuse experiment): {ctx.session_id}")
+    return {"experiment_id": ctx.session_id, "result": result}
+
+
+async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> dict:
+    """Run evaluation without Langfuse (local development).
+
+    Args:
+        config: DatasetConfig
+        llm: LangChain LLM instance
+        callbacks: LangChain callbacks list
+
+    Returns:
+        Dict containing evaluation response
+    """
+    data_items = load_local_data(config)
+    all_results = {}
+
+    for item in data_items:
+        question_part = item.get("metadata", {}).get("question_part", "unknown")
+        themes_df = pd.DataFrame(item["input"]["themes"])
+        question = item["input"]["question"]
+
+        with langfuse_utils.trace_context(
+            langfuse_utils.LangfuseContext(client=None, handler=None)
+        ):
+            condensed_df, _ = await theme_condensation(
+                themes_df,
+                llm=llm,
+                question=question,
+            )
+
+        # Qualitative evaluation via LLM
+        original_themes = themes_df[["topic_label", "topic_description"]].to_dict(orient="records")
+        condensed_themes = condensed_df[["topic_label", "topic_description"]].to_dict(orient="records")
+
         eval_prompt = read_and_render(
             "condensation_eval.txt",
-            {"original_topics": themes, "condensed_topics": condensed_themes},
+            {"original_topics": original_themes, "condensed_topics": condensed_themes},
         )
         response = llm.invoke(eval_prompt)
+        print(f"Theme Condensation ({question_part}): \n {response.content}")
 
-    print(f"Theme Condensation Eval Results: \n {response.content}")
+        all_results[f"{question_part}_evaluation"] = response.content
 
-    # Flush (no numeric scores for qualitative eval)
-    langfuse_utils.flush(langfuse_ctx)
+    return all_results
 
 
 if __name__ == "__main__":
-    asyncio.run(evaluate_condensation())
+    parser = argparse.ArgumentParser(description="Run theme condensation evaluation")
+    parser.add_argument("--dataset", default="gambling_XS", help="Dataset identifier (e.g., gambling_XS)")
+    args = parser.parse_args()
+
+    asyncio.run(evaluate_condensation(dataset=args.dataset))
