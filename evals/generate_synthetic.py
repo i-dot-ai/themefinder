@@ -89,40 +89,41 @@ async def main() -> None:
 
     # Run generation with progress tracking
     progress = create_progress_bar()
-    with progress:
-        progress.add_task(
-            f"[cyan]Generating {config.dataset_name}...",
-            total=total_responses,
-        )
+    output_path = None
+    n_themes = 0
 
-        try:
+    try:
+        with progress:
+            progress.add_task(
+                f"[cyan]Generating {config.dataset_name}...",
+                total=total_responses,
+            )
             output_path = await generator.generate(progress)
 
-            # Count themes from first question for summary
-            n_themes = 0
-            themes_file = (
-                output_path
-                / "outputs"
-                / "mapping"
-                / generator.writer.date_str
-                / "question_part_1"
-                / "themes.json"
-            )
-            if themes_file.exists():
-                import json
+        # Count themes from first question for summary (after progress bar closes)
+        themes_file = (
+            output_path
+            / "outputs"
+            / "mapping"
+            / generator.writer.date_str
+            / "question_part_1"
+            / "themes.json"
+        )
+        if themes_file.exists():
+            import json
 
-                with open(themes_file) as f:
-                    n_themes = len(json.load(f))
+            with open(themes_file) as f:
+                n_themes = len(json.load(f))
 
-            print_success(str(output_path), n_themes, total_responses)
+        print_success(str(output_path), n_themes, total_responses)
 
-        except Exception as e:
-            print_error(e)
-            raise
+    except Exception as e:
+        print_error(e)
+        raise
 
-        finally:
-            if LANGFUSE_AVAILABLE and langfuse_ctx:
-                langfuse_utils.flush(langfuse_ctx)
+    finally:
+        if LANGFUSE_AVAILABLE and langfuse_ctx:
+            langfuse_utils.flush(langfuse_ctx)
 
 
 if __name__ == "__main__":
