@@ -10,7 +10,7 @@ ThemeFinder is a topic modelling Python package designed for analysing one-to-ma
 
 ### Install using your package manager of choice
 
-For example `pip install themefinder` or `poetry add themefinder`.
+For example `pip install themefinder` or `uv add themefinder`.
 
 ### Usage
 
@@ -128,6 +128,26 @@ ThemeFinder's structured output approach makes it compatible with a wide range o
 - Llama 2, Llama 3
 - Mistral models (e.g., Mistral 7B, Mixtral)
 
+
+## Development
+
+This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
+
+```bash
+# Clone and set up development environment
+git clone https://github.com/i-dot-ai/themefinder.git
+cd themefinder
+uv venv
+source .venv/bin/activate
+uv pip sync requirements-dev.txt
+uv pip install -e .
+
+# Run tests
+pytest tests/
+
+# Run linting
+pre-commit run --all-files
+```
 
 ## License
 
