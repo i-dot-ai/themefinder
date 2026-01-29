@@ -5,12 +5,13 @@ Provides graceful fallback when Langfuse is not configured.
 
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
-    from langfuse.callback import CallbackHandler
+    from langfuse.langchain import CallbackHandler
 
 logger = logging.getLogger("themefinder.evals.langfuse")
 
@@ -21,6 +22,7 @@ class LangfuseContext:
 
     client: Optional["Langfuse"]
     handler: Optional["CallbackHandler"]
+    session_id: Optional[str] = None
 
     @property
     def is_enabled(self) -> bool:
@@ -44,29 +46,32 @@ def get_langfuse_context(
     """
     secret_key = os.getenv("LANGFUSE_SECRET_KEY")
     public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
-    host = os.getenv("LANGFUSE_HOST")
+    base_url = os.getenv("LANGFUSE_BASE_URL")
 
-    if not all([secret_key, public_key, host]):
+    if not all([secret_key, public_key, base_url]):
         logger.info("Langfuse not configured - tracing disabled")
         return LangfuseContext(client=None, handler=None)
 
     try:
-        from langfuse import Langfuse
-        from langfuse.callback import CallbackHandler
+        from langfuse import Langfuse, propagate_attributes
+        from langfuse.langchain import CallbackHandler
 
         client = Langfuse(
             secret_key=secret_key,
             public_key=public_key,
-            host=host,
+            host=base_url,
         )
 
-        handler = CallbackHandler(
+        # Set session and metadata via propagate_attributes for SDK v3
+        propagate_attributes(
             session_id=session_id,
             metadata=metadata or {},
         )
 
+        handler = CallbackHandler()
+
         logger.info(f"Langfuse initialised with session_id={session_id}")
-        return LangfuseContext(client=client, handler=handler)
+        return LangfuseContext(client=client, handler=handler, session_id=session_id)
 
     except ImportError:
         logger.warning("Langfuse package not available")
@@ -92,7 +97,7 @@ def create_scores(
         return
 
     if trace_id is None and context.handler:
-        trace_id = context.handler.get_trace_id()
+        trace_id = context.handler.last_trace_id
 
     if not trace_id:
         logger.warning("No trace_id available for score attachment")
@@ -105,7 +110,7 @@ def create_scores(
             continue
 
         try:
-            context.client.score(
+            context.client.create_score(
                 name=name,
                 value=float(value),
                 trace_id=trace_id,
