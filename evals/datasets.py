@@ -103,12 +103,18 @@ def _load_question(
         question_part: Which question part to load
 
     Returns:
-        Question text string
+        Question text string (includes scale_statement for agree/disagree questions)
     """
     question_path = config.local_path / "inputs" / question_part / "question.json"
     with open(question_path) as f:
         data = json.load(f)
-    return data["question_text"]
+    question_text = data["question_text"]
+
+    # For agree/disagree questions, append the scale statement
+    if data.get("scale_statement"):
+        question_text = f'{question_text}\n\nStatement: "{data["scale_statement"]}"'
+
+    return question_text
 
 
 def _load_themes(

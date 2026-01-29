@@ -895,3 +895,86 @@ def test_partition_dataframe():
     partitions = partition_dataframe(df, partition_key=None)
     assert len(partitions) == 1
     assert len(partitions[0]) == 4
+
+
+@pytest.mark.asyncio
+async def test_call_llm_conversational_retry(mock_llm):
+    """
+    Test conversational retry when LLM misses some response IDs.
+    Verifies that the system asks for missing IDs and merges results.
+    """
+
+    batch_prompts = [BatchPrompt(prompt_string="initial prompt", response_ids=[1, 2, 3])]
+
+    # First response is missing response_id 3
+    first_response = MagicMock()
+    first_response.dict.return_value = {
+        "responses": [
+            {"response_id": 1, "content": "result1"},
+            {"response_id": 2, "content": "result2"},
+        ]
+    }
+
+    # Second response (after conversational retry) provides the missing ID
+    second_response = MagicMock()
+    second_response.dict.return_value = {
+        "responses": [
+            {"response_id": 3, "content": "result3"},
+        ]
+    }
+
+    mock_llm.ainvoke.side_effect = [first_response, second_response]
+
+    results, failed_ids = await call_llm(
+        batch_prompts, mock_llm, integrity_check=True, max_conversation_retries=5
+    )
+
+    # Should have all 3 responses after conversational retry
+    assert len(results) == 3
+    assert failed_ids == []
+    assert mock_llm.ainvoke.call_count == 2
+
+    # Verify the follow-up message was constructed correctly
+    second_call_args = mock_llm.ainvoke.call_args_list[1]
+    follow_up_msg = second_call_args[0][0]
+    assert "3" in follow_up_msg  # Should mention missing ID 3
+
+
+@pytest.mark.asyncio
+async def test_call_llm_conversational_retry_max_attempts(mock_llm):
+    """
+    Test that conversational retry respects max attempts.
+    Verifies that after max_conversation_retries, remaining IDs are returned as failed.
+    """
+    batch_prompts = [BatchPrompt(prompt_string="initial prompt", response_ids=[1, 2, 3])]
+
+    # LLM always returns only response_id 1, never provides 2 or 3
+    incomplete_response = MagicMock()
+    incomplete_response.dict.return_value = {
+        "responses": [
+            {"response_id": 1, "content": "result1"},
+        ]
+    }
+
+    mock_llm.ainvoke.return_value = incomplete_response
+
+    results, failed_ids = await call_llm(
+        batch_prompts, mock_llm, integrity_check=True, max_conversation_retries=3
+    )
+
+    # Should have 1 response, with 2 and 3 as failed
+    assert len(results) == 1
+    assert set(failed_ids) == {2, 3}
+    # Initial call + 3 retry attempts = 4 calls
+    assert mock_llm.ainvoke.call_count == 4
+
+
+def test_build_missing_ids_message():
+    """Test the helper function that builds the follow-up message."""
+    from themefinder.llm_batch_processor import _build_missing_ids_message
+
+    message = _build_missing_ids_message([5, 2, 8])
+
+    assert "2, 5, 8" in message  # Should be sorted
+    assert "3 missing" in message
+    assert "response IDs" in message

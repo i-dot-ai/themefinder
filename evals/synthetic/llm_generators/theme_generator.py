@@ -21,7 +21,7 @@ class Theme(BaseModel):
     )
     topic_label: str = Field(description="Short theme name (2-5 words)")
     topic_description: str = Field(
-        description="Detailed description explaining what responses in this theme discuss (1-3 sentences)"
+        description="Concise description of what responses in this theme argue (15-25 words max)"
     )
 
 
@@ -66,6 +66,12 @@ Ensure your themes span these categories where relevant:
 - Cover the FULL SPECTRUM of likely opinion
 - Be REALISTIC about what UK citizens actually write in consultations
 - Consider MINORITY viewpoints that may be less common but important
+
+## Description Format
+- topic_label: 2-5 words (e.g., "Fiscal cost concerns")
+- topic_description: ONE concise sentence, 15-25 words max
+  - Good: "Opposition citing large Exchequer cost and pressure on public services"
+  - Bad: "Submissions emphasising the large direct cost to the Exchequer, potential increases in public borrowing and the opportunity cost for other public services. Critics in this theme demand robust costing..."
 
 Generate as many themes as needed to comprehensively cover the topic. For simple questions,
 this might be 10-15 themes. For complex, contentious topics, you may need 30-50+ themes.
@@ -193,14 +199,14 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
             {
                 "topic_id": "X",
                 "topic_label": "None of the Above",
-                "topic_description": "The response discusses a topic not covered by the listed themes (only use this if no other theme applies).",
-                "topic": "None of the Above: The response discusses a topic not covered by the listed themes (only use this if no other theme applies).",
+                "topic_description": "Response discusses a topic not covered by listed themes",
+                "topic": "None of the Above: Response discusses a topic not covered by listed themes",
             },
             {
                 "topic_id": "Y",
                 "topic_label": "No Reason Given",
-                "topic_description": "The response does not provide a substantive answer to the question.",
-                "topic": "No Reason Given: The response does not provide a substantive answer to the question.",
+                "topic_description": "Response does not provide a substantive answer",
+                "topic": "No Reason Given: Response does not provide a substantive answer",
             },
         ]
     )

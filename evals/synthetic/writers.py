@@ -60,6 +60,8 @@ class DatasetWriter:
         }
         if config.multi_choice_options:
             data["multi_choice_options"] = config.multi_choice_options
+        if config.scale_statement:
+            data["scale_statement"] = config.scale_statement
 
         with open(path, "w") as f:
             json.dump(data, f, indent=4)
