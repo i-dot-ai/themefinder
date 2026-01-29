@@ -1,11 +1,13 @@
 import asyncio
 import io
 import os
+from datetime import datetime
 
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
 
+import langfuse_utils
 from metrics import calculate_sentiment_metrics
 from themefinder import sentiment_analysis
 from utils import download_file_from_bucket
@@ -32,9 +34,21 @@ def load_responses() -> tuple[str, pd.DataFrame]:
 async def evaluate_sentiment():
     dotenv.load_dotenv()
 
+    # Langfuse setup
+    session_id = f"eval_sentiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    langfuse_ctx = langfuse_utils.get_langfuse_context(
+        session_id=session_id,
+        metadata={
+            "eval_type": "sentiment",
+            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
+        },
+    )
+    callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
+
     llm = AzureChatOpenAI(
         azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
+        callbacks=callbacks,
     )
 
     question, responses = load_responses()
@@ -53,8 +67,12 @@ async def evaluate_sentiment():
     merged["ai_position"] = merged["ai_position"].map(
         {"DISAGREEMENT": "DISAGREE", "AGREEMENT": "AGREE"}
     )
-    accuracy = calculate_sentiment_metrics(merged)
-    print(f"AI Agreement Accuracy: {accuracy["accuracy"]}")
+    eval_scores = calculate_sentiment_metrics(merged)
+    print(f"AI Agreement Accuracy: {eval_scores['accuracy']}")
+
+    # Attach scores and flush
+    langfuse_utils.create_scores(langfuse_ctx, eval_scores)
+    langfuse_utils.flush(langfuse_ctx)
 
 
 if __name__ == "__main__":

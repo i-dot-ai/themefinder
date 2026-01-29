@@ -28,13 +28,16 @@ def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
 
 
 def calculate_generation_metrics(
-    generated_topics: pd.DataFrame, topic_framework: dict
+    generated_topics: pd.DataFrame,
+    topic_framework: dict,
+    callbacks: list | None = None,
 ) -> dict[str, float | int]:
     """Calculate precision and recall metrics for generated themes against a framework.
 
     Args:
         generated_topics (pd.DataFrame): DataFrame containing generated themes as columns
         topic_framework (dict): Dictionary containing reference framework themes
+        callbacks (list | None): Optional list of LangChain callbacks for tracing
 
     Returns:
         dict[str, float | int]: Dictionary with keys:
@@ -44,10 +47,12 @@ def calculate_generation_metrics(
             - Recall N not Captured: Count of framework topics not captured
             - Recall Average topic Representation: Mean representation score
     """
+    callbacks = callbacks or []
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
         model_kwargs={"response_format": {"type": "json_object"}},
+        callbacks=callbacks,
     )
     precision_scores = llm.invoke(
         read_and_render(

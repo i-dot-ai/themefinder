@@ -3,11 +3,13 @@ import asyncio
 import io
 import json
 import os
+from datetime import datetime
 
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
 
+import langfuse_utils
 from metrics import calculate_mapping_metrics
 from themefinder import theme_mapping
 from utils import download_file_from_bucket
@@ -46,11 +48,27 @@ def load_mapped_responses(
 
 async def evaluate_mapping(question_num: int | None = None):
     dotenv.load_dotenv()
+
+    # Langfuse setup
+    session_id = f"eval_mapping_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    langfuse_ctx = langfuse_utils.get_langfuse_context(
+        session_id=session_id,
+        metadata={
+            "eval_type": "mapping",
+            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
+        },
+    )
+    callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
+
     llm = AzureChatOpenAI(
         azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
+        callbacks=callbacks,
     )
+
     questions_to_process = [question_num] if question_num is not None else range(1, 4)
+    all_scores = {}
+
     for i in questions_to_process:
         question, topics, responses = load_mapped_responses(i)
         result, _ = await theme_mapping(
@@ -66,6 +84,15 @@ async def evaluate_mapping(question_num: int | None = None):
             df=responses, column_one="topics", column_two="labels"
         )
         print(f"Theme Mapping Question {i} Eval Results: \n {mapping_metrics}")
+
+        # Collect scores with question prefix
+        for key, value in mapping_metrics.items():
+            if isinstance(value, (int, float)):
+                all_scores[f"q{i}_{key}"] = value
+
+    # Attach scores and flush
+    langfuse_utils.create_scores(langfuse_ctx, all_scores)
+    langfuse_utils.flush(langfuse_ctx)
 
 
 if __name__ == "__main__":

@@ -1,12 +1,14 @@
 import asyncio
 import io
 import os
+from datetime import datetime
 from pathlib import Path
 
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
 
+import langfuse_utils
 from themefinder import theme_condensation
 from utils import download_file_from_bucket, read_and_render
 
@@ -30,10 +32,24 @@ def load_generated_themes() -> tuple[str, pd.DataFrame]:
 
 async def evaluate_condensation():
     dotenv.load_dotenv()
+
+    # Langfuse setup
+    session_id = f"eval_condensation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    langfuse_ctx = langfuse_utils.get_langfuse_context(
+        session_id=session_id,
+        metadata={
+            "eval_type": "condensation",
+            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
+        },
+    )
+    callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
+
     llm = AzureChatOpenAI(
         azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
+        callbacks=callbacks,
     )
+
     themes, question = load_generated_themes()
     condensed_themes, _ = await theme_condensation(
         themes,
@@ -49,6 +65,9 @@ async def evaluate_condensation():
     )
     response = llm.invoke(eval_prompt)
     print(f"Theme Condensation Eval Results: \n {response.content}")
+
+    # Flush (no numeric scores for qualitative eval)
+    langfuse_utils.flush(langfuse_ctx)
 
 
 if __name__ == "__main__":
