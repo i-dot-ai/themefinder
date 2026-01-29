@@ -13,22 +13,29 @@ from synthetic.config import (
     GenerationConfig,
     NoiseLevel,
     ResponseLength,
-    ResponseSpec,
     ResponseType,
 )
 from synthetic.demographics import sample_demographics
-from synthetic.llm_generators.response_generator import generate_response_batch
+from synthetic.llm_generators.response_generator import (
+    RespondentSpec,
+    generate_respondent_batch,
+)
 from synthetic.llm_generators.theme_generator import generate_themes
 from synthetic.validators import validate_dataset
 from synthetic.writers import DatasetWriter
 
 logger = logging.getLogger(__name__)
 
-BATCH_SIZE = 100  # Responses per LLM batch (optimised for gpt-5-nano rate limits)
+BATCH_SIZE = 100  # Respondents per batch (parallelised across respondents)
 
 
 class SyntheticDatasetGenerator:
-    """Orchestrates synthetic consultation dataset generation."""
+    """Orchestrates synthetic consultation dataset generation.
+
+    Uses a per-respondent sequential approach: each respondent answers all
+    questions in order, with previous responses passed as context for consistency.
+    Respondents are processed in parallel batches.
+    """
 
     def __init__(
         self,
@@ -66,71 +73,88 @@ class SyntheticDatasetGenerator:
         # Create output directory structure
         self.writer.initialise_directories(self.config.questions)
 
-        # Sample demographics once for all respondents
-        demographics = sample_demographics(
-            self.config.demographic_fields,
-            self.config.n_responses,
-            self.rng,
-        )
+        # Step 1: Generate themes for ALL questions upfront
+        logger.info("Generating themes for all questions...")
+        themes_by_question: dict[int, list[dict]] = {}
 
-        # Write respondents file with response IDs starting at 1001
-        respondents = [
-            {"response_id": 1001 + i, "demographic_data": demo}
-            for i, demo in enumerate(demographics)
-        ]
-        self.writer.write_respondents(respondents)
-
-        # Generate for each question
         for question_config in self.config.questions:
-            question_part = f"question_part_{question_config.number}"
-            logger.info(f"Generating {question_part}...")
-
-            # Step 1: Generate themes (uses gpt-5-mini with reasoning)
             themes = await generate_themes(
                 topic=self.config.topic,
                 question=question_config.text,
                 demographic_fields=self.config.demographic_fields,
                 callbacks=self.callbacks,
             )
-            logger.info(f"Generated {len(themes)} themes for {question_part}")
+            themes_by_question[question_config.number] = themes
+            logger.info(
+                f"Generated {len(themes)} themes for question {question_config.number}"
+            )
 
+            # Write themes and question config
+            question_part = f"question_part_{question_config.number}"
             self.writer.write_themes(question_part, themes)
             self.writer.write_question(question_part, question_config)
 
-            # Step 2: Plan response distribution
-            specs = self._plan_responses(themes, demographics)
+        # Step 2: Sample demographics and create respondent specs
+        demographics = sample_demographics(
+            self.config.demographic_fields,
+            self.config.n_responses,
+            self.rng,
+        )
 
-            # Step 3: Initialise streaming files and generate responses in batches
+        respondent_specs = self._create_respondent_specs(demographics)
+
+        # Write respondents file
+        respondents = [
+            {"response_id": spec.response_id, "demographic_data": spec.persona}
+            for spec in respondent_specs
+        ]
+        self.writer.write_respondents(respondents)
+
+        # Initialise streaming files for all questions
+        for question_config in self.config.questions:
+            question_part = f"question_part_{question_config.number}"
             self.writer.init_streaming_files(question_part)
-            task_id = progress.task_ids[0] if progress else None
-            batch_num = 0
 
-            def on_response_complete():
-                """Callback for each completed response."""
-                self._generated_count += 1
-                if progress and task_id is not None:
-                    progress.update(task_id, completed=self._generated_count)
+        # Step 3: Generate responses in batches of respondents
+        total_responses = self.config.n_responses * len(self.config.questions)
+        task_id = progress.task_ids[0] if progress else None
 
-            for batch_specs in self._batch(specs, BATCH_SIZE):
-                batch_num += 1
-                batch_responses = await generate_response_batch(
-                    llm=self.llm,
-                    question=question_config.text,
-                    themes=themes,
-                    specs=batch_specs,
-                    noise_level=self.config.noise_level,
-                    callbacks=self.callbacks,
-                    on_response_complete=on_response_complete,
-                )
+        def on_response_complete():
+            """Callback for each completed response."""
+            self._generated_count += 1
+            if progress and task_id is not None:
+                progress.update(task_id, completed=self._generated_count)
 
-                # Stream to disk immediately (reduces RAM, crash-safe)
-                self.writer.append_responses(question_part, batch_responses)
+        logger.info(
+            f"Generating {total_responses} responses "
+            f"({self.config.n_responses} respondents × {len(self.config.questions)} questions)..."
+        )
 
-                # Checkpoint with batch progress
-                self._save_checkpoint(question_part, batch_num, len(specs))
+        batch_num = 0
+        for batch_specs in self._batch(respondent_specs, BATCH_SIZE):
+            batch_num += 1
+            logger.info(
+                f"Processing batch {batch_num} ({len(batch_specs)} respondents)..."
+            )
 
-                # Brief pause between batches for rate limiting
-                await asyncio.sleep(0.2)
+            batch_responses = await generate_respondent_batch(
+                llm=self.llm,
+                respondents=batch_specs,
+                questions=self.config.questions,
+                themes_by_question=themes_by_question,
+                noise_level=self.config.noise_level,
+                callbacks=self.callbacks,
+                on_response_complete=on_response_complete,
+            )
+
+            # Group responses by question and write
+            self._write_batch_responses(batch_responses)
+
+            # Checkpoint
+            self._save_checkpoint(batch_num, len(respondent_specs))
+
+            # Brief pause between batches for rate limiting
+            await asyncio.sleep(0.2)
 
         # Validate generated dataset
         validation_result = validate_dataset(self.config.output_dir)
@@ -143,26 +167,24 @@ class SyntheticDatasetGenerator:
 
         return self.config.output_dir
 
-    def _plan_responses(
+    def _create_respondent_specs(
         self,
-        themes: list[dict],
         demographics: list[dict],
-    ) -> list[ResponseSpec]:
-        """Plan response specifications ensuring distribution targets.
+    ) -> list[RespondentSpec]:
+        """Create respondent specifications with assigned dispositions.
 
         Args:
-            themes: Generated themes for the question.
             demographics: Sampled demographic profiles.
 
         Returns:
-            List of ResponseSpec objects defining each response to generate.
+            List of RespondentSpec objects.
         """
-        specs = []
         n = self.config.n_responses
+        specs = []
 
-        # Calculate counts for each response type
+        # Calculate disposition counts based on distribution
         dist = self.config.position_distribution
-        type_counts = {
+        disposition_counts = {
             ResponseType.AGREE: int(n * dist["agree"]),
             ResponseType.DISAGREE: int(n * dist["disagree"]),
             ResponseType.NUANCED: int(n * dist["nuanced"]),
@@ -171,9 +193,9 @@ class SyntheticDatasetGenerator:
         }
 
         # Ensure counts sum to n
-        total_assigned = sum(type_counts.values())
+        total_assigned = sum(disposition_counts.values())
         if total_assigned < n:
-            type_counts[ResponseType.NUANCED] += n - total_assigned
+            disposition_counts[ResponseType.NUANCED] += n - total_assigned
 
         # Calculate length counts
         length_dist = self.config.length_distribution
@@ -183,17 +205,9 @@ class SyntheticDatasetGenerator:
             ResponseLength.LONG: int(n * length_dist["long"]),
         }
 
-        # Get regular themes (excluding X and Y)
-        regular_themes = [t for t in themes if t["topic_id"] not in ("X", "Y")]
-
         response_id = 1001
-        for response_type, count in type_counts.items():
+        for disposition, count in disposition_counts.items():
             for _ in range(count):
-                # Select themes for this response
-                theme_ids, stances = self._select_themes_for_response(
-                    response_type, regular_themes
-                )
-
                 # Sample length
                 length = self._sample_length(length_counts)
 
@@ -201,13 +215,11 @@ class SyntheticDatasetGenerator:
                 apply_noise, noise_type = self._sample_noise()
 
                 specs.append(
-                    ResponseSpec(
+                    RespondentSpec(
                         response_id=response_id,
-                        themes=theme_ids,
-                        stances=stances,
-                        response_type=response_type,
-                        length=length,
                         persona=demographics[(response_id - 1001) % len(demographics)],
+                        base_disposition=disposition,
+                        length=length,
                         apply_noise=apply_noise,
                         noise_type=noise_type,
                     )
@@ -215,64 +227,34 @@ class SyntheticDatasetGenerator:
 
                 response_id += 1
 
+        # Shuffle to mix dispositions
+        self.rng.shuffle(specs)
+
         return specs
 
-    def _select_themes_for_response(
-        self,
-        response_type: ResponseType,
-        regular_themes: list[dict],
-    ) -> tuple[list[str], list[str]]:
-        """Select themes and stances for a response based on type.
+    def _write_batch_responses(self, responses: list[dict]) -> None:
+        """Write batch responses grouped by question.
 
         Args:
-            response_type: The type of response being generated.
-            regular_themes: List of regular themes (excluding X, Y).
-
-        Returns:
-            Tuple of (theme_ids, stances).
+            responses: Flat list of response dicts with question_number field.
         """
-        if response_type == ResponseType.OFF_TOPIC:
-            return ["X"], ["NEUTRAL"]
+        # Group by question
+        by_question: dict[int, list[dict]] = {}
+        for response in responses:
+            q_num = response["question_number"]
+            if q_num not in by_question:
+                by_question[q_num] = []
+            by_question[q_num].append(response)
 
-        if response_type == ResponseType.LOW_QUALITY:
-            return ["Y"], ["NEUTRAL"]
-
-        # For regular responses: select 1-3 themes
-        n_themes = int(self.rng.choice([1, 2, 3], p=[0.5, 0.35, 0.15]))
-
-        # Ensure multi-theme ratio is respected
-        if self.rng.random() < self.config.multi_theme_ratio:
-            n_themes = max(2, n_themes)
-
-        n_themes = min(n_themes, len(regular_themes))
-
-        selected = self.rng.choice(regular_themes, size=n_themes, replace=False)
-        theme_ids = [t["topic_id"] for t in selected]
-
-        # Assign stances based on response type
-        if response_type == ResponseType.AGREE:
-            stances = ["POSITIVE"] * len(theme_ids)
-        elif response_type == ResponseType.DISAGREE:
-            stances = ["NEGATIVE"] * len(theme_ids)
-        else:  # NUANCED
-            stances = self.rng.choice(
-                ["POSITIVE", "NEGATIVE", "NEUTRAL"],
-                size=len(theme_ids),
-            ).tolist()
-
-        return theme_ids, stances
+        # Write each question's responses
+        for q_num, q_responses in by_question.items():
+            question_part = f"question_part_{q_num}"
+            self.writer.append_responses(question_part, q_responses)
 
     def _sample_length(
         self, length_counts: dict[ResponseLength, int]
     ) -> ResponseLength:
-        """Sample a response length from remaining allocation.
-
-        Args:
-            length_counts: Remaining counts per length category.
-
-        Returns:
-            Selected ResponseLength.
-        """
+        """Sample a response length from remaining allocation."""
         available = [length for length, count in length_counts.items() if count > 0]
         if not available:
             return ResponseLength.MEDIUM
@@ -282,11 +264,7 @@ class SyntheticDatasetGenerator:
         return length
 
     def _sample_noise(self) -> tuple[bool, str | None]:
-        """Determine whether to apply noise and what type.
-
-        Returns:
-            Tuple of (apply_noise, noise_type).
-        """
+        """Determine whether to apply noise and what type."""
         noise_rates = {
             NoiseLevel.LOW: {
                 "typo": 0.02,
@@ -320,32 +298,15 @@ class SyntheticDatasetGenerator:
         return False, None
 
     def _batch(self, items: list, size: int):
-        """Yield batches of items.
-
-        Args:
-            items: List to batch.
-            size: Batch size.
-
-        Yields:
-            Batches of items.
-        """
+        """Yield batches of items."""
         for i in range(0, len(items), size):
             yield items[i : i + size]
 
-    def _save_checkpoint(
-        self, question_part: str, batch_num: int, total_specs: int
-    ) -> None:
-        """Save checkpoint for recovery.
-
-        Args:
-            question_part: Current question part being processed.
-            batch_num: Number of batches completed.
-            total_specs: Total number of response specs for this question.
-        """
+    def _save_checkpoint(self, batch_num: int, total_respondents: int) -> None:
+        """Save checkpoint for recovery."""
         checkpoint = {
-            "question_part": question_part,
             "batch_num": batch_num,
-            "total_specs": total_specs,
+            "total_respondents": total_respondents,
             "generated_count": self._generated_count,
         }
         with open(self._checkpoint_path, "w") as f:

@@ -2,12 +2,13 @@
 
 import random
 from collections.abc import Callable
+from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 
-from synthetic.config import NoiseLevel, ResponseSpec
+from synthetic.config import NoiseLevel, QuestionConfig, ResponseLength, ResponseType
 
 
 class GeneratedResponse(BaseModel):
@@ -20,7 +21,28 @@ class GeneratedResponse(BaseModel):
     )
 
 
-SYSTEM_PROMPT_TEMPLATE = """You are simulating a member of the UK public responding to a government consultation.
+@dataclass
+class RespondentSpec:
+    """Specification for a single respondent across all questions."""
+
+    response_id: int
+    persona: dict[str, str]
+    base_disposition: ResponseType  # Overall stance for Q1
+    length: ResponseLength
+    apply_noise: bool
+    noise_type: str | None = None
+
+
+@dataclass
+class PreviousResponse:
+    """A previous response in the survey for context."""
+
+    question_text: str
+    response_text: str
+    sentiment: str
+
+
+SYSTEM_PROMPT_FIRST_QUESTION = """You are simulating a member of the UK public responding to a government consultation.
 
 Persona:
 {persona_desc}
@@ -39,43 +61,78 @@ Guidelines by response type:
 
 Generate authentic-sounding responses. Vary sentence structure and vocabulary."""
 
+SYSTEM_PROMPT_WITH_CONTEXT = """You are simulating a member of the UK public responding to a government consultation.
 
-async def generate_response_batch(
+Persona:
+{persona_desc}
+
+You have already answered previous questions in this consultation. Your responses should be CONSISTENT with your earlier answers - maintain the same general viewpoint, concerns, and tone.
+
+Generate a realistic consultation response with these characteristics:
+- Length: approximately {min_words}-{max_words} words
+- Write naturally as this persona would, including their likely vocabulary and concerns
+- IMPORTANT: Stay consistent with your previous responses shown below
+
+Generate authentic-sounding responses. Vary sentence structure and vocabulary."""
+
+
+async def generate_respondent_survey(
     llm: AzureChatOpenAI,
-    question: str,
-    themes: list[dict],
-    specs: list[ResponseSpec],
+    respondent: RespondentSpec,
+    questions: list[QuestionConfig],
+    themes_by_question: dict[int, list[dict]],
     noise_level: NoiseLevel,
     callbacks: list | None = None,
     on_response_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
-    """Generate a batch of responses from specifications (parallelised).
+    """Generate all responses for a single respondent across all questions.
 
-    Uses asyncio.as_completed for real-time progress tracking as each
-    response finishes, rather than waiting for the entire batch.
+    Processes questions sequentially, passing previous responses as context
+    to maintain consistency in the respondent's viewpoint.
 
     Args:
         llm: Azure OpenAI LLM instance.
-        question: Consultation question text.
-        themes: Full theme list for reference.
-        specs: List of response specifications.
+        respondent: Respondent specification with persona and base disposition.
+        questions: List of question configurations in order.
+        themes_by_question: Dict mapping question number to themes list.
         noise_level: Noise injection intensity.
         callbacks: LangChain callbacks for tracing.
         on_response_complete: Callback invoked when each response finishes.
 
     Returns:
-        List of response dicts with all required fields.
+        List of response dicts, one per question, with all required fields.
     """
-    import asyncio
-
     structured_llm = llm.with_structured_output(GeneratedResponse)
     config = {"callbacks": callbacks} if callbacks else {}
 
-    async def generate_single(spec: ResponseSpec) -> dict:
-        """Generate a single response."""
-        theme_context = _build_theme_context(spec, themes)
-        system_prompt = _build_system_prompt(spec)
-        human_prompt = _build_human_prompt(question, theme_context, spec)
+    previous_responses: list[PreviousResponse] = []
+    results = []
+
+    for question in questions:
+        themes = themes_by_question[question.number]
+        is_first_question = len(previous_responses) == 0
+
+        # Select themes for this response
+        theme_ids, stances = _select_themes_for_response(
+            respondent.base_disposition,
+            themes,
+            previous_responses,
+        )
+
+        # Build prompts
+        if is_first_question:
+            system_prompt = _build_first_question_prompt(respondent)
+        else:
+            system_prompt = _build_context_prompt(respondent)
+
+        human_prompt = _build_human_prompt(
+            question=question,
+            themes=themes,
+            theme_ids=theme_ids,
+            stances=stances,
+            respondent=respondent,
+            previous_responses=previous_responses,
+        )
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -85,110 +142,244 @@ async def generate_response_batch(
         response = await structured_llm.ainvoke(messages, config=config)
 
         final_text = response.response
-        if spec.apply_noise and spec.noise_type:
-            final_text = _apply_noise(final_text, spec.noise_type, noise_level)
+        if respondent.apply_noise and respondent.noise_type:
+            final_text = _apply_noise(final_text, respondent.noise_type, noise_level)
 
-        return {
-            "response_id": spec.response_id,
+        result = {
+            "response_id": respondent.response_id,
+            "question_number": question.number,
             "response": final_text,
             "position": response.sentiment,
             "evidence_rich": "YES" if response.evidence_rich else "NO",
-            "labels": spec.themes,
-            "stances": spec.stances,
+            "labels": theme_ids,
+            "stances": stances,
         }
-
-    # Create tasks for all specs
-    tasks = [asyncio.create_task(generate_single(spec)) for spec in specs]
-
-    # Use as_completed to track progress as each response finishes
-    results = []
-    for coro in asyncio.as_completed(tasks):
-        result = await coro
         results.append(result)
+
+        # Track for next question's context
+        previous_responses.append(
+            PreviousResponse(
+                question_text=question.text,
+                response_text=final_text,
+                sentiment=response.sentiment,
+            )
+        )
+
         if on_response_complete:
             on_response_complete()
 
     return results
 
 
-def _build_theme_context(spec: ResponseSpec, themes: list[dict]) -> list[str]:
-    """Build theme context lines for prompt.
+async def generate_respondent_batch(
+    llm: AzureChatOpenAI,
+    respondents: list[RespondentSpec],
+    questions: list[QuestionConfig],
+    themes_by_question: dict[int, list[dict]],
+    noise_level: NoiseLevel,
+    callbacks: list | None = None,
+    on_response_complete: Callable[[], None] | None = None,
+) -> list[dict]:
+    """Generate responses for a batch of respondents (parallelised across respondents).
+
+    Each respondent processes their questions sequentially for consistency,
+    but multiple respondents are processed in parallel.
 
     Args:
-        spec: Response specification.
-        themes: Full theme list.
+        llm: Azure OpenAI LLM instance.
+        respondents: List of respondent specifications.
+        questions: List of question configurations in order.
+        themes_by_question: Dict mapping question number to themes list.
+        noise_level: Noise injection intensity.
+        callbacks: LangChain callbacks for tracing.
+        on_response_complete: Callback invoked when each response finishes.
 
     Returns:
-        List of formatted theme+stance strings.
+        Flat list of all response dicts across all respondents and questions.
     """
-    theme_context = []
-    for tid, stance in zip(spec.themes, spec.stances):
-        theme = next((t for t in themes if t["topic_id"] == tid), None)
-        if theme:
-            theme_context.append(f"- {theme['topic_label']} (stance: {stance})")
-    return theme_context
+    import asyncio
+
+    tasks = [
+        asyncio.create_task(
+            generate_respondent_survey(
+                llm=llm,
+                respondent=respondent,
+                questions=questions,
+                themes_by_question=themes_by_question,
+                noise_level=noise_level,
+                callbacks=callbacks,
+                on_response_complete=on_response_complete,
+            )
+        )
+        for respondent in respondents
+    ]
+
+    # Gather all results
+    all_results = await asyncio.gather(*tasks)
+
+    # Flatten: list of lists -> single list
+    return [
+        response
+        for respondent_responses in all_results
+        for response in respondent_responses
+    ]
 
 
-def _build_system_prompt(spec: ResponseSpec) -> str:
-    """Build system prompt for response generation.
+def _select_themes_for_response(
+    base_disposition: ResponseType,
+    themes: list[dict],
+    previous_responses: list[PreviousResponse],
+) -> tuple[list[str], list[str]]:
+    """Select themes and stances for a response.
+
+    For Q1, uses the base disposition. For subsequent questions,
+    infers stance from previous response sentiments for consistency.
 
     Args:
-        spec: Response specification.
+        base_disposition: The respondent's base response type.
+        themes: Available themes for this question.
+        previous_responses: Previous responses for context.
 
     Returns:
-        Formatted system prompt.
+        Tuple of (theme_ids, stances).
     """
-    length_range = spec.length.value
-    persona_desc = ", ".join(f"{k}: {v}" for k, v in spec.persona.items())
+    if base_disposition == ResponseType.OFF_TOPIC:
+        return ["X"], ["NEUTRAL"]
 
-    return SYSTEM_PROMPT_TEMPLATE.format(
+    if base_disposition == ResponseType.LOW_QUALITY:
+        return ["Y"], ["NEUTRAL"]
+
+    # Get regular themes (excluding X and Y)
+    regular_themes = [t for t in themes if t["topic_id"] not in ("X", "Y")]
+
+    if not regular_themes:
+        return ["X"], ["NEUTRAL"]
+
+    # Select 1-3 themes
+    n_themes = random.choice([1, 2, 3])
+    n_themes = min(n_themes, len(regular_themes))
+    selected = random.sample(regular_themes, n_themes)
+    theme_ids = [t["topic_id"] for t in selected]
+
+    # Determine stances based on disposition and previous responses
+    if previous_responses:
+        # Infer from previous sentiment for consistency
+        prev_sentiments = [r.sentiment for r in previous_responses]
+        agrees = sum(1 for s in prev_sentiments if s == "AGREE")
+        disagrees = sum(1 for s in prev_sentiments if s == "DISAGREE")
+
+        if agrees > disagrees:
+            dominant_stance = "POSITIVE"
+        elif disagrees > agrees:
+            dominant_stance = "NEGATIVE"
+        else:
+            dominant_stance = "NEUTRAL"
+
+        # Mostly use dominant stance with some variation
+        stances = []
+        for _ in theme_ids:
+            if random.random() < 0.8:
+                stances.append(dominant_stance)
+            else:
+                stances.append(random.choice(["POSITIVE", "NEGATIVE", "NEUTRAL"]))
+    else:
+        # First question: use base disposition
+        if base_disposition == ResponseType.AGREE:
+            stances = ["POSITIVE"] * len(theme_ids)
+        elif base_disposition == ResponseType.DISAGREE:
+            stances = ["NEGATIVE"] * len(theme_ids)
+        else:  # NUANCED
+            stances = [
+                random.choice(["POSITIVE", "NEGATIVE", "NEUTRAL"]) for _ in theme_ids
+            ]
+
+    return theme_ids, stances
+
+
+def _build_first_question_prompt(respondent: RespondentSpec) -> str:
+    """Build system prompt for the first question."""
+    length_range = respondent.length.value
+    persona_desc = ", ".join(f"{k}: {v}" for k, v in respondent.persona.items())
+
+    return SYSTEM_PROMPT_FIRST_QUESTION.format(
         persona_desc=persona_desc,
         min_words=length_range[0],
         max_words=length_range[1],
-        response_type=spec.response_type.value,
+        response_type=respondent.base_disposition.value,
+    )
+
+
+def _build_context_prompt(respondent: RespondentSpec) -> str:
+    """Build system prompt for subsequent questions with context instruction."""
+    length_range = respondent.length.value
+    persona_desc = ", ".join(f"{k}: {v}" for k, v in respondent.persona.items())
+
+    return SYSTEM_PROMPT_WITH_CONTEXT.format(
+        persona_desc=persona_desc,
+        min_words=length_range[0],
+        max_words=length_range[1],
     )
 
 
 def _build_human_prompt(
-    question: str,
-    theme_context: list[str],
-    spec: ResponseSpec,
+    question: QuestionConfig,
+    themes: list[dict],
+    theme_ids: list[str],
+    stances: list[str],
+    respondent: RespondentSpec,
+    previous_responses: list[PreviousResponse],
 ) -> str:
-    """Build human prompt for specific response.
+    """Build human prompt with question, themes, and optional previous context."""
+    parts = []
 
-    Args:
-        question: Consultation question.
-        theme_context: Formatted theme+stance lines.
-        spec: Response specification.
+    # Add previous responses context if any
+    if previous_responses:
+        parts.append("## Your Previous Responses in This Consultation\n")
+        for i, prev in enumerate(previous_responses, 1):
+            parts.append(f"**Q{i}:** {prev.question_text}")
+            parts.append(f'*Your answer ({prev.sentiment}):* "{prev.response_text}"\n')
+        parts.append("---\n")
 
-    Returns:
-        Formatted human prompt.
-    """
-    themes_str = "\n".join(theme_context)
+    # Current question
+    question_text = question.text
+    if question.scale_statement:
+        question_text = f'{question.text}\n\nStatement: "{question.scale_statement}"'
 
-    evidence_instruction = ""
-    if spec.length.value[0] >= 51:  # Medium or long responses
-        evidence_instruction = "\nInclude specific examples, personal experience, or evidence where appropriate."
+    parts.append(f"## Current Question\n{question_text}\n")
 
-    return f"""Consultation Question: {question}
+    # Theme guidance
+    theme_context = []
+    for tid, stance in zip(theme_ids, stances):
+        theme = next((t for t in themes if t["topic_id"] == tid), None)
+        if theme:
+            theme_context.append(f"- {theme['topic_label']} (stance: {stance})")
 
-Your response should address these themes with the indicated stance:
-{themes_str}
+    if theme_context:
+        parts.append(
+            "Your response should address these themes with the indicated stance:"
+        )
+        parts.append("\n".join(theme_context))
+        parts.append("")
 
-Write your consultation response now.{evidence_instruction}"""
+    # Evidence instruction for longer responses
+    if respondent.length.value[0] >= 51:
+        parts.append(
+            "Include specific examples, personal experience, or evidence where appropriate.\n"
+        )
+
+    # Consistency reminder for subsequent questions
+    if previous_responses:
+        parts.append(
+            "**Remember:** Stay consistent with your previous responses - maintain your overall viewpoint and concerns."
+        )
+
+    parts.append("\nWrite your consultation response now.")
+
+    return "\n".join(parts)
 
 
 def _apply_noise(text: str, noise_type: str, level: NoiseLevel) -> str:
-    """Apply noise injection to response text.
-
-    Args:
-        text: Original response text.
-        noise_type: Type of noise to apply.
-        level: Noise intensity level.
-
-    Returns:
-        Text with noise applied.
-    """
+    """Apply noise injection to response text."""
     intensity = {
         NoiseLevel.LOW: 0.3,
         NoiseLevel.MEDIUM: 0.5,
@@ -210,25 +401,15 @@ def _apply_noise(text: str, noise_type: str, level: NoiseLevel) -> str:
 
 
 def _inject_typos(text: str, intensity: float) -> str:
-    """Inject realistic typos into text.
-
-    Args:
-        text: Original text.
-        intensity: How aggressively to inject typos (0-1).
-
-    Returns:
-        Text with typos.
-    """
+    """Inject realistic typos into text."""
     words = text.split()
     n_typos = max(1, int(len(words) * intensity * 0.1))
 
     typo_patterns = [
-        lambda w: w[:-1] if len(w) > 3 else w,  # Missing last letter
-        lambda w: w + w[-1] if len(w) > 2 else w,  # Doubled letter
-        lambda w: w[:1] + w[1:].replace("e", "r", 1)
-        if "e" in w[1:]
-        else w,  # Adjacent key
-        lambda w: w.replace("th", "hte", 1) if "th" in w else w,  # Common transposition
+        lambda w: w[:-1] if len(w) > 3 else w,
+        lambda w: w + w[-1] if len(w) > 2 else w,
+        lambda w: w[:1] + w[1:].replace("e", "r", 1) if "e" in w[1:] else w,
+        lambda w: w.replace("th", "hte", 1) if "th" in w else w,
     ]
 
     for _ in range(n_typos):
@@ -241,21 +422,11 @@ def _inject_typos(text: str, intensity: float) -> str:
 
 
 def _inject_grammar_errors(text: str, intensity: float) -> str:
-    """Inject grammar errors into text.
-
-    Args:
-        text: Original text.
-        intensity: How aggressively to inject errors (0-1).
-
-    Returns:
-        Text with grammar errors.
-    """
+    """Inject grammar errors into text."""
     if intensity > 0.5:
-        # Remove some punctuation
         text = text.replace(",", "", 1)
 
     if intensity > 0.7:
-        # Common grammar mistakes
         replacements = [
             ("there is", "theres"),
             ("they are", "their"),
@@ -271,14 +442,7 @@ def _inject_grammar_errors(text: str, intensity: float) -> str:
 
 
 def _inject_emotional_language(text: str) -> str:
-    """Add emotional emphasis to text.
-
-    Args:
-        text: Original text.
-
-    Returns:
-        Text with emotional language.
-    """
+    """Add emotional emphasis to text."""
     emphatics = [
         "Absolutely ",
         "I really think ",
@@ -286,14 +450,12 @@ def _inject_emotional_language(text: str) -> str:
         "I strongly believe ",
     ]
 
-    # Add emphatic opener
     if not text[0].isupper():
         text = text[0].upper() + text[1:]
 
     prefix = random.choice(emphatics)
     text = prefix.lower() + text[0].lower() + text[1:]
 
-    # Add exclamation
     if text.endswith("."):
         text = text[:-1] + "!"
 
@@ -301,21 +463,13 @@ def _inject_emotional_language(text: str) -> str:
 
 
 def _add_sarcasm_markers(text: str) -> str:
-    """Add sarcasm indicators to text.
-
-    Args:
-        text: Original text.
-
-    Returns:
-        Text with sarcasm markers.
-    """
+    """Add sarcasm indicators to text."""
     sarcastic_additions = [
         " (as if that will ever happen)",
         " - what a surprise",
         " Obviously...",
     ]
 
-    # Find a sentence to add sarcasm to
     sentences = text.split(". ")
     if len(sentences) > 1:
         idx = random.randint(0, len(sentences) - 2)

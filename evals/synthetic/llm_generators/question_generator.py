@@ -11,7 +11,6 @@ from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 
 
-
 class GeneratedQuestion(BaseModel):
     """A single generated consultation question."""
 
