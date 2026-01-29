@@ -24,7 +24,7 @@ jobs:
     permissions: write-all
     with:
       EC2_INSTANCE_TYPE: t3.medium
-      ENVIRONMENT: eval
+      ENVIRONMENT: prod
     secrets:
       AWS_GITHUBRUNNER_USER_ACCESS_KEY: ${{ secrets.AWS_GITHUBRUNNER_USER_ACCESS_KEY }}
       AWS_GITHUBRUNNER_USER_SECRET_ID: ${{ secrets.AWS_GITHUBRUNNER_USER_SECRET_ID }}
