@@ -33,7 +33,7 @@ async def evaluate_sentiment():
     dotenv.load_dotenv()
 
     llm = AzureChatOpenAI(
-        model_name="gpt-4o",
+        azure_deployment=os.getenv("DEPLOYMENT_NAME"),
         temperature=0,
     )
 
