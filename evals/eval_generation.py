@@ -30,10 +30,7 @@ async def evaluate_generation():
     session_id = f"eval_generation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
-        metadata={
-            "eval_type": "generation",
-            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
-        },
+        eval_type="generation",
     )
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 
@@ -44,6 +41,7 @@ async def evaluate_generation():
     )
 
     sentiments, question, theme_framework = load_responses_and_framework()
+
     themes_df, _ = await theme_generation(
         responses_df=sentiments,
         llm=llm,
@@ -59,12 +57,12 @@ async def evaluate_generation():
         llm=llm,
         question=question,
     )
+
     eval_scores = calculate_generation_metrics(
         refined_themes_df, theme_framework, callbacks=callbacks
     )
     print(f"Theme Generation Eval Results: \n {eval_scores}")
 
-    # Attach scores and flush
     langfuse_utils.create_scores(langfuse_ctx, eval_scores)
     langfuse_utils.flush(langfuse_ctx)
 

@@ -38,10 +38,7 @@ async def evaluate_sentiment():
     session_id = f"eval_sentiment_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
-        metadata={
-            "eval_type": "sentiment",
-            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
-        },
+        eval_type="sentiment",
     )
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 

@@ -33,10 +33,7 @@ async def evaluate_refinement():
     session_id = f"eval_refinement_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
-        metadata={
-            "eval_type": "refinement",
-            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
-        },
+        eval_type="refinement",
     )
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 

@@ -37,10 +37,7 @@ async def evaluate_condensation():
     session_id = f"eval_condensation_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
-        metadata={
-            "eval_type": "condensation",
-            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
-        },
+        eval_type="condensation",
     )
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 

@@ -53,10 +53,7 @@ async def evaluate_mapping(question_num: int | None = None):
     session_id = f"eval_mapping_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
-        metadata={
-            "eval_type": "mapping",
-            "model": os.getenv("DEPLOYMENT_NAME", "unknown"),
-        },
+        eval_type="mapping",
     )
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 

@@ -15,6 +15,20 @@ if TYPE_CHECKING:
 logger = logging.getLogger("themefinder.evals.langfuse")
 
 
+def _get_version() -> str:
+    """Get package version from installed metadata.
+
+    Returns:
+        Version string (e.g., "0.7.8") or "unknown" if not found.
+    """
+    try:
+        from importlib.metadata import version
+
+        return version("themefinder")
+    except Exception:
+        return "unknown"
+
+
 @dataclass
 class LangfuseContext:
     """Container for Langfuse client and callback handler."""
@@ -31,14 +45,18 @@ class LangfuseContext:
 
 def get_langfuse_context(
     session_id: str,
+    eval_type: str,
     metadata: dict | None = None,
+    tags: list[str] | None = None,
 ) -> LangfuseContext:
-    """Initialise Langfuse with graceful fallback if not configured.
+    """Initialise Langfuse with structured tags and metadata.
 
     Args:
         session_id: Unique identifier for grouping traces
             (e.g., "eval_generation_20260129_120000")
-        metadata: Optional metadata dict to attach to all traces
+        eval_type: Type of evaluation (e.g., "generation", "sentiment", "mapping")
+        metadata: Optional additional metadata dict to merge with standard metadata
+        tags: Optional additional tags to merge with standard tags
 
     Returns:
         LangfuseContext with client and handler (or None values if not configured)
@@ -61,15 +79,43 @@ def get_langfuse_context(
             host=base_url,
         )
 
-        # Set session and metadata via propagate_attributes for SDK v3
+        # Build standard tags and metadata
+        version = _get_version()
+        environment = os.getenv("ENVIRONMENT", "development")
+        git_sha = os.getenv("GITHUB_SHA", "local")[:7]
+        model = os.getenv("DEPLOYMENT_NAME", "unknown")
+
+        standard_tags = [
+            "eval",
+            eval_type,
+            f"model:{model}",
+            f"v{version}",
+            environment,
+        ]
+        all_tags = standard_tags + (tags or [])
+
+        standard_metadata = {
+            "eval_type": eval_type,
+            "model": model,
+            "version": version,
+            "git_sha": git_sha,
+            "environment": environment,
+        }
+        all_metadata = {**standard_metadata, **(metadata or {})}
+
+        # Set session, tags, and metadata via propagate_attributes for SDK v3
         propagate_attributes(
             session_id=session_id,
-            metadata=metadata or {},
+            tags=all_tags,
+            metadata=all_metadata,
         )
 
         handler = CallbackHandler()
 
-        logger.info(f"Langfuse initialised with session_id={session_id}")
+        logger.info(
+            f"Langfuse initialised: session_id={session_id}, "
+            f"eval_type={eval_type}, version={version}, env={environment}"
+        )
         return LangfuseContext(client=client, handler=handler, session_id=session_id)
 
     except ImportError:
