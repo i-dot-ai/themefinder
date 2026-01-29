@@ -44,19 +44,23 @@ async def evaluate_refinement():
     )
 
     condensed_themes = load_condensed_themes()
-    refined_themes, _ = await theme_refinement(
-        condensed_themes,
-        llm=llm,
-        question="",
-    )
-    condensed_themes_dict = condensed_themes[
-        ["topic_label", "topic_description"]
-    ].to_dict(orient="records")
-    eval_prompt = read_and_render(
-        "refinement_eval.txt",
-        {"original_topics": condensed_themes_dict, "new_topics": refined_themes},
-    )
-    response = llm.invoke(eval_prompt)
+
+    # Wrap all LLM calls in trace_context to propagate tags/metadata
+    with langfuse_utils.trace_context(langfuse_ctx):
+        refined_themes, _ = await theme_refinement(
+            condensed_themes,
+            llm=llm,
+            question="",
+        )
+        condensed_themes_dict = condensed_themes[
+            ["topic_label", "topic_description"]
+        ].to_dict(orient="records")
+        eval_prompt = read_and_render(
+            "refinement_eval.txt",
+            {"original_topics": condensed_themes_dict, "new_topics": refined_themes},
+        )
+        response = llm.invoke(eval_prompt)
+
     print(f"Theme Refinement Eval Results: \n {response.content}")
 
     # Flush (no numeric scores for qualitative eval)

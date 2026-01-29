@@ -50,11 +50,13 @@ async def evaluate_sentiment():
 
     question, responses = load_responses()
 
-    result, _ = await sentiment_analysis(
-        responses_df=responses[["response_id", "response"]],
-        llm=llm,
-        question=question,
-    )
+    # Wrap all LLM calls in trace_context to propagate tags/metadata
+    with langfuse_utils.trace_context(langfuse_ctx):
+        result, _ = await sentiment_analysis(
+            responses_df=responses[["response_id", "response"]],
+            llm=llm,
+            question=question,
+        )
 
     responses = responses.rename(columns={"position": "supervisor_position"})
     result = result.rename(columns={"position": "ai_position"})

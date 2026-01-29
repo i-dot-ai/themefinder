@@ -66,26 +66,28 @@ async def evaluate_mapping(question_num: int | None = None):
     questions_to_process = [question_num] if question_num is not None else range(1, 4)
     all_scores = {}
 
-    for i in questions_to_process:
-        question, topics, responses = load_mapped_responses(i)
-        result, _ = await theme_mapping(
-            responses_df=responses[["response_id", "response"]],
-            llm=llm,
-            question=question,
-            refined_themes_df=topics,
-        )
-        responses = responses.merge(
-            result[["response_id", "labels"]], "inner", on="response_id"
-        )
-        mapping_metrics = calculate_mapping_metrics(
-            df=responses, column_one="topics", column_two="labels"
-        )
-        print(f"Theme Mapping Question {i} Eval Results: \n {mapping_metrics}")
+    # Wrap all LLM calls in trace_context to propagate tags/metadata
+    with langfuse_utils.trace_context(langfuse_ctx):
+        for i in questions_to_process:
+            question, topics, responses = load_mapped_responses(i)
+            result, _ = await theme_mapping(
+                responses_df=responses[["response_id", "response"]],
+                llm=llm,
+                question=question,
+                refined_themes_df=topics,
+            )
+            responses = responses.merge(
+                result[["response_id", "labels"]], "inner", on="response_id"
+            )
+            mapping_metrics = calculate_mapping_metrics(
+                df=responses, column_one="topics", column_two="labels"
+            )
+            print(f"Theme Mapping Question {i} Eval Results: \n {mapping_metrics}")
 
-        # Collect scores with question prefix
-        for key, value in mapping_metrics.items():
-            if isinstance(value, (int, float)):
-                all_scores[f"q{i}_{key}"] = value
+            # Collect scores with question prefix
+            for key, value in mapping_metrics.items():
+                if isinstance(value, (int, float)):
+                    all_scores[f"q{i}_{key}"] = value
 
     # Attach scores and flush
     langfuse_utils.create_scores(langfuse_ctx, all_scores)

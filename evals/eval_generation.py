@@ -42,25 +42,28 @@ async def evaluate_generation():
 
     sentiments, question, theme_framework = load_responses_and_framework()
 
-    themes_df, _ = await theme_generation(
-        responses_df=sentiments,
-        llm=llm,
-        question=question,
-    )
-    condensed_themes_df, _ = await theme_condensation(
-        themes_df,
-        llm=llm,
-        question=question,
-    )
-    refined_themes_df, _ = await theme_refinement(
-        condensed_themes_df,
-        llm=llm,
-        question=question,
-    )
+    # Wrap all LLM calls in trace_context to propagate tags/metadata
+    with langfuse_utils.trace_context(langfuse_ctx):
+        themes_df, _ = await theme_generation(
+            responses_df=sentiments,
+            llm=llm,
+            question=question,
+        )
+        condensed_themes_df, _ = await theme_condensation(
+            themes_df,
+            llm=llm,
+            question=question,
+        )
+        refined_themes_df, _ = await theme_refinement(
+            condensed_themes_df,
+            llm=llm,
+            question=question,
+        )
 
-    eval_scores = calculate_generation_metrics(
-        refined_themes_df, theme_framework, callbacks=callbacks
-    )
+        eval_scores = calculate_generation_metrics(
+            refined_themes_df, theme_framework, callbacks=callbacks
+        )
+
     print(f"Theme Generation Eval Results: \n {eval_scores}")
 
     langfuse_utils.create_scores(langfuse_ctx, eval_scores)

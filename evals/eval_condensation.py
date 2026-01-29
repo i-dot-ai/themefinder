@@ -48,19 +48,23 @@ async def evaluate_condensation():
     )
 
     themes, question = load_generated_themes()
-    condensed_themes, _ = await theme_condensation(
-        themes,
-        llm=llm,
-        question=question,
-    )
-    condensed_themes = condensed_themes[["topic_label", "topic_description"]].to_dict(
-        orient="records"
-    )
-    eval_prompt = read_and_render(
-        "condensation_eval.txt",
-        {"original_topics": themes, "condensed_topics": condensed_themes},
-    )
-    response = llm.invoke(eval_prompt)
+
+    # Wrap all LLM calls in trace_context to propagate tags/metadata
+    with langfuse_utils.trace_context(langfuse_ctx):
+        condensed_themes, _ = await theme_condensation(
+            themes,
+            llm=llm,
+            question=question,
+        )
+        condensed_themes = condensed_themes[
+            ["topic_label", "topic_description"]
+        ].to_dict(orient="records")
+        eval_prompt = read_and_render(
+            "condensation_eval.txt",
+            {"original_topics": themes, "condensed_topics": condensed_themes},
+        )
+        response = llm.invoke(eval_prompt)
+
     print(f"Theme Condensation Eval Results: \n {response.content}")
 
     # Flush (no numeric scores for qualitative eval)

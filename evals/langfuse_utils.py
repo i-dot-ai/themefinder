@@ -5,8 +5,9 @@ Provides graceful fallback when Langfuse is not configured.
 
 import logging
 import os
+from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generator
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -36,11 +37,48 @@ class LangfuseContext:
     client: "Langfuse | None"
     handler: "CallbackHandler | None"
     session_id: str | None = None
+    tags: list[str] | None = None
+    metadata: dict | None = None
 
     @property
     def is_enabled(self) -> bool:
         """Check if Langfuse is configured and available."""
         return self.client is not None
+
+
+@contextmanager
+def trace_context(context: LangfuseContext) -> Generator[None, None, None]:
+    """Context manager to propagate Langfuse attributes to all nested LLM calls.
+
+    Use this to wrap code sections where you want tags, metadata, and session_id
+    to be attached to all Langfuse traces created within the block.
+
+    Args:
+        context: LangfuseContext from get_langfuse_context()
+
+    Example:
+        with trace_context(langfuse_ctx):
+            response = llm.invoke(prompt)  # Trace will have tags/metadata
+    """
+    if not context.is_enabled:
+        yield
+        return
+
+    try:
+        from langfuse import propagate_attributes
+
+        with propagate_attributes(
+            session_id=context.session_id,
+            tags=context.tags,
+            metadata=context.metadata,
+        ):
+            yield
+    except ImportError:
+        logger.warning("Langfuse package not available for propagate_attributes")
+        yield
+    except Exception as e:
+        logger.warning(f"Failed to set trace context: {e}")
+        yield
 
 
 def get_langfuse_context(
@@ -70,7 +108,7 @@ def get_langfuse_context(
         return LangfuseContext(client=None, handler=None)
 
     try:
-        from langfuse import Langfuse, propagate_attributes
+        from langfuse import Langfuse
         from langfuse.langchain import CallbackHandler
 
         client = Langfuse(
@@ -103,20 +141,19 @@ def get_langfuse_context(
         }
         all_metadata = {**standard_metadata, **(metadata or {})}
 
-        # Set session, tags, and metadata via propagate_attributes for SDK v3
-        propagate_attributes(
-            session_id=session_id,
-            tags=all_tags,
-            metadata=all_metadata,
-        )
-
         handler = CallbackHandler()
 
         logger.info(
             f"Langfuse initialised: session_id={session_id}, "
             f"eval_type={eval_type}, version={version}, env={environment}"
         )
-        return LangfuseContext(client=client, handler=handler, session_id=session_id)
+        return LangfuseContext(
+            client=client,
+            handler=handler,
+            session_id=session_id,
+            tags=all_tags,
+            metadata=all_metadata,
+        )
 
     except ImportError:
         logger.warning("Langfuse package not available")
