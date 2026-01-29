@@ -16,10 +16,10 @@ nest_asyncio.apply()
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
+from themefinder import theme_refinement
 
 import langfuse_utils
 from datasets import DatasetConfig, load_local_data
-from themefinder import theme_refinement
 from utils import read_and_render
 
 
@@ -37,7 +37,9 @@ async def evaluate_refinement(
     dotenv.load_dotenv()
 
     config = DatasetConfig(dataset=dataset, stage="refinement")
-    session_id = f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    session_id = (
+        f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
 
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
@@ -82,7 +84,9 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
     try:
         dataset = ctx.client.get_dataset(config.name)
     except Exception as e:
-        print(f"Dataset {config.name} not found in Langfuse, falling back to local: {e}")
+        print(
+            f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
+        )
         return await _run_local_fallback(config, llm, callbacks)
 
     def task(*, item, **kwargs) -> dict:
@@ -147,15 +151,19 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
 
         # Qualitative evaluation via LLM
         # Original themes have topic_label, topic_description, and combined topic
-        original_themes = themes_df[["topic_label", "topic_description"]].to_dict(orient="records")
+        original_themes = themes_df[["topic_label", "topic_description"]].to_dict(
+            orient="records"
+        )
         # Refined themes have combined topic column - parse it back for comparison
         refined_themes = []
         for _, row in refined_df.iterrows():
             topic_parts = row["topic"].split(": ", 1)
-            refined_themes.append({
-                "topic_label": topic_parts[0] if len(topic_parts) > 0 else "",
-                "topic_description": topic_parts[1] if len(topic_parts) > 1 else "",
-            })
+            refined_themes.append(
+                {
+                    "topic_label": topic_parts[0] if len(topic_parts) > 0 else "",
+                    "topic_description": topic_parts[1] if len(topic_parts) > 1 else "",
+                }
+            )
 
         eval_prompt = read_and_render(
             "refinement_eval.txt",
@@ -171,7 +179,11 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run theme refinement evaluation")
-    parser.add_argument("--dataset", default="gambling_XS", help="Dataset identifier (e.g., gambling_XS)")
+    parser.add_argument(
+        "--dataset",
+        default="gambling_XS",
+        help="Dataset identifier (e.g., gambling_XS)",
+    )
     args = parser.parse_args()
 
     asyncio.run(evaluate_refinement(dataset=args.dataset))

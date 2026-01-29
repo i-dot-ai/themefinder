@@ -17,12 +17,12 @@ nest_asyncio.apply()
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
+from themefinder import theme_condensation, theme_generation, theme_refinement
 
 import langfuse_utils
 from datasets import DatasetConfig, load_local_data
 from evaluators import create_coverage_evaluator, create_groundedness_evaluator
 from metrics import calculate_generation_metrics
-from themefinder import theme_condensation, theme_generation, theme_refinement
 
 
 async def evaluate_generation(
@@ -39,7 +39,9 @@ async def evaluate_generation(
     dotenv.load_dotenv()
 
     config = DatasetConfig(dataset=dataset, stage="generation")
-    session_id = f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    session_id = (
+        f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
 
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
@@ -81,7 +83,9 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
     try:
         dataset = ctx.client.get_dataset(config.name)
     except Exception as e:
-        print(f"Dataset {config.name} not found in Langfuse, falling back to local: {e}")
+        print(
+            f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
+        )
         return await _run_local_fallback(config, llm, callbacks)
 
     def task(*, item, **kwargs) -> dict:
@@ -188,7 +192,11 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run theme generation evaluation")
-    parser.add_argument("--dataset", default="gambling_XS", help="Dataset identifier (e.g., gambling_XS)")
+    parser.add_argument(
+        "--dataset",
+        default="gambling_XS",
+        help="Dataset identifier (e.g., gambling_XS)",
+    )
     args = parser.parse_args()
 
     asyncio.run(evaluate_generation(dataset=args.dataset))

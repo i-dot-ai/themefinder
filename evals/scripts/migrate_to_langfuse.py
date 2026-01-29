@@ -116,9 +116,17 @@ def migrate_all(dataset: str = "gambling_XS", stage: str | None = None) -> None:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Migrate eval data to Langfuse datasets")
-    parser.add_argument("--dataset", default="gambling_XS", help="Dataset identifier (e.g., gambling_XS)")
-    parser.add_argument("--stage", default=None, help="Specific stage to migrate (optional)")
+    parser = argparse.ArgumentParser(
+        description="Migrate eval data to Langfuse datasets"
+    )
+    parser.add_argument(
+        "--dataset",
+        default="gambling_XS",
+        help="Dataset identifier (e.g., gambling_XS)",
+    )
+    parser.add_argument(
+        "--stage", default=None, help="Specific stage to migrate (optional)"
+    )
     args = parser.parse_args()
 
     migrate_all(dataset=args.dataset, stage=args.stage)

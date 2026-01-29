@@ -191,7 +191,9 @@ def create_coverage_evaluator(llm: Any):
     return coverage_evaluator
 
 
-def sentiment_accuracy_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
+def sentiment_accuracy_evaluator(
+    *, output: dict, expected_output: dict, **kwargs
+) -> Any:
     """Aggregate accuracy evaluator for sentiment analysis.
 
     Args:
@@ -212,11 +214,19 @@ def sentiment_accuracy_evaluator(*, output: dict, expected_output: dict, **kwarg
 
         if not expected_positions:
             if Evaluation == dict:
-                return {"name": "accuracy", "value": 0.0, "comment": "No expected positions"}
-            return Evaluation(name="accuracy", value=0.0, comment="No expected positions")
+                return {
+                    "name": "accuracy",
+                    "value": 0.0,
+                    "comment": "No expected positions",
+                }
+            return Evaluation(
+                name="accuracy", value=0.0, comment="No expected positions"
+            )
 
         correct = sum(
-            1 for rid, pos in output_positions.items() if expected_positions.get(rid) == pos
+            1
+            for rid, pos in output_positions.items()
+            if expected_positions.get(rid) == pos
         )
         total = len(expected_positions)
         accuracy = correct / total if total > 0 else 0.0
@@ -261,8 +271,14 @@ def mapping_f1_evaluator(*, output: dict, expected_output: dict, **kwargs) -> An
 
         if not expected_mappings:
             if Evaluation == dict:
-                return {"name": "f1_score", "value": 0.0, "comment": "No expected mappings"}
-            return Evaluation(name="f1_score", value=0.0, comment="No expected mappings")
+                return {
+                    "name": "f1_score",
+                    "value": 0.0,
+                    "comment": "No expected mappings",
+                }
+            return Evaluation(
+                name="f1_score", value=0.0, comment="No expected mappings"
+            )
 
         # Convert to lists for MultiLabelBinarizer
         response_ids = list(expected_mappings.keys())

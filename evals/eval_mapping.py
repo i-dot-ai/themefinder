@@ -16,12 +16,12 @@ nest_asyncio.apply()
 import dotenv
 import pandas as pd
 from langchain_openai import AzureChatOpenAI
+from themefinder import theme_mapping
 
 import langfuse_utils
 from datasets import DatasetConfig, load_local_data
 from evaluators import mapping_f1_evaluator
 from metrics import calculate_mapping_metrics
-from themefinder import theme_mapping
 
 
 async def evaluate_mapping(
@@ -40,7 +40,9 @@ async def evaluate_mapping(
     dotenv.load_dotenv()
 
     config = DatasetConfig(dataset=dataset, stage="mapping")
-    session_id = f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    session_id = (
+        f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    )
 
     langfuse_ctx = langfuse_utils.get_langfuse_context(
         session_id=session_id,
@@ -84,7 +86,9 @@ async def _run_with_langfuse(
     try:
         dataset = ctx.client.get_dataset(config.name)
     except Exception as e:
-        print(f"Dataset {config.name} not found in Langfuse, falling back to local: {e}")
+        print(
+            f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
+        )
         return await _run_local_fallback(config, llm, question_num)
 
     def task(*, item, **kwargs) -> dict:
@@ -148,7 +152,10 @@ async def _run_local_fallback(
     # Filter to specific question if requested
     if question_num is not None:
         data_items = [
-            item for item in data_items if f"part_{question_num}" in item.get("metadata", {}).get("question_part", "")
+            item
+            for item in data_items
+            if f"part_{question_num}"
+            in item.get("metadata", {}).get("question_part", "")
         ]
 
     all_scores = {}
@@ -168,7 +175,9 @@ async def _run_local_fallback(
         )
 
         # Merge for comparison
-        responses_df["topics"] = responses_df["response_id"].astype(str).map(expected_mappings)
+        responses_df["topics"] = (
+            responses_df["response_id"].astype(str).map(expected_mappings)
+        )
         responses_df = responses_df.merge(
             result[["response_id", "labels"]], "inner", on="response_id"
         )
@@ -188,8 +197,14 @@ async def _run_local_fallback(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run theme mapping evaluation")
-    parser.add_argument("--dataset", default="gambling_XS", help="Dataset identifier (e.g., gambling_XS)")
-    parser.add_argument("--question", type=int, default=None, help="Specific question number (1-3)")
+    parser.add_argument(
+        "--dataset",
+        default="gambling_XS",
+        help="Dataset identifier (e.g., gambling_XS)",
+    )
+    parser.add_argument(
+        "--question", type=int, default=None, help="Specific question number (1-3)"
+    )
     args = parser.parse_args()
 
     asyncio.run(evaluate_mapping(dataset=args.dataset, question_num=args.question))
