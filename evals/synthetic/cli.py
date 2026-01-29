@@ -176,13 +176,13 @@ async def run_interactive_cli() -> GenerationConfig:
     # Step 2: Number of questions
     _print_step_header(2, "Number of Questions")
     console.print(
-        "[dim]How many consultation questions should be generated? (1-10)[/dim]\n"
+        "[dim]How many consultation questions should be generated? (1-25)[/dim]\n"
     )
     n_questions = IntPrompt.ask(
         "[bold yellow]Questions[/bold yellow]",
         default=3,
     )
-    n_questions = max(1, min(10, n_questions))
+    n_questions = max(1, min(25, n_questions))
 
     # Step 3: AI-generated questions with approval workflow
     _print_step_header(3, "Question Generation")
