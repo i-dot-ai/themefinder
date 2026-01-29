@@ -5,9 +5,8 @@ Provides graceful fallback when Langfuse is not configured.
 
 import logging
 import os
-from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
@@ -20,9 +19,9 @@ logger = logging.getLogger("themefinder.evals.langfuse")
 class LangfuseContext:
     """Container for Langfuse client and callback handler."""
 
-    client: Optional["Langfuse"]
-    handler: Optional["CallbackHandler"]
-    session_id: Optional[str] = None
+    client: "Langfuse | None"
+    handler: "CallbackHandler | None"
+    session_id: str | None = None
 
     @property
     def is_enabled(self) -> bool:
@@ -32,7 +31,7 @@ class LangfuseContext:
 
 def get_langfuse_context(
     session_id: str,
-    metadata: Optional[dict] = None,
+    metadata: dict | None = None,
 ) -> LangfuseContext:
     """Initialise Langfuse with graceful fallback if not configured.
 
@@ -84,7 +83,7 @@ def get_langfuse_context(
 def create_scores(
     context: LangfuseContext,
     scores: dict[str, float | int],
-    trace_id: Optional[str] = None,
+    trace_id: str | None = None,
 ) -> None:
     """Attach computed metrics as scores to the current trace.
 

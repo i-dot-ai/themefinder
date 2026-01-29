@@ -8,6 +8,9 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 from utils import read_and_render
 
+# Minimum score (0-5) to consider a topic well-grounded or captured
+GROUNDEDNESS_THRESHOLD = 3
+
 
 def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
     """Calculate accuracy metrics for sentiment analysis predictions.
@@ -68,12 +71,15 @@ def calculate_generation_metrics(
         )
     )
     recall_scores = list(json.loads(recall_scores.content).values())
-    threshold = 3
     return {
         "Precision N topics": len(generated_topics),
-        "Precision N not well grounded": sum([i < threshold for i in precision_scores]),
+        "Precision N not well grounded": sum(
+            score < GROUNDEDNESS_THRESHOLD for score in precision_scores
+        ),
         "Precision Average Groundedness": np.mean(precision_scores).round(2),
-        "Recall N not Captured": sum([i < threshold for i in recall_scores]),
+        "Recall N not Captured": sum(
+            score < GROUNDEDNESS_THRESHOLD for score in recall_scores
+        ),
         "Recall Average topic Representation": np.mean(recall_scores).round(2),
     }
 

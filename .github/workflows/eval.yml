@@ -4,6 +4,10 @@ on:
   schedule:
     - cron: '0 3 * * *'  # 3am UTC daily
   pull_request:
+    paths:
+      - 'evals/**'
+      - 'src/themefinder/**'
+      - '.github/workflows/eval.yml'
   workflow_dispatch:
     inputs:
       eval_type:
