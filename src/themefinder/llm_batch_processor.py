@@ -9,7 +9,7 @@ import openai
 import pandas as pd
 import tiktoken
 from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from pydantic import ValidationError
 from tenacity import (
     before,
@@ -36,6 +36,7 @@ async def batch_and_run(
     partition_key: str | None = None,
     integrity_check: bool = False,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
     **kwargs: Any,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Process a DataFrame of responses in batches using an LLM.
@@ -81,6 +82,7 @@ async def batch_and_run(
         llm=llm,
         integrity_check=integrity_check,
         concurrency=concurrency,
+        config=config,
     )
     processed_results = process_llm_responses(processed_rows, input_df)
 
@@ -94,6 +96,7 @@ async def batch_and_run(
             llm=llm,
             integrity_check=integrity_check,
             concurrency=concurrency,
+            config=config,
         )
         retry_processed_results = process_llm_responses(retry_results, retry_df)
         unprocessable_df = retry_df.loc[retry_df["response_id"].isin(unprocessable_ids)]
@@ -128,7 +131,7 @@ def convert_to_prompt_template(prompt_template: str | Path | PromptTemplate):
             - PromptTemplate: Already initialized LangChain PromptTemplate
 
     Returns:
-        PromptTemplate: Initialized LangChain PromptTemplate object.
+        PromptTemplate: Initialised LangChain PromptTemplate object.
 
     Raises:
         TypeError: If prompt_template is not one of the expected types.
@@ -288,6 +291,7 @@ async def call_llm(
     concurrency: int = 10,
     integrity_check: bool = False,
     max_conversation_retries: int = 5,
+    config: RunnableConfig | None = None,
 ) -> tuple[list[dict], list[int]]:
     """Process multiple batches of prompts concurrently through an LLM with retry logic.
 
@@ -318,7 +322,7 @@ async def call_llm(
     async def async_llm_call(batch_prompt) -> tuple[list[dict], list[int]]:
         async with semaphore:
             try:
-                llm_response = await llm.ainvoke(batch_prompt.prompt_string)
+                llm_response = await llm.ainvoke(batch_prompt.prompt_string, config=config)
                 all_results = (
                     llm_response.dict()
                     if hasattr(llm_response, "dict")
@@ -366,7 +370,7 @@ async def call_llm(
 
                 try:
                     # Re-invoke with the follow-up request
-                    retry_response = await llm.ainvoke(follow_up)
+                    retry_response = await llm.ainvoke(follow_up, config=config)
                     retry_results = (
                         retry_response.dict()
                         if hasattr(retry_response, "dict")
