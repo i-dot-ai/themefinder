@@ -254,13 +254,24 @@ async def generate_respondent_batch(
         for respondent in respondents
     ]
 
-    # Gather all results
-    all_results = await asyncio.gather(*tasks)
+    # Gather all results - return_exceptions=True prevents one failure cancelling all tasks
+    all_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    # Filter out failed respondents and log errors
+    successful_results = []
+    for i, result in enumerate(all_results):
+        if isinstance(result, Exception):
+            respondent_id = respondents[i].response_id
+            logger.error(
+                f"Respondent {respondent_id} failed: {type(result).__name__}: {result}"
+            )
+        else:
+            successful_results.append(result)
 
     # Flatten: list of lists -> single list
     return [
         response
-        for respondent_responses in all_results
+        for respondent_responses in successful_results
         for response in respondent_responses
     ]
 

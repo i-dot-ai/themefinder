@@ -124,12 +124,17 @@ class SyntheticDatasetGenerator:
             asyncio.create_task(generate_themes_for_question(q))
             for q in self.config.questions
         ]
-        results = await asyncio.gather(*theme_tasks)
+        results = await asyncio.gather(*theme_tasks, return_exceptions=True)
 
-        # Build themes dict from results
-        themes_by_question: dict[int, list[dict]] = {
-            q_num: themes for q_num, themes in results
-        }
+        # Build themes dict from results, fail if any question failed
+        themes_by_question: dict[int, list[dict]] = {}
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                q_num = self.config.questions[i].number
+                logger.error(f"Theme generation for question {q_num} failed: {result}")
+                raise RuntimeError(f"Theme generation failed for question {q_num}") from result
+            q_num, themes = result
+            themes_by_question[q_num] = themes
 
         # Mark theme generation complete
         if progress and theme_task_id is not None:

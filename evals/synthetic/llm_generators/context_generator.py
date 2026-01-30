@@ -109,6 +109,7 @@ def _get_context_llm(callbacks: list | None = None) -> AzureChatOpenAI:
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
         reasoning_effort="medium",
         callbacks=callbacks or [],
+        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
 

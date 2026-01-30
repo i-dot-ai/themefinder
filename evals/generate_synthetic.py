@@ -59,6 +59,7 @@ async def main() -> None:
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
         reasoning_effort="medium",
+        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
     # Optional Langfuse tracking

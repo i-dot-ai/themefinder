@@ -131,6 +131,7 @@ def _get_generation_llm(
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
         reasoning_effort=reasoning_effort,
         callbacks=callbacks or [],
+        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
 
@@ -310,12 +311,20 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
 
         raise last_error  # type: ignore[misc]
 
-    # Run FAN_OUT_COUNT calls in parallel
+    # Run FAN_OUT_COUNT calls in parallel - return_exceptions prevents one failure cancelling all
     tasks = [asyncio.create_task(single_call(i)) for i in range(FAN_OUT_COUNT)]
-    results = await asyncio.gather(*tasks)
+    results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Flatten all themes into one list
-    all_themes = [theme for batch in results for theme in batch]
+    # Filter out failed calls and log errors
+    all_themes = []
+    for i, result in enumerate(results):
+        if isinstance(result, Exception):
+            logger.error(f"Theme fan-out call {i} failed: {type(result).__name__}: {result}")
+        else:
+            all_themes.extend(result)
+
+    if not all_themes:
+        raise RuntimeError("All theme generation calls failed")
 
     return all_themes
 

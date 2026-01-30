@@ -106,6 +106,7 @@ def _get_question_generation_llm(callbacks: list | None = None) -> AzureChatOpen
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
         reasoning_effort="high",
         callbacks=callbacks or [],
+        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
 
