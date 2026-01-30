@@ -59,69 +59,40 @@ STEP_ICONS = {
 
 
 class SmoothedTimeRemainingColumn(ProgressColumn):
-    """Renders estimated time remaining using exponential moving average.
+    """Renders estimated time remaining using overall average speed.
 
-    More accurate than the default TimeRemainingColumn because it weights
-    recent speed more heavily, accounting for:
-    - Cold start delays (first few API calls are slower)
-    - Variable task completion times
-    - Bursty parallel task completion
+    Optimised for bursty workloads like parallel LLM calls where completions
+    come in batches. Uses overall average speed with gradual warm-up for
+    stability, avoiding EMA issues with burst completion patterns.
     """
 
-    def __init__(self, smoothing: float = 0.3) -> None:
-        """Initialise with smoothing factor.
+    def __init__(self, warmup_items: int = 5) -> None:
+        """Initialise with warmup threshold.
 
         Args:
-            smoothing: EMA smoothing factor (0-1). Higher = more responsive
-                      to recent speed changes. Default 0.3.
+            warmup_items: Minimum completed items before showing ETA.
+                         Prevents wild estimates early on. Default 5.
         """
         super().__init__()
-        self.smoothing = smoothing
-        self._ema_speed: dict[int, float] = {}  # task_id -> smoothed speed
-        self._last_completed: dict[int, float] = {}  # task_id -> last completed count
-        self._last_time: dict[int, float] = {}  # task_id -> last update time
+        self.warmup_items = warmup_items
 
     def render(self, task: Task) -> Text:
-        """Render the smoothed time remaining."""
-        import time
-
+        """Render the time remaining based on overall average speed."""
         if task.finished:
             return Text("0:00:00", style="green")
 
         if task.total is None or task.completed == 0:
             return Text("-:--:--", style="dim")
 
-        task_id = id(task)
-        current_time = time.monotonic()
+        # Wait for warmup period to get stable speed estimate
+        if task.completed < self.warmup_items:
+            return Text("-:--:--", style="dim")
+
         elapsed = task.elapsed or 0.001
 
-        # Calculate instantaneous speed
-        if task_id in self._last_completed and task_id in self._last_time:
-            time_delta = current_time - self._last_time[task_id]
-            completed_delta = task.completed - self._last_completed[task_id]
+        # Use simple overall average - most stable for bursty workloads
+        speed = task.completed / elapsed
 
-            if time_delta > 0.1 and completed_delta > 0:  # Minimum threshold
-                instant_speed = completed_delta / time_delta
-
-                # Update EMA
-                if task_id in self._ema_speed:
-                    self._ema_speed[task_id] = (
-                        self.smoothing * instant_speed
-                        + (1 - self.smoothing) * self._ema_speed[task_id]
-                    )
-                else:
-                    self._ema_speed[task_id] = instant_speed
-
-                self._last_completed[task_id] = task.completed
-                self._last_time[task_id] = current_time
-        else:
-            # First update - use overall average
-            self._last_completed[task_id] = task.completed
-            self._last_time[task_id] = current_time
-            self._ema_speed[task_id] = task.completed / elapsed
-
-        # Calculate remaining time using smoothed speed
-        speed = self._ema_speed.get(task_id, task.completed / elapsed)
         if speed <= 0:
             return Text("-:--:--", style="dim")
 
@@ -636,7 +607,7 @@ def create_progress_bar() -> Progress:
     """Create a progress bar for generation tracking.
 
     Returns:
-        Configured Rich Progress instance with smoothed ETA, elapsed time, and M/N display.
+        Configured Rich Progress instance with stable ETA, elapsed time, and M/N display.
     """
     return Progress(
         SpinnerColumn(),
@@ -647,7 +618,7 @@ def create_progress_bar() -> Progress:
         TextColumn("[dim]|[/dim]"),
         TimeElapsedColumn(),
         TextColumn("[dim]ETA[/dim]"),
-        SmoothedTimeRemainingColumn(smoothing=0.3),
+        SmoothedTimeRemainingColumn(warmup_items=5),
         console=console,
         refresh_per_second=4,
     )

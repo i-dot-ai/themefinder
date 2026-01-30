@@ -85,20 +85,17 @@ async def main() -> None:
         callbacks=callbacks,
     )
 
-    # Calculate total responses for progress tracking
+    # Calculate total responses for summary
     total_responses = config.n_responses * len(config.questions)
 
     # Run generation with progress tracking
+    # Generator manages its own tasks: theme generation, then response generation
     progress = create_progress_bar()
     output_path = None
     n_themes = 0
 
     try:
         with progress:
-            progress.add_task(
-                f"[cyan]Generating {config.dataset_name}...",
-                total=total_responses,
-            )
             output_path = await generator.generate(progress)
 
         # Count themes from first question for summary (after progress bar closes)

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 from langchain_openai import AzureChatOpenAI
-from rich.progress import Progress
+from rich.progress import Progress, TaskID
 
 from synthetic.config import (
     GenerationConfig,
@@ -20,7 +20,7 @@ from synthetic.llm_generators.response_generator import (
     RespondentSpec,
     generate_respondent_batch,
 )
-from synthetic.llm_generators.theme_generator import generate_themes
+from synthetic.llm_generators.theme_generator import FAN_OUT_COUNT, generate_themes
 from synthetic.validators import validate_dataset
 from synthetic.writers import DatasetWriter
 
@@ -74,17 +74,40 @@ class SyntheticDatasetGenerator:
         self.writer.initialise_directories(self.config.questions)
 
         # Step 1: Generate themes for ALL questions upfront
-        logger.info("Generating themes for all questions...")
-        themes_by_question: dict[int, list[dict]] = {}
+        # Each question has FAN_OUT_COUNT parallel calls + 1 consolidation = FAN_OUT_COUNT + 1 LLM calls
+        n_questions = len(self.config.questions)
+        total_theme_calls = n_questions * FAN_OUT_COUNT  # Fan-out calls only (consolidation is fast)
 
-        for question_config in self.config.questions:
+        theme_task_id: TaskID | None = None
+        theme_progress_count = 0
+
+        if progress:
+            theme_task_id = progress.add_task(
+                "[cyan]Generating themes...",
+                total=total_theme_calls,
+            )
+
+        def on_fan_out_complete():
+            """Callback for each completed fan-out call."""
+            nonlocal theme_progress_count
+            theme_progress_count += 1
+            if progress and theme_task_id is not None:
+                progress.update(theme_task_id, completed=theme_progress_count)
+
+        logger.info(
+            f"Generating themes for {n_questions} questions "
+            f"({total_theme_calls} parallel fan-out calls)..."
+        )
+
+        async def generate_themes_for_question(question_config):
+            """Generate themes for a single question."""
             themes = await generate_themes(
                 topic=self.config.topic,
                 question=question_config.text,
                 demographic_fields=self.config.demographic_fields,
                 callbacks=self.callbacks,
+                on_fan_out_complete=on_fan_out_complete,
             )
-            themes_by_question[question_config.number] = themes
             logger.info(
                 f"Generated {len(themes)} themes for question {question_config.number}"
             )
@@ -93,6 +116,24 @@ class SyntheticDatasetGenerator:
             question_part = f"question_part_{question_config.number}"
             self.writer.write_themes(question_part, themes)
             self.writer.write_question(question_part, question_config)
+
+            return question_config.number, themes
+
+        # Run ALL questions in parallel (N questions × 10 fan-out = N×10 concurrent calls)
+        theme_tasks = [
+            asyncio.create_task(generate_themes_for_question(q))
+            for q in self.config.questions
+        ]
+        results = await asyncio.gather(*theme_tasks)
+
+        # Build themes dict from results
+        themes_by_question: dict[int, list[dict]] = {
+            q_num: themes for q_num, themes in results
+        }
+
+        # Mark theme generation complete
+        if progress and theme_task_id is not None:
+            progress.update(theme_task_id, completed=total_theme_calls)
 
         # Step 2: Sample demographics and create respondent specs
         demographics = sample_demographics(
@@ -117,13 +158,19 @@ class SyntheticDatasetGenerator:
 
         # Step 3: Generate responses in batches of respondents
         total_responses = self.config.n_responses * len(self.config.questions)
-        task_id = progress.task_ids[0] if progress else None
+        response_task_id: TaskID | None = None
+
+        if progress:
+            response_task_id = progress.add_task(
+                "[green]Generating responses...",
+                total=total_responses,
+            )
 
         def on_response_complete():
             """Callback for each completed response."""
             self._generated_count += 1
-            if progress and task_id is not None:
-                progress.update(task_id, completed=self._generated_count)
+            if progress and response_task_id is not None:
+                progress.update(response_task_id, completed=self._generated_count)
 
         logger.info(
             f"Generating {total_responses} responses "

@@ -1,16 +1,21 @@
 """Theme generation using LLM for synthetic consultation datasets.
 
-Uses gpt-5-mini with medium reasoning for comprehensive theme discovery
-across diverse demographic perspectives.
+Uses fan-out parallelisation (10 calls) for diverse theme discovery,
+then consolidates with light-touch rationalisation.
 """
 
+import asyncio
 import os
+from collections.abc import Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 
 from synthetic.config import DemographicField
+
+# Number of parallel theme generation calls for diversity
+FAN_OUT_COUNT = 10
 
 
 class Theme(BaseModel):
@@ -77,13 +82,36 @@ Generate as many themes as needed to comprehensively cover the topic. For simple
 this might be 10-15 themes. For complex, contentious topics, you may need 30-50+ themes.
 Do not artificially limit yourself - be thorough."""
 
+CONSOLIDATION_SYSTEM_PROMPT = """You are an expert at consolidating and deduplicating theme lists.
 
-def _get_theme_generation_llm(callbacks: list | None = None) -> AzureChatOpenAI:
-    """Create LLM instance optimised for theme generation.
+You will receive a large list of themes generated from multiple parallel analyses of the same
+consultation question. Your task is to:
 
-    Uses gpt-5-mini with medium reasoning level for comprehensive analysis.
+1. **Remove exact or near-duplicates** - themes that express the same idea
+2. **Merge highly similar themes** - combine themes that overlap significantly into one
+3. **Preserve diversity** - keep distinct viewpoints even if only mentioned once
+4. **Maintain quality** - ensure each final theme is clear and well-described
+
+## Important Guidelines
+- Be CONSERVATIVE with merging - when in doubt, keep themes separate
+- Preserve minority/niche viewpoints - these are valuable for realistic consultation data
+- Keep the original wording where possible - don't over-edit
+- Aim for comprehensive coverage over conciseness
+
+## Output Format
+- topic_label: 2-5 words
+- topic_description: ONE concise sentence, 15-25 words max
+- Use sequential IDs: A, B, C, ... Z, AA, AB, ..."""
+
+
+def _get_generation_llm(
+    reasoning_effort: str = "medium",
+    callbacks: list | None = None,
+) -> AzureChatOpenAI:
+    """Create LLM instance for theme generation.
 
     Args:
+        reasoning_effort: Reasoning level (low, medium, high).
         callbacks: LangChain callbacks for tracing.
 
     Returns:
@@ -94,7 +122,7 @@ def _get_theme_generation_llm(callbacks: list | None = None) -> AzureChatOpenAI:
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        reasoning_effort="high",
+        reasoning_effort=reasoning_effort,
         callbacks=callbacks or [],
     )
 
@@ -127,25 +155,85 @@ async def generate_themes(
     question: str,
     demographic_fields: list[DemographicField],
     callbacks: list | None = None,
+    on_fan_out_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """Generate comprehensive themes for a consultation question.
 
-    Uses gpt-5-mini with medium reasoning to deeply analyse the policy topic
-    and generate themes covering diverse demographic perspectives.
+    Uses fan-out parallelisation: 10 concurrent LLM calls generate diverse themes,
+    then a consolidation step deduplicates and rationalises them.
 
     Args:
         topic: Overall consultation topic.
         question: Specific question text.
         demographic_fields: Enabled demographic fields for perspective consideration.
         callbacks: LangChain callbacks for tracing.
+        on_fan_out_complete: Callback invoked after each fan-out call completes.
 
     Returns:
         List of theme dicts with topic_id, topic_label, topic_description, topic.
     """
-    llm = _get_theme_generation_llm(callbacks)
+    # Step 1: Fan-out - 10 parallel calls for diverse theme discovery
+    raw_themes = await _fan_out_theme_generation(
+        topic=topic,
+        question=question,
+        demographic_fields=demographic_fields,
+        callbacks=callbacks,
+        on_complete=on_fan_out_complete,
+    )
+
+    # Step 2: Consolidate - deduplicate and rationalise
+    consolidated_themes = await _consolidate_themes(
+        raw_themes=raw_themes,
+        topic=topic,
+        question=question,
+        callbacks=callbacks,
+    )
+
+    # Add special themes X and Y (always required per spec)
+    consolidated_themes.extend(
+        [
+            {
+                "topic_id": "X",
+                "topic_label": "None of the Above",
+                "topic_description": "Response discusses a topic not covered by listed themes",
+                "topic": "None of the Above: Response discusses a topic not covered by listed themes",
+            },
+            {
+                "topic_id": "Y",
+                "topic_label": "No Reason Given",
+                "topic_description": "Response does not provide a substantive answer",
+                "topic": "No Reason Given: Response does not provide a substantive answer",
+            },
+        ]
+    )
+
+    return consolidated_themes
+
+
+async def _fan_out_theme_generation(
+    topic: str,
+    question: str,
+    demographic_fields: list[DemographicField],
+    callbacks: list | None = None,
+    on_complete: Callable[[], None] | None = None,
+) -> list[dict]:
+    """Generate themes with fan-out parallelisation.
+
+    Runs FAN_OUT_COUNT concurrent LLM calls to discover diverse themes.
+
+    Args:
+        topic: Consultation topic.
+        question: Question text.
+        demographic_fields: Demographic fields for context.
+        callbacks: LangChain callbacks.
+        on_complete: Callback for each completed call.
+
+    Returns:
+        Combined list of all themes from all calls (with duplicates).
+    """
+    llm = _get_generation_llm(reasoning_effort="medium", callbacks=callbacks)
     structured_llm = llm.with_structured_output(ThemeSet)
 
-    # Build demographic context for the prompt (guides reasoning, not output)
     demographic_context = _build_demographic_context(demographic_fields)
 
     human_prompt = f"""Analyse this UK government consultation question and generate a comprehensive theme framework.
@@ -177,12 +265,87 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
         HumanMessage(content=human_prompt),
     ]
 
+    async def single_call() -> list[dict]:
+        """Execute a single theme generation call."""
+        result = await structured_llm.ainvoke(messages)
+        themes = [
+            {
+                "topic_label": t.topic_label,
+                "topic_description": t.topic_description,
+            }
+            for t in result.themes
+        ]
+        if on_complete:
+            on_complete()
+        return themes
+
+    # Run FAN_OUT_COUNT calls in parallel
+    tasks = [asyncio.create_task(single_call()) for _ in range(FAN_OUT_COUNT)]
+    results = await asyncio.gather(*tasks)
+
+    # Flatten all themes into one list
+    all_themes = [theme for batch in results for theme in batch]
+
+    return all_themes
+
+
+async def _consolidate_themes(
+    raw_themes: list[dict],
+    topic: str,
+    question: str,
+    callbacks: list | None = None,
+) -> list[dict]:
+    """Consolidate and deduplicate themes from fan-out generation.
+
+    Uses a light-touch LLM call to merge duplicates while preserving diversity.
+
+    Args:
+        raw_themes: Combined themes from all fan-out calls.
+        topic: Consultation topic.
+        question: Question text.
+        callbacks: LangChain callbacks.
+
+    Returns:
+        Deduplicated and rationalised theme list.
+    """
+    # Use low reasoning for consolidation - it's mostly deduplication
+    llm = _get_generation_llm(reasoning_effort="low", callbacks=callbacks)
+    structured_llm = llm.with_structured_output(ThemeSet)
+
+    # Format raw themes for the prompt
+    themes_text = "\n".join(
+        f"- {t['topic_label']}: {t['topic_description']}" for t in raw_themes
+    )
+
+    human_prompt = f"""## Consultation Context
+Topic: {topic}
+Question: {question}
+
+## Raw Themes to Consolidate
+The following {len(raw_themes)} themes were generated from multiple parallel analyses.
+Consolidate them by removing duplicates and merging highly similar themes.
+
+{themes_text}
+
+## Your Task
+1. Remove exact or near-duplicate themes
+2. Merge themes that express essentially the same viewpoint
+3. Preserve distinct minority viewpoints - don't over-consolidate
+4. Output a clean, deduplicated theme list
+
+Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
+
+    messages = [
+        SystemMessage(content=CONSOLIDATION_SYSTEM_PROMPT),
+        HumanMessage(content=human_prompt),
+    ]
+
     result = await structured_llm.ainvoke(messages)
 
     # Normalise topic IDs to ensure sequential ordering
     topic_ids = _generate_topic_ids(len(result.themes))
 
-    # Build theme list with combined topic field
+    # Build final theme list
     themes = [
         {
             "topic_id": topic_ids[i],
@@ -192,24 +355,6 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
         }
         for i, t in enumerate(result.themes)
     ]
-
-    # Add special themes X and Y (always required per spec)
-    themes.extend(
-        [
-            {
-                "topic_id": "X",
-                "topic_label": "None of the Above",
-                "topic_description": "Response discusses a topic not covered by listed themes",
-                "topic": "None of the Above: Response discusses a topic not covered by listed themes",
-            },
-            {
-                "topic_id": "Y",
-                "topic_label": "No Reason Given",
-                "topic_description": "Response does not provide a substantive answer",
-                "topic": "No Reason Given: Response does not provide a substantive answer",
-            },
-        ]
-    )
 
     return themes
 
