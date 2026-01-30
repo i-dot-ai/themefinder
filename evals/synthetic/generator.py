@@ -15,7 +15,7 @@ from synthetic.config import (
     ResponseLength,
     ResponseType,
 )
-from synthetic.demographics import sample_demographics
+from synthetic.demographics import calculate_stance_modifier, sample_demographics
 from synthetic.llm_generators.response_generator import (
     RespondentSpec,
     generate_respondent_batch,
@@ -218,7 +218,10 @@ class SyntheticDatasetGenerator:
         self,
         demographics: list[dict],
     ) -> list[RespondentSpec]:
-        """Create respondent specifications with assigned dispositions.
+        """Create respondent specifications with stance-influenced dispositions.
+
+        Stance modifiers from policy context fields subtly influence whether
+        a respondent tends to agree or disagree with the proposal.
 
         Args:
             demographics: Sampled demographic profiles.
@@ -229,22 +232,17 @@ class SyntheticDatasetGenerator:
         n = self.config.n_responses
         specs = []
 
-        # Calculate disposition counts based on distribution
+        # Base disposition probabilities
         dist = self.config.position_distribution
-        disposition_counts = {
-            ResponseType.AGREE: int(n * dist["agree"]),
-            ResponseType.DISAGREE: int(n * dist["disagree"]),
-            ResponseType.NUANCED: int(n * dist["nuanced"]),
-            ResponseType.OFF_TOPIC: int(n * dist.get("off_topic", 0.05)),
-            ResponseType.LOW_QUALITY: int(n * dist.get("low_quality", 0.05)),
+        base_probs = {
+            ResponseType.AGREE: dist["agree"],
+            ResponseType.DISAGREE: dist["disagree"],
+            ResponseType.NUANCED: dist["nuanced"],
+            ResponseType.OFF_TOPIC: dist.get("off_topic", 0.05),
+            ResponseType.LOW_QUALITY: dist.get("low_quality", 0.05),
         }
 
-        # Ensure counts sum to n
-        total_assigned = sum(disposition_counts.values())
-        if total_assigned < n:
-            disposition_counts[ResponseType.NUANCED] += n - total_assigned
-
-        # Calculate length counts
+        # Calculate length counts for sampling
         length_dist = self.config.length_distribution
         length_counts = {
             ResponseLength.SHORT: int(n * length_dist["short"]),
@@ -253,31 +251,97 @@ class SyntheticDatasetGenerator:
         }
 
         response_id = 1001
-        for disposition, count in disposition_counts.items():
-            for _ in range(count):
-                # Sample length
-                length = self._sample_length(length_counts)
+        for i in range(n):
+            persona = demographics[i % len(demographics)]
 
-                # Determine noise application
-                apply_noise, noise_type = self._sample_noise()
+            # Calculate stance modifier from policy context
+            stance_modifier = calculate_stance_modifier(
+                persona, self.config.demographic_fields
+            )
 
-                specs.append(
-                    RespondentSpec(
-                        response_id=response_id,
-                        persona=demographics[(response_id - 1001) % len(demographics)],
-                        base_disposition=disposition,
-                        length=length,
-                        apply_noise=apply_noise,
-                        noise_type=noise_type,
-                    )
+            # Adjust disposition probabilities based on stance
+            # Positive modifier → more likely to agree
+            # Negative modifier → more likely to disagree
+            adjusted_probs = self._adjust_disposition_probs(base_probs, stance_modifier)
+
+            # Sample disposition based on adjusted probabilities
+            disposition = self._sample_disposition(adjusted_probs)
+
+            # Sample length
+            length = self._sample_length(length_counts)
+
+            # Determine noise application
+            apply_noise, noise_type = self._sample_noise()
+
+            specs.append(
+                RespondentSpec(
+                    response_id=response_id,
+                    persona=persona,
+                    base_disposition=disposition,
+                    length=length,
+                    apply_noise=apply_noise,
+                    noise_type=noise_type,
                 )
+            )
 
-                response_id += 1
+            response_id += 1
 
         # Shuffle to mix dispositions
         self.rng.shuffle(specs)
 
         return specs
+
+    def _adjust_disposition_probs(
+        self,
+        base_probs: dict[ResponseType, float],
+        stance_modifier: float,
+    ) -> dict[ResponseType, float]:
+        """Adjust disposition probabilities based on stance modifier.
+
+        Positive modifiers shift probability from disagree to agree.
+        Negative modifiers shift probability from agree to disagree.
+
+        Args:
+            base_probs: Base disposition probabilities.
+            stance_modifier: Value from -0.5 to +0.5.
+
+        Returns:
+            Adjusted probabilities that sum to 1.0.
+        """
+        adjusted = base_probs.copy()
+
+        if stance_modifier > 0:
+            # Shift from disagree to agree
+            shift = min(stance_modifier, adjusted[ResponseType.DISAGREE] * 0.5)
+            adjusted[ResponseType.AGREE] += shift
+            adjusted[ResponseType.DISAGREE] -= shift
+        elif stance_modifier < 0:
+            # Shift from agree to disagree
+            shift = min(-stance_modifier, adjusted[ResponseType.AGREE] * 0.5)
+            adjusted[ResponseType.DISAGREE] += shift
+            adjusted[ResponseType.AGREE] -= shift
+
+        return adjusted
+
+    def _sample_disposition(
+        self, probs: dict[ResponseType, float]
+    ) -> ResponseType:
+        """Sample a disposition based on probabilities.
+
+        Args:
+            probs: Disposition probabilities.
+
+        Returns:
+            Sampled ResponseType.
+        """
+        dispositions = list(probs.keys())
+        probabilities = list(probs.values())
+
+        # Normalise to ensure sum is 1.0
+        total = sum(probabilities)
+        probabilities = [p / total for p in probabilities]
+
+        return self.rng.choice(dispositions, p=probabilities)
 
     def _write_batch_responses(self, responses: list[dict]) -> None:
         """Write batch responses grouped by question.

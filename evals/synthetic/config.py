@@ -43,16 +43,25 @@ class ResponseType(Enum):
 
 @dataclass
 class DemographicField:
-    """Single demographic field with values and distribution weights."""
+    """Single demographic or policy context field with values and distribution weights.
+
+    Can represent either:
+    - Fixed demographics (region, age, etc.) - is_policy_context=False
+    - Policy-specific context (student loan status, etc.) - is_policy_context=True
+
+    Policy context fields can have stance_modifiers to influence respondent disposition.
+    """
 
     name: str
     display_name: str
     values: list[str]
     distribution: list[float]
     enabled: bool = True
+    is_policy_context: bool = False  # True for LLM-generated policy-specific fields
+    stance_modifiers: list[float] | None = None  # Per-value: -0.1 to +0.1 (subtle influence)
 
     def __post_init__(self) -> None:
-        """Validate distribution sums to 1.0."""
+        """Validate distribution and stance modifiers."""
         total = sum(self.distribution)
         if not (0.99 <= total <= 1.01):
             msg = f"Distribution for {self.name} must sum to 1.0, got {total}"
@@ -60,6 +69,14 @@ class DemographicField:
         if len(self.values) != len(self.distribution):
             msg = f"Values and distribution must have same length for {self.name}"
             raise ValueError(msg)
+        if self.stance_modifiers is not None:
+            if len(self.stance_modifiers) != len(self.values):
+                msg = f"Stance modifiers must match values length for {self.name}"
+                raise ValueError(msg)
+            for mod in self.stance_modifiers:
+                if not (-1.0 <= mod <= 1.0):
+                    msg = f"Stance modifiers must be between -1.0 and 1.0 for {self.name}"
+                    raise ValueError(msg)
 
 
 @dataclass

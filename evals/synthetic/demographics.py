@@ -96,3 +96,38 @@ def sample_demographics(
         profiles.append(profile)
 
     return profiles
+
+
+def calculate_stance_modifier(
+    profile: dict[str, str],
+    fields: list[DemographicField],
+) -> float:
+    """Calculate total stance modifier for a profile based on policy context.
+
+    Args:
+        profile: Sampled profile mapping display_name to value.
+        fields: All demographic fields (including policy context).
+
+    Returns:
+        Total stance modifier (-1.0 to +1.0), clamped.
+    """
+    total_modifier = 0.0
+
+    for field in fields:
+        if not field.is_policy_context or not field.stance_modifiers:
+            continue
+
+        # Find which value was sampled for this field
+        sampled_value = profile.get(field.display_name)
+        if sampled_value is None:
+            continue
+
+        try:
+            value_index = field.values.index(sampled_value)
+            total_modifier += field.stance_modifiers[value_index]
+        except ValueError:
+            # Value not found, skip
+            continue
+
+    # Clamp to reasonable range
+    return max(-0.5, min(0.5, total_modifier))

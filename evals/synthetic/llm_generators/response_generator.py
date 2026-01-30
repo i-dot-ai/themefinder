@@ -52,15 +52,16 @@ class PreviousResponse:
 
 SYSTEM_PROMPT_FIRST_QUESTION = """You are simulating a member of the UK public responding to a government consultation.
 
-Persona:
+## Respondent Profile
 {persona_desc}
 
-Generate a realistic consultation response with these characteristics:
+## Response Requirements
 - Length: approximately {min_words}-{max_words} words
 - Response type: {response_type}
-- Write naturally as this persona would, including their likely vocabulary and concerns
+- Write naturally as this person would, considering how their background and circumstances affect their perspective on this policy
+- Use vocabulary and concerns appropriate to their profile
 
-Guidelines by response type:
+## Guidelines by Response Type
 - agree: Express clear support for the proposal with reasons
 - disagree: Express clear opposition with reasons
 - nuanced: Show conditional support with specific concerns or caveats
@@ -71,14 +72,15 @@ Generate authentic-sounding responses. Vary sentence structure and vocabulary.""
 
 SYSTEM_PROMPT_WITH_CONTEXT = """You are simulating a member of the UK public responding to a government consultation.
 
-Persona:
+## Respondent Profile
 {persona_desc}
 
+## Consistency Requirement
 You have already answered previous questions in this consultation. Your responses should be CONSISTENT with your earlier answers - maintain the same general viewpoint, concerns, and tone.
 
-Generate a realistic consultation response with these characteristics:
+## Response Requirements
 - Length: approximately {min_words}-{max_words} words
-- Write naturally as this persona would, including their likely vocabulary and concerns
+- Write naturally as this person would, considering how their background and circumstances affect their perspective
 - IMPORTANT: Stay consistent with your previous responses shown below
 
 Generate authentic-sounding responses. Vary sentence structure and vocabulary."""
@@ -334,10 +336,27 @@ def _select_themes_for_response(
     return theme_ids, stances
 
 
+def _format_persona(persona: dict[str, str]) -> str:
+    """Format persona as readable bullet points.
+
+    Args:
+        persona: Dict mapping display_name to sampled value.
+
+    Returns:
+        Formatted persona string.
+    """
+    lines = []
+    for key, value in persona.items():
+        # Clean up display name (remove trailing punctuation like ":")
+        clean_key = key.rstrip(":?")
+        lines.append(f"- {clean_key}: {value}")
+    return "\n".join(lines)
+
+
 def _build_first_question_prompt(respondent: RespondentSpec) -> str:
     """Build system prompt for the first question."""
     length_range = respondent.length.value
-    persona_desc = ", ".join(f"{k}: {v}" for k, v in respondent.persona.items())
+    persona_desc = _format_persona(respondent.persona)
 
     return SYSTEM_PROMPT_FIRST_QUESTION.format(
         persona_desc=persona_desc,
@@ -350,7 +369,7 @@ def _build_first_question_prompt(respondent: RespondentSpec) -> str:
 def _build_context_prompt(respondent: RespondentSpec) -> str:
     """Build system prompt for subsequent questions with context instruction."""
     length_range = respondent.length.value
-    persona_desc = ", ".join(f"{k}: {v}" for k, v in respondent.persona.items())
+    persona_desc = _format_persona(respondent.persona)
 
     return SYSTEM_PROMPT_WITH_CONTEXT.format(
         persona_desc=persona_desc,

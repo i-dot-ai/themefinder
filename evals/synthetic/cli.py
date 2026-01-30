@@ -20,12 +20,17 @@ from rich.table import Table
 from rich.text import Text
 
 from synthetic.config import (
+    DemographicField,
     GenerationConfig,
     NoiseLevel,
     QuestionConfig,
     QuestionType,
 )
 from synthetic.demographics import get_uk_demographic_presets
+from synthetic.llm_generators.context_generator import (
+    generate_context_fields,
+    regenerate_context_fields,
+)
 from synthetic.llm_generators.question_generator import (
     GeneratedQuestion,
     generate_questions,
@@ -49,12 +54,13 @@ BANNER = """
 """
 
 STEP_ICONS = {
-    1: "📋",
-    2: "🔢",
-    3: "🤖",
-    4: "📊",
-    5: "👥",
-    6: "⚙️",
+    1: "📋",  # Policy Topic
+    2: "🔢",  # Number of Questions
+    3: "🤖",  # Question Generation
+    4: "🎯",  # Policy Context Fields
+    5: "📊",  # Number of Responses
+    6: "👥",  # Demographics
+    7: "⚙️",  # Advanced Options
 }
 
 
@@ -173,8 +179,11 @@ async def run_interactive_cli() -> GenerationConfig:
 
     questions = await _question_approval_workflow(topic, n_questions)
 
-    # Step 4: Number of responses
-    _print_step_header(4, "Number of Responses")
+    # Step 4: Policy Context Fields
+    policy_context_fields = await _context_field_workflow(topic, questions)
+
+    # Step 5: Number of responses
+    _print_step_header(5, "Number of Responses")
     console.print("[dim]How many synthetic responses per question?[/dim]\n")
 
     size_table = Table(box=ROUNDED, border_style="dim", pad_edge=False)
@@ -194,11 +203,11 @@ async def run_interactive_cli() -> GenerationConfig:
     )
     n_responses = max(10, n_responses)  # Minimum 10 responses
 
-    # Step 5: Demographic presets
+    # Step 6: Demographic presets
     demographics = _configure_demographics()
 
-    # Step 6: Advanced options (noise level)
-    _print_step_header(6, "Advanced Options")
+    # Step 7: Advanced options (noise level)
+    _print_step_header(7, "Advanced Options")
     noise_level = NoiseLevel.MEDIUM
 
     if Confirm.ask(
@@ -228,9 +237,13 @@ async def run_interactive_cli() -> GenerationConfig:
     safe_topic = "".join(c for c in safe_topic if c.isalnum() or c == "_")
     dataset_name = f"{safe_topic}_{n_responses}"
 
+    # Merge demographics and policy context fields
+    all_fields = demographics + policy_context_fields
+
     # Confirmation summary
     _show_confirmation_summary(
-        dataset_name, topic, questions, n_responses, demographics, noise_level
+        dataset_name, topic, questions, n_responses, demographics,
+        policy_context_fields, noise_level
     )
 
     if not Confirm.ask("\n[bold]Proceed with generation?[/bold]", default=True):
@@ -241,7 +254,7 @@ async def run_interactive_cli() -> GenerationConfig:
         topic=topic,
         n_responses=n_responses,
         questions=questions,
-        demographic_fields=demographics,
+        demographic_fields=all_fields,
         noise_level=noise_level,
     )
 
@@ -302,6 +315,122 @@ async def _question_approval_workflow(
     )
 
     return approved_questions
+
+
+async def _context_field_workflow(
+    topic: str,
+    questions: list[QuestionConfig],
+) -> list[DemographicField]:
+    """Interactive workflow for generating and reviewing policy context fields.
+
+    Args:
+        topic: The consultation topic.
+        questions: Approved consultation questions.
+
+    Returns:
+        List of approved DemographicField objects with is_policy_context=True.
+    """
+    _print_step_header(4, "Policy Context Fields")
+    console.print(
+        Panel(
+            "[bold]AI-Generated Respondent Context[/bold]\n\n"
+            "Based on your consultation topic, we'll generate context questions\n"
+            "that capture respondent characteristics relevant to this policy.\n\n"
+            "These will shape how different respondent personas answer.\n"
+            "For example: student loan status, employment sector, etc.",
+            box=ROUNDED,
+            border_style="blue",
+            padding=(1, 2),
+        )
+    )
+
+    context_fields: list[DemographicField] = []
+
+    with console.status(
+        "[bold magenta]🎯 Generating policy context fields...[/bold magenta]",
+        spinner="dots",
+    ):
+        context_fields = await generate_context_fields(
+            topic=topic,
+            questions=questions,
+            n_fields=4,
+        )
+
+    # Display generated fields for review
+    while True:
+        _display_context_fields(context_fields)
+
+        console.print(
+            "\n  [green]approve[/green] │ [yellow]regenerate[/yellow] │ [dim]skip[/dim]"
+        )
+        action = Prompt.ask(
+            "[bold yellow]Action[/bold yellow]",
+            choices=["approve", "regenerate", "skip"],
+            default="approve",
+        )
+
+        if action == "approve":
+            console.print("[green]✓ Context fields approved[/green]")
+            break
+        elif action == "skip":
+            console.print("[dim]Skipping policy context fields[/dim]")
+            context_fields = []
+            break
+        else:  # regenerate
+            console.print()
+            feedback = Prompt.ask(
+                "[bold yellow]Feedback[/bold yellow] [dim](what should be different?)[/dim]"
+            )
+
+            with console.status(
+                "[bold magenta]🎯 Regenerating context fields...[/bold magenta]",
+                spinner="dots",
+            ):
+                context_fields = await regenerate_context_fields(
+                    topic=topic,
+                    questions=questions,
+                    feedback=feedback,
+                    n_fields=4,
+                )
+
+    return context_fields
+
+
+def _display_context_fields(fields: list[DemographicField]) -> None:
+    """Display context fields in a formatted panel.
+
+    Args:
+        fields: List of policy context fields to display.
+    """
+    console.print()
+
+    for i, field in enumerate(fields, 1):
+        lines = [f"[bold]{field.display_name}[/bold]\n"]
+
+        for j, value in enumerate(field.values):
+            pct = field.distribution[j] * 100
+            modifier = field.stance_modifiers[j] if field.stance_modifiers else 0
+
+            # Format stance indicator
+            if modifier > 0.02:
+                stance = f"[green]→ SUPPORT +{modifier:.0%}[/green]"
+            elif modifier < -0.02:
+                stance = f"[red]→ OPPOSE {modifier:.0%}[/red]"
+            else:
+                stance = "[dim]→ NEUTRAL[/dim]"
+
+            lines.append(f"   {value} [dim]({pct:.0f}%)[/dim] {stance}")
+
+        content = "\n".join(lines)
+        console.print(
+            Panel(
+                content,
+                title=f"[bold cyan]{i}[/bold cyan]",
+                box=ROUNDED,
+                border_style="cyan",
+                padding=(0, 1),
+            )
+        )
 
 
 async def _review_single_question(
@@ -463,7 +592,7 @@ def _configure_demographics():
     Returns:
         List of DemographicField with user-selected enabled states.
     """
-    _print_step_header(5, "Demographics")
+    _print_step_header(6, "Demographics")
     console.print(
         "[dim]Select demographic fields to include in respondent profiles.[/dim]\n"
     )
@@ -539,7 +668,8 @@ def _show_confirmation_summary(
     topic: str,
     questions: list[QuestionConfig],
     n_responses: int,
-    demographics,
+    demographics: list[DemographicField],
+    policy_context_fields: list[DemographicField],
     noise_level: NoiseLevel,
 ) -> None:
     """Display configuration summary for confirmation.
@@ -550,6 +680,7 @@ def _show_confirmation_summary(
         questions: List of approved question configurations.
         n_responses: Number of responses per question.
         demographics: List of demographic fields.
+        policy_context_fields: List of policy-specific context fields.
         noise_level: Noise injection level.
     """
     console.print()
@@ -571,6 +702,10 @@ def _show_confirmation_summary(
         f.name.replace("_", " ").title() for f in demographics if f.enabled
     ]
     config_table.add_row("👥 Demographics", ", ".join(enabled_demographics))
+
+    if policy_context_fields:
+        context_names = [f.name.replace("_", " ").title() for f in policy_context_fields]
+        config_table.add_row("🎯 Policy Context", ", ".join(context_names))
 
     console.print(config_table)
     console.print()
