@@ -18,13 +18,6 @@ logger = logging.getLogger(__name__)
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 2.0
 
-# Safety instruction added when content filter is triggered
-CONTENT_FILTER_SAFETY_INSTRUCTION = """
-
-IMPORTANT: Keep your response appropriate and professional. Avoid any content that could be
-considered explicit, inappropriate, or harmful. Focus on policy perspectives and factual arguments.
-Do not include any sexual, violent, or otherwise sensitive content."""
-
 
 class GeneratedResponse(BaseModel):
     """LLM-generated consultation response."""
@@ -159,18 +152,9 @@ async def generate_respondent_survey(
         # Retry loop for transient LLM errors (JSON parsing, connection issues, content filter)
         response = None
         last_error = None
-        content_filter_retry = False
 
         for attempt in range(MAX_RETRIES):
             try:
-                # If previous attempt hit content filter, add safety instruction
-                if content_filter_retry:
-                    safe_system_prompt = system_prompt + CONTENT_FILTER_SAFETY_INSTRUCTION
-                    messages = [
-                        SystemMessage(content=safe_system_prompt),
-                        HumanMessage(content=human_prompt),
-                    ]
-
                 response = await structured_llm.ainvoke(messages, config=config)
                 break  # Success - exit retry loop
             except (ValidationError, Exception) as e:
@@ -186,20 +170,11 @@ async def generate_respondent_survey(
                 if is_validation_error or is_connection_error or is_content_filter:
                     if attempt < MAX_RETRIES - 1:
                         delay = RETRY_DELAY_SECONDS * (2 ** attempt)  # Exponential backoff
-
-                        if is_content_filter:
-                            content_filter_retry = True
-                            logger.warning(
-                                f"Content filter triggered for response_id={respondent.response_id}, "
-                                f"question={question.number}, attempt {attempt + 1}/{MAX_RETRIES}. "
-                                f"Retrying with safety instruction in {delay:.1f}s..."
-                            )
-                        else:
-                            logger.warning(
-                                f"Retryable error ({error_type}) for response_id={respondent.response_id}, "
-                                f"question={question.number}, attempt {attempt + 1}/{MAX_RETRIES}. "
-                                f"Retrying in {delay:.1f}s..."
-                            )
+                        logger.warning(
+                            f"Retryable error ({error_type}) for response_id={respondent.response_id}, "
+                            f"question={question.number}, attempt {attempt + 1}/{MAX_RETRIES}. "
+                            f"Retrying in {delay:.1f}s..."
+                        )
                         await asyncio.sleep(delay)
                         continue
                 # Non-retryable or exhausted retries - re-raise
