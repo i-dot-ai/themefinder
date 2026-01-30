@@ -5,17 +5,24 @@ then consolidates with light-touch rationalisation.
 """
 
 import asyncio
+import logging
 import os
 from collections.abc import Callable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import DemographicField
 
+logger = logging.getLogger(__name__)
+
 # Number of parallel theme generation calls for diversity
 FAN_OUT_COUNT = 10
+
+# Retry configuration for transient LLM errors
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 2.0
 
 
 class Theme(BaseModel):
@@ -265,22 +272,46 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
         HumanMessage(content=human_prompt),
     ]
 
-    async def single_call() -> list[dict]:
-        """Execute a single theme generation call."""
-        result = await structured_llm.ainvoke(messages)
-        themes = [
-            {
-                "topic_label": t.topic_label,
-                "topic_description": t.topic_description,
-            }
-            for t in result.themes
-        ]
-        if on_complete:
-            on_complete()
-        return themes
+    async def single_call(call_id: int) -> list[dict]:
+        """Execute a single theme generation call with retry logic."""
+        last_error = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                result = await structured_llm.ainvoke(messages)
+                themes = [
+                    {
+                        "topic_label": t.topic_label,
+                        "topic_description": t.topic_description,
+                    }
+                    for t in result.themes
+                ]
+                if on_complete:
+                    on_complete()
+                return themes
+            except (ValidationError, Exception) as e:
+                last_error = e
+                error_type = type(e).__name__
+
+                # Check if it's a retryable error
+                is_validation_error = isinstance(e, ValidationError)
+                is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+
+                if is_validation_error or is_connection_error:
+                    if attempt < MAX_RETRIES - 1:
+                        delay = RETRY_DELAY_SECONDS * (2 ** attempt)
+                        logger.warning(
+                            f"Retryable error ({error_type}) in theme fan-out call {call_id}, "
+                            f"attempt {attempt + 1}/{MAX_RETRIES}. Retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                raise
+
+        raise last_error  # type: ignore[misc]
 
     # Run FAN_OUT_COUNT calls in parallel
-    tasks = [asyncio.create_task(single_call()) for _ in range(FAN_OUT_COUNT)]
+    tasks = [asyncio.create_task(single_call(i)) for i in range(FAN_OUT_COUNT)]
     results = await asyncio.gather(*tasks)
 
     # Flatten all themes into one list
@@ -340,7 +371,34 @@ Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
         HumanMessage(content=human_prompt),
     ]
 
-    result = await structured_llm.ainvoke(messages)
+    # Retry loop for transient LLM errors
+    result = None
+    last_error = None
+
+    for attempt in range(MAX_RETRIES):
+        try:
+            result = await structured_llm.ainvoke(messages)
+            break
+        except (ValidationError, Exception) as e:
+            last_error = e
+            error_type = type(e).__name__
+
+            is_validation_error = isinstance(e, ValidationError)
+            is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+
+            if is_validation_error or is_connection_error:
+                if attempt < MAX_RETRIES - 1:
+                    delay = RETRY_DELAY_SECONDS * (2 ** attempt)
+                    logger.warning(
+                        f"Retryable error ({error_type}) in theme consolidation, "
+                        f"attempt {attempt + 1}/{MAX_RETRIES}. Retrying in {delay:.1f}s..."
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+            raise
+
+    if result is None:
+        raise last_error  # type: ignore[misc]
 
     # Normalise topic IDs to ensure sequential ordering
     topic_ids = _generate_topic_ids(len(result.themes))

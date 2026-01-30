@@ -1,14 +1,22 @@
 """Response generation using LLM for synthetic consultation datasets."""
 
+import asyncio
+import logging
 import random
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import NoiseLevel, QuestionConfig, ResponseLength, ResponseType
+
+logger = logging.getLogger(__name__)
+
+# Retry configuration for transient LLM errors
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 2.0
 
 
 class GeneratedResponse(BaseModel):
@@ -139,7 +147,37 @@ async def generate_respondent_survey(
             HumanMessage(content=human_prompt),
         ]
 
-        response = await structured_llm.ainvoke(messages, config=config)
+        # Retry loop for transient LLM errors (JSON parsing, connection issues)
+        response = None
+        last_error = None
+
+        for attempt in range(MAX_RETRIES):
+            try:
+                response = await structured_llm.ainvoke(messages, config=config)
+                break  # Success - exit retry loop
+            except (ValidationError, Exception) as e:
+                last_error = e
+                error_type = type(e).__name__
+
+                # Check if it's a retryable error
+                is_validation_error = isinstance(e, ValidationError)
+                is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+
+                if is_validation_error or is_connection_error:
+                    if attempt < MAX_RETRIES - 1:
+                        delay = RETRY_DELAY_SECONDS * (2 ** attempt)  # Exponential backoff
+                        logger.warning(
+                            f"Retryable error ({error_type}) for response_id={respondent.response_id}, "
+                            f"question={question.number}, attempt {attempt + 1}/{MAX_RETRIES}. "
+                            f"Retrying in {delay:.1f}s..."
+                        )
+                        await asyncio.sleep(delay)
+                        continue
+                # Non-retryable or exhausted retries - re-raise
+                raise
+
+        if response is None:
+            raise last_error  # type: ignore[misc]
 
         final_text = response.response
         if respondent.apply_noise and respondent.noise_type:
