@@ -7,10 +7,12 @@ import logging
 import os
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Generator
+from datetime import datetime
+from typing import TYPE_CHECKING, Any, Generator
 
 if TYPE_CHECKING:
     from langfuse import Langfuse
+    from langfuse._client.span import LangfuseSpan
     from langfuse.langchain import CallbackHandler
 
 logger = logging.getLogger("themefinder.evals.langfuse")
@@ -47,38 +49,62 @@ class LangfuseContext:
 
 
 @contextmanager
-def trace_context(context: LangfuseContext) -> Generator[None, None, None]:
-    """Context manager to propagate Langfuse attributes to all nested LLM calls.
+def trace_context(
+    context: LangfuseContext, name: str = "eval_task"
+) -> Generator["LangfuseSpan | None", None, None]:
+    """Create a parent Langfuse span that captures all nested LangChain traces.
 
-    Use this to wrap code sections where you want tags, metadata, and session_id
-    to be attached to all Langfuse traces created within the block.
+    Uses native Langfuse span with update_trace() for trace-level attributes.
+    Also updates the CallbackHandler's trace_context to ensure LangChain traces
+    are properly nested under the parent span.
 
     Args:
         context: LangfuseContext from get_langfuse_context()
+        name: Name for the parent span (e.g., "generation_eval", "question_1")
+
+    Yields:
+        LangfuseSpan instance (or None if Langfuse is disabled)
 
     Example:
-        with trace_context(langfuse_ctx):
-            response = llm.invoke(prompt)  # Trace will have tags/metadata
+        with trace_context(langfuse_ctx, name="sentiment_eval") as span:
+            response = llm.invoke(prompt)  # Nested under span with tags/metadata
     """
-    if not context.is_enabled:
-        yield
+    if not context.is_enabled or not context.client:
+        yield None
         return
 
-    try:
-        from langfuse import propagate_attributes
+    # Store original handler trace_context to restore later
+    original_trace_context = None
+    if context.handler:
+        original_trace_context = getattr(context.handler, "trace_context", None)
 
-        with propagate_attributes(
-            session_id=context.session_id,
-            tags=context.tags,
-            metadata=context.metadata,
-        ):
-            yield
+    try:
+        with context.client.start_as_current_span(
+            name=name, metadata=context.metadata
+        ) as span:
+            # Set session_id, tags on the parent trace
+            span.update_trace(
+                session_id=context.session_id,
+                tags=context.tags,
+                metadata=context.metadata,
+            )
+
+            # Update handler's trace_context to nest LangChain traces under this span
+            if context.handler:
+                context.handler.trace_context = {"trace_id": span.trace_id}
+                logger.debug(f"Set handler trace_context to {span.trace_id}")
+
+            yield span
     except ImportError:
-        logger.warning("Langfuse package not available for propagate_attributes")
-        yield
+        logger.warning("Langfuse package not available")
+        yield None
     except Exception as e:
-        logger.warning(f"Failed to set trace context: {e}")
-        yield
+        logger.warning(f"Failed to create trace context: {e}")
+        yield None
+    finally:
+        # Restore original handler trace_context
+        if context.handler and original_trace_context is not None:
+            context.handler.trace_context = original_trace_context
 
 
 def get_langfuse_context(
@@ -170,19 +196,15 @@ def create_scores(
 ) -> None:
     """Attach computed metrics as scores to the current trace.
 
+    Uses score_current_trace() when inside a trace_context() block,
+    otherwise falls back to explicit trace_id attachment.
+
     Args:
         context: LangfuseContext from get_langfuse_context()
         scores: Dict mapping score names to numeric values
-        trace_id: Optional trace_id (uses handler's trace if not provided)
+        trace_id: Optional trace_id (used only as fallback)
     """
-    if not context.is_enabled:
-        return
-
-    if trace_id is None and context.handler:
-        trace_id = context.handler.last_trace_id
-
-    if not trace_id:
-        logger.warning("No trace_id available for score attachment")
+    if not context.is_enabled or not context.client:
         return
 
     for name, value in scores.items():
@@ -192,15 +214,31 @@ def create_scores(
             continue
 
         try:
-            context.client.create_score(
+            # Try to use score_current_trace() first (works inside trace_context)
+            context.client.score_current_trace(
                 name=name,
                 value=float(value),
-                trace_id=trace_id,
                 data_type="NUMERIC",
             )
-            logger.debug(f"Attached score {name}={value}")
+            logger.debug(f"Attached score {name}={value} to current trace")
         except Exception as e:
-            logger.warning(f"Failed to attach score {name}: {e}")
+            # Fallback to explicit trace_id if available
+            if trace_id is None and context.handler:
+                trace_id = context.handler.last_trace_id
+
+            if trace_id:
+                try:
+                    context.client.create_score(
+                        name=name,
+                        value=float(value),
+                        trace_id=trace_id,
+                        data_type="NUMERIC",
+                    )
+                    logger.debug(f"Attached score {name}={value} via trace_id")
+                except Exception as e2:
+                    logger.warning(f"Failed to attach score {name}: {e2}")
+            else:
+                logger.warning(f"Failed to attach score {name}: {e}")
 
 
 def flush(context: LangfuseContext) -> None:
@@ -215,3 +253,75 @@ def flush(context: LangfuseContext) -> None:
             logger.debug("Langfuse data flushed")
         except Exception as e:
             logger.warning(f"Failed to flush Langfuse: {e}")
+
+
+@contextmanager
+def dataset_item_trace(
+    context: LangfuseContext,
+    dataset_item: Any,
+    run_name: str,
+) -> Generator[tuple[Any, str | None], None, None]:
+    """Create a trace for a single dataset item linked to a dataset run.
+
+    Uses Langfuse's item.run() context manager which automatically:
+    - Creates a trace linked to the dataset item
+    - Associates the trace with a named dataset run
+    - Aggregates metadata and costs at the run level
+
+    Args:
+        context: LangfuseContext from get_langfuse_context()
+        dataset_item: Langfuse dataset item object (must have .run() method)
+        run_name: Name of the experiment run (typically session_id)
+
+    Yields:
+        Tuple of (span object, trace_id) for score attachment.
+        Both are None if Langfuse is disabled.
+
+    Example:
+        for item in dataset.items:
+            with dataset_item_trace(ctx, item, ctx.session_id) as (trace, trace_id):
+                result = await run_task(item)
+                if trace:
+                    trace.update(output=result)
+                if trace_id:
+                    ctx.client.create_score(
+                        trace_id=trace_id, name="accuracy", value=0.95, data_type="NUMERIC"
+                    )
+    """
+    if not context.is_enabled or not context.client:
+        yield None, None
+        return
+
+    # Store original handler trace_context to restore later
+    original_trace_context = None
+    if context.handler:
+        original_trace_context = getattr(context.handler, "trace_context", None)
+
+    try:
+        # Use item.run() context manager for automatic dataset run linking
+        # This creates a trace that is properly linked to the dataset run,
+        # enabling metadata and cost aggregation at the run level
+        with dataset_item.run(
+            run_name=run_name,
+            run_metadata=context.metadata,
+        ) as root_span:
+            # Update trace-level attributes (session_id, tags)
+            root_span.update_trace(
+                session_id=context.session_id,
+                tags=context.tags,
+            )
+
+            # Update handler's trace_context to nest LangChain traces under this span
+            if context.handler:
+                context.handler.trace_context = {"trace_id": root_span.trace_id}
+                logger.debug(f"Set handler trace_context to {root_span.trace_id}")
+
+            yield root_span, root_span.trace_id
+
+    except Exception as e:
+        logger.warning(f"Failed to create dataset item trace: {e}")
+        yield None, None
+    finally:
+        # Restore original handler trace_context
+        if context.handler and original_trace_context is not None:
+            context.handler.trace_context = original_trace_context
