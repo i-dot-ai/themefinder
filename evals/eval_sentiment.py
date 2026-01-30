@@ -10,7 +10,7 @@ from datetime import datetime
 
 import nest_asyncio
 
-# Allow nested asyncio.run() calls for Langfuse experiment runner
+# Allow nested asyncio.run() calls for async evaluation context
 nest_asyncio.apply()
 
 import dotenv
@@ -68,7 +68,7 @@ async def evaluate_sentiment(
 
 
 async def _run_with_langfuse(ctx, config: DatasetConfig, llm) -> dict:
-    """Run experiment using Langfuse dataset.
+    """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
         ctx: LangfuseContext
@@ -76,7 +76,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm) -> dict:
         llm: LangChain LLM instance
 
     Returns:
-        Experiment result dict
+        Dict containing evaluation scores
     """
     try:
         dataset = ctx.client.get_dataset(config.name)
@@ -86,46 +86,61 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm) -> dict:
         )
         return await _run_local_fallback(config, llm)
 
-    def task(*, item, **kwargs) -> dict:
-        """Task function for experiment runner."""
-        responses_df = pd.DataFrame(item.input["responses"])
-        question = item.input["question"]
+    all_scores = {}
+    items = list(dataset.items)
 
-        # Run sentiment analysis
-        result_df = asyncio.run(
-            sentiment_analysis(
+    for item in items:
+        # Create trace for this item with full metadata
+        with langfuse_utils.dataset_item_trace(ctx, item, ctx.session_id) as (
+            trace,
+            trace_id,
+        ):
+            # Extract input
+            responses_df = pd.DataFrame(item.input["responses"])
+            question = item.input["question"]
+
+            # Run sentiment analysis
+            result_df, _ = await sentiment_analysis(
                 responses_df=responses_df[["response_id", "response"]],
                 llm=llm,
                 question=question,
             )
-        )
 
-        # Handle tuple return
-        if isinstance(result_df, tuple):
-            result_df = result_df[0]
-
-        # Build positions map
-        positions = dict(
-            zip(
-                result_df["response_id"].astype(str),
-                result_df["position"].map(
-                    {"DISAGREEMENT": "DISAGREE", "AGREEMENT": "AGREE"}
-                ),
+            # Build positions map
+            positions = dict(
+                zip(
+                    result_df["response_id"].astype(str),
+                    result_df["position"].map(
+                        {"DISAGREEMENT": "DISAGREE", "AGREEMENT": "AGREE"}
+                    ),
+                )
             )
-        )
+            output = {"positions": positions}
 
-        return {"positions": positions}
+            # Update trace with output
+            if trace:
+                trace.update(output=output)
 
-    with langfuse_utils.trace_context(ctx):
-        result = dataset.run_experiment(
-            name=ctx.session_id,
-            task=task,
-            evaluators=[sentiment_accuracy_evaluator],
-            max_concurrency=1,
-        )
+            # Run evaluator and attach score
+            eval_result = sentiment_accuracy_evaluator(
+                output=output,
+                expected_output=item.expected_output,
+            )
 
-    print(f"Sentiment Eval Results (Langfuse experiment): {ctx.session_id}")
-    return {"experiment_id": ctx.session_id, "result": result}
+            if trace_id and ctx.client:
+                ctx.client.create_score(
+                    trace_id=trace_id,
+                    name=eval_result.name,
+                    value=eval_result.value,
+                    data_type="NUMERIC",
+                )
+
+            # Collect for return
+            item_key = item.metadata.get("question_part", item.id)
+            all_scores[f"{item_key}_accuracy"] = eval_result.value
+
+    print(f"Sentiment Eval Results: {ctx.session_id}")
+    return all_scores
 
 
 async def _run_local_fallback(config: DatasetConfig, llm) -> dict:

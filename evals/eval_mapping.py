@@ -10,7 +10,7 @@ from datetime import datetime
 
 import nest_asyncio
 
-# Allow nested asyncio.run() calls for Langfuse experiment runner
+# Allow nested asyncio.run() calls for async evaluation context
 nest_asyncio.apply()
 
 import dotenv
@@ -72,7 +72,7 @@ async def evaluate_mapping(
 async def _run_with_langfuse(
     ctx, config: DatasetConfig, llm, question_num: int | None
 ) -> dict:
-    """Run experiment using Langfuse dataset.
+    """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
         ctx: LangfuseContext
@@ -81,7 +81,7 @@ async def _run_with_langfuse(
         question_num: Optional specific question to evaluate
 
     Returns:
-        Experiment result dict
+        Dict containing evaluation scores
     """
     try:
         dataset = ctx.client.get_dataset(config.name)
@@ -91,47 +91,64 @@ async def _run_with_langfuse(
         )
         return await _run_local_fallback(config, llm, question_num)
 
-    def task(*, item, **kwargs) -> dict:
-        """Task function for experiment runner."""
-        responses_df = pd.DataFrame(item.input["responses"])
-        question = item.input["question"]
-        topics_df = pd.DataFrame(item.input["topics"])
-        topics_df = topics_df.rename(columns={"topic_id": "topic_id", "topic": "topic"})
+    all_scores = {}
+    items = list(dataset.items)
 
-        # Run theme mapping
-        result_df = asyncio.run(
-            theme_mapping(
+    for item in items:
+        # Create trace for this item with full metadata
+        with langfuse_utils.dataset_item_trace(ctx, item, ctx.session_id) as (
+            trace,
+            trace_id,
+        ):
+            # Extract input
+            responses_df = pd.DataFrame(item.input["responses"])
+            question = item.input["question"]
+            topics_df = pd.DataFrame(item.input["topics"])
+            topics_df = topics_df.rename(
+                columns={"topic_id": "topic_id", "topic": "topic"}
+            )
+
+            # Run theme mapping
+            result_df, _ = await theme_mapping(
                 responses_df=responses_df[["response_id", "response"]],
                 llm=llm,
                 question=question,
                 refined_themes_df=topics_df,
             )
-        )
 
-        # Handle tuple return
-        if isinstance(result_df, tuple):
-            result_df = result_df[0]
-
-        # Build labels map
-        labels = dict(
-            zip(
-                result_df["response_id"].astype(str),
-                result_df["labels"].tolist(),
+            # Build labels map
+            labels = dict(
+                zip(
+                    result_df["response_id"].astype(str),
+                    result_df["labels"].tolist(),
+                )
             )
-        )
+            output = {"labels": labels}
 
-        return {"labels": labels}
+            # Update trace with output
+            if trace:
+                trace.update(output=output)
 
-    with langfuse_utils.trace_context(ctx):
-        result = dataset.run_experiment(
-            name=ctx.session_id,
-            task=task,
-            evaluators=[mapping_f1_evaluator],
-            max_concurrency=1,
-        )
+            # Run evaluator and attach score
+            eval_result = mapping_f1_evaluator(
+                output=output,
+                expected_output=item.expected_output,
+            )
 
-    print(f"Mapping Eval Results (Langfuse experiment): {ctx.session_id}")
-    return {"experiment_id": ctx.session_id, "result": result}
+            if trace_id and ctx.client:
+                ctx.client.create_score(
+                    trace_id=trace_id,
+                    name=eval_result.name,
+                    value=eval_result.value,
+                    data_type="NUMERIC",
+                )
+
+            # Collect for return
+            item_key = item.metadata.get("question_part", item.id)
+            all_scores[f"{item_key}_f1"] = eval_result.value
+
+    print(f"Mapping Eval Results: {ctx.session_id}")
+    return all_scores
 
 
 async def _run_local_fallback(

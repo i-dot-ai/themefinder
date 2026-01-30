@@ -11,7 +11,7 @@ from datetime import datetime
 
 import nest_asyncio
 
-# Allow nested asyncio.run() calls for Langfuse experiment runner
+# Allow nested asyncio.run() calls for async evaluation context
 nest_asyncio.apply()
 
 import dotenv
@@ -69,7 +69,7 @@ async def evaluate_generation(
 
 
 async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -> dict:
-    """Run experiment using Langfuse dataset.
+    """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
         ctx: LangfuseContext
@@ -78,7 +78,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         callbacks: LangChain callbacks list
 
     Returns:
-        Experiment result dict
+        Dict containing evaluation scores
     """
     try:
         dataset = ctx.client.get_dataset(config.name)
@@ -88,57 +88,67 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         )
         return await _run_local_fallback(config, llm, callbacks)
 
-    def task(*, item, **kwargs) -> dict:
-        """Task function for experiment runner."""
-        responses_df = pd.DataFrame(item.input["responses"])
-        question = item.input["question"]
+    # Create evaluator functions
+    groundedness_evaluator = create_groundedness_evaluator(llm)
+    coverage_evaluator = create_coverage_evaluator(llm)
 
-        # Run full pipeline synchronously (experiment runner is sync)
-        themes_df = asyncio.run(
-            theme_generation(
+    all_scores = {}
+    items = list(dataset.items)
+
+    for item in items:
+        # Create trace for this item with full metadata
+        with langfuse_utils.dataset_item_trace(ctx, item, ctx.session_id) as (
+            trace,
+            trace_id,
+        ):
+            # Extract input
+            responses_df = pd.DataFrame(item.input["responses"])
+            question = item.input["question"]
+
+            # Run full pipeline
+            themes_df, _ = await theme_generation(
                 responses_df=responses_df,
                 llm=llm,
                 question=question,
             )
-        )
-        condensed_df = asyncio.run(
-            theme_condensation(
+            condensed_df, _ = await theme_condensation(
                 themes_df,
                 llm=llm,
                 question=question,
             )
-        )
-        refined_df = asyncio.run(
-            theme_refinement(
+            refined_df, _ = await theme_refinement(
                 condensed_df,
                 llm=llm,
                 question=question,
             )
-        )
 
-        # Handle tuple returns (df, metadata)
-        if isinstance(themes_df, tuple):
-            themes_df = themes_df[0]
-        if isinstance(condensed_df, tuple):
-            condensed_df = condensed_df[0]
-        if isinstance(refined_df, tuple):
-            refined_df = refined_df[0]
+            output = {"themes": refined_df.to_dict(orient="records")}
 
-        return {"themes": refined_df.to_dict(orient="records")}
+            # Update trace with output
+            if trace:
+                trace.update(output=output)
 
-    with langfuse_utils.trace_context(ctx):
-        result = dataset.run_experiment(
-            name=ctx.session_id,
-            task=task,
-            evaluators=[
-                create_groundedness_evaluator(llm),
-                create_coverage_evaluator(llm),
-            ],
-            max_concurrency=1,
-        )
+            # Run evaluators and attach scores
+            for evaluator in [groundedness_evaluator, coverage_evaluator]:
+                eval_result = evaluator(
+                    output=output,
+                    expected_output=item.expected_output,
+                )
 
-    print(f"Theme Generation Eval Results (Langfuse experiment): {ctx.session_id}")
-    return {"experiment_id": ctx.session_id, "result": result}
+                if trace_id and ctx.client:
+                    ctx.client.create_score(
+                        trace_id=trace_id,
+                        name=eval_result.name,
+                        value=eval_result.value,
+                        data_type="NUMERIC",
+                    )
+
+                # Collect for return
+                item_key = item.metadata.get("question_part", item.id)
+                all_scores[f"{item_key}_{eval_result.name}"] = eval_result.value
+
+    print(f"Theme Generation Eval Results: {ctx.session_id}")
+    return all_scores
 
 
 async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> dict:

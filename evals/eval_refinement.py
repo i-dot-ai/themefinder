@@ -10,7 +10,7 @@ from datetime import datetime
 
 import nest_asyncio
 
-# Allow nested asyncio.run() calls for Langfuse experiment runner
+# Allow nested asyncio.run() calls for async evaluation context
 nest_asyncio.apply()
 
 import dotenv
@@ -67,10 +67,9 @@ async def evaluate_refinement(
 
 
 async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -> dict:
-    """Run experiment using Langfuse dataset.
+    """Run evaluation with manual dataset iteration for proper trace control.
 
-    Note: Refinement uses qualitative LLM evaluation, so we run it
-    but don't use numeric evaluators.
+    Note: Refinement uses qualitative LLM evaluation, so no numeric evaluators.
 
     Args:
         ctx: LangfuseContext
@@ -79,7 +78,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         callbacks: LangChain callbacks list
 
     Returns:
-        Experiment result dict
+        Dict containing evaluation results
     """
     try:
         dataset = ctx.client.get_dataset(config.name)
@@ -89,36 +88,38 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         )
         return await _run_local_fallback(config, llm, callbacks)
 
-    def task(*, item, **kwargs) -> dict:
-        """Task function for experiment runner."""
-        themes_df = pd.DataFrame(item.input["themes"])
-        question = item.input.get("question", "")
+    all_results = {}
+    items = list(dataset.items)
 
-        # Run refinement
-        refined_df = asyncio.run(
-            theme_refinement(
+    for item in items:
+        # Create trace for this item with full metadata
+        with langfuse_utils.dataset_item_trace(ctx, item, ctx.session_id) as (
+            trace,
+            trace_id,
+        ):
+            # Extract input
+            themes_df = pd.DataFrame(item.input["themes"])
+            question = item.input.get("question", "")
+
+            # Run refinement
+            refined_df, _ = await theme_refinement(
                 themes_df,
                 llm=llm,
                 question=question,
             )
-        )
 
-        # Handle tuple return
-        if isinstance(refined_df, tuple):
-            refined_df = refined_df[0]
+            output = {"refined_themes": refined_df.to_dict(orient="records")}
 
-        return {"refined_themes": refined_df.to_dict(orient="records")}
+            # Update trace with output
+            if trace:
+                trace.update(output=output)
 
-    with langfuse_utils.trace_context(ctx):
-        result = dataset.run_experiment(
-            name=ctx.session_id,
-            task=task,
-            evaluators=[],  # Qualitative evaluation done separately
-            max_concurrency=1,
-        )
+            # Collect for return (qualitative - no numeric scores)
+            item_key = item.metadata.get("question_part", item.id)
+            all_results[f"{item_key}_output"] = output
 
-    print(f"Refinement Eval Results (Langfuse experiment): {ctx.session_id}")
-    return {"experiment_id": ctx.session_id, "result": result}
+    print(f"Refinement Eval Results: {ctx.session_id}")
+    return all_results
 
 
 async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> dict:
