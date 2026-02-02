@@ -76,7 +76,9 @@ class SyntheticDatasetGenerator:
         # Step 1: Generate themes for ALL questions upfront
         # Each question has FAN_OUT_COUNT parallel calls + 1 consolidation = FAN_OUT_COUNT + 1 LLM calls
         n_questions = len(self.config.questions)
-        total_theme_calls = n_questions * FAN_OUT_COUNT  # Fan-out calls only (consolidation is fast)
+        total_theme_calls = (
+            n_questions * FAN_OUT_COUNT
+        )  # Fan-out calls only (consolidation is fast)
 
         theme_task_id: TaskID | None = None
         theme_progress_count = 0
@@ -132,7 +134,9 @@ class SyntheticDatasetGenerator:
             if isinstance(result, Exception):
                 q_num = self.config.questions[i].number
                 logger.error(f"Theme generation for question {q_num} failed: {result}")
-                raise RuntimeError(f"Theme generation failed for question {q_num}") from result
+                raise RuntimeError(
+                    f"Theme generation failed for question {q_num}"
+                ) from result
             q_num, themes = result
             themes_by_question[q_num] = themes
 
@@ -328,9 +332,7 @@ class SyntheticDatasetGenerator:
 
         return adjusted
 
-    def _sample_disposition(
-        self, probs: dict[ResponseType, float]
-    ) -> ResponseType:
+    def _sample_disposition(self, probs: dict[ResponseType, float]) -> ResponseType:
         """Sample a disposition based on probabilities.
 
         Args:

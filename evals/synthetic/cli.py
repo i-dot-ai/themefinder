@@ -1,5 +1,7 @@
 """Interactive CLI for synthetic consultation dataset generation."""
 
+from pathlib import Path
+
 from rich.box import DOUBLE, HEAVY, ROUNDED
 from rich.console import Console
 from rich.panel import Panel
@@ -33,6 +35,7 @@ from synthetic.llm_generators.context_generator import (
 )
 from synthetic.llm_generators.question_generator import (
     GeneratedQuestion,
+    generate_dataset_name,
     generate_questions,
     regenerate_single_question,
 )
@@ -116,6 +119,59 @@ class SmoothedTimeRemainingColumn(ProgressColumn):
         return Text(time_str, style="cyan")
 
 
+def _resolve_topic_input(topic_input: str) -> str:
+    """Resolve topic input, reading from file if path provided.
+
+    Supports:
+    - Direct text input (returned as-is)
+    - File path prefixed with @ (e.g., @policy.txt)
+    - File path with common extensions (.txt, .md)
+    - Absolute/relative paths
+
+    Args:
+        topic_input: User input - either text or file path.
+
+    Returns:
+        Topic content (from file or direct input).
+    """
+    if not topic_input:
+        return "general policy consultation"
+
+    topic_input = topic_input.strip()
+
+    # Check for @ prefix (explicit file marker)
+    if topic_input.startswith("@"):
+        file_path = Path(topic_input[1:]).expanduser()
+    # Check for common file extensions or path-like patterns
+    elif (
+        topic_input.endswith((".txt", ".md", ".markdown"))
+        or topic_input.startswith(("/", "~", "./", "../"))
+        or (len(topic_input) < 200 and Path(topic_input).expanduser().exists())
+    ):
+        file_path = Path(topic_input).expanduser()
+    else:
+        # Treat as direct text input
+        return topic_input
+
+    # Read from file
+    if not file_path.exists():
+        console.print(f"[red]File not found: {file_path}[/red]")
+        console.print("[dim]Using input as topic text instead.[/dim]")
+        return topic_input
+
+    try:
+        content = file_path.read_text(encoding="utf-8").strip()
+        console.print(f"[green]✓ Loaded topic from {file_path}[/green]")
+        console.print(
+            f"[dim]  ({len(content):,} characters, {len(content.split()):,} words)[/dim]"
+        )
+        return content
+    except Exception as e:
+        console.print(f"[red]Error reading file: {e}[/red]")
+        console.print("[dim]Using input as topic text instead.[/dim]")
+        return topic_input
+
+
 def _print_step_header(step: int, title: str) -> None:
     """Print a formatted step header."""
     icon = STEP_ICONS.get(step, "•")
@@ -142,24 +198,26 @@ async def run_interactive_cli() -> GenerationConfig:
 
     # Step 1: Policy topic
     _print_step_header(1, "Policy Topic")
-    console.print("[dim]What is the consultation about?[/dim]\n")
-    topic = Prompt.ask(
+    console.print(
+        "[dim]What is the consultation about?[/dim]\n"
+        "[dim]For longer documents, provide a file path: [cyan]@path/to/file.txt[/cyan] or [cyan]/path/to/file.md[/cyan][/dim]\n"
+    )
+    topic_input = Prompt.ask(
         "[bold yellow]Topic[/bold yellow]",
         default="",
     )
-    if not topic:
-        topic = "general policy consultation"
+    topic = _resolve_topic_input(topic_input)
 
     # Step 2: Number of questions
     _print_step_header(2, "Number of Questions")
     console.print(
-        "[dim]How many consultation questions should be generated? (1-25)[/dim]\n"
+        "[dim]How many consultation questions should be generated? (1-50)[/dim]\n"
     )
     n_questions = IntPrompt.ask(
         "[bold yellow]Questions[/bold yellow]",
         default=3,
     )
-    n_questions = max(1, min(25, n_questions))
+    n_questions = max(1, min(50, n_questions))
 
     # Step 3: AI-generated questions with approval workflow
     _print_step_header(3, "Question Generation")
@@ -232,18 +290,42 @@ async def run_interactive_cli() -> GenerationConfig:
         )
         noise_level = NoiseLevel(noise)
 
-    # Generate dataset name
-    safe_topic = topic.lower().replace(" ", "_").replace("-", "_")
-    safe_topic = "".join(c for c in safe_topic if c.isalnum() or c == "_")
-    dataset_name = f"{safe_topic}_{n_responses}"
+    # Generate dataset name using LLM
+    with console.status(
+        "[bold magenta]📛 Generating dataset name...[/bold magenta]",
+        spinner="dots",
+    ):
+        suggested_name = await generate_dataset_name(
+            topic=topic,
+            questions=[q.text for q in questions],
+        )
+
+    console.print(
+        f"\n[bold]Suggested dataset name:[/bold] [cyan]{suggested_name}[/cyan]"
+    )
+    custom_name = Prompt.ask(
+        "[bold yellow]Dataset name[/bold yellow] [dim](press Enter to accept)[/dim]",
+        default=suggested_name,
+    )
+
+    # Sanitise user input
+    dataset_name = custom_name.lower().strip()
+    dataset_name = dataset_name.replace(" ", "_").replace("-", "_")
+    dataset_name = "".join(c for c in dataset_name if c.isalnum() or c == "_")
+    dataset_name = dataset_name[:50] if dataset_name else "consultation_dataset"
 
     # Merge demographics and policy context fields
     all_fields = demographics + policy_context_fields
 
     # Confirmation summary
     _show_confirmation_summary(
-        dataset_name, topic, questions, n_responses, demographics,
-        policy_context_fields, noise_level
+        dataset_name,
+        topic,
+        questions,
+        n_responses,
+        demographics,
+        policy_context_fields,
+        noise_level,
     )
 
     if not Confirm.ask("\n[bold]Proceed with generation?[/bold]", default=True):
@@ -704,7 +786,9 @@ def _show_confirmation_summary(
     config_table.add_row("👥 Demographics", ", ".join(enabled_demographics))
 
     if policy_context_fields:
-        context_names = [f.name.replace("_", " ").title() for f in policy_context_fields]
+        context_names = [
+            f.name.replace("_", " ").title() for f in policy_context_fields
+        ]
         config_table.add_row("🎯 Policy Context", ", ".join(context_names))
 
     console.print(config_table)

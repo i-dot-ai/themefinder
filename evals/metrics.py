@@ -5,7 +5,6 @@ import pandas as pd
 from langchain_openai import AzureChatOpenAI
 from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
-
 from utils import read_and_render
 
 # Minimum score (0-5) to consider a topic well-grounded or captured

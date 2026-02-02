@@ -58,7 +58,9 @@ class DemographicField:
     distribution: list[float]
     enabled: bool = True
     is_policy_context: bool = False  # True for LLM-generated policy-specific fields
-    stance_modifiers: list[float] | None = None  # Per-value: -0.1 to +0.1 (subtle influence)
+    stance_modifiers: list[float] | None = (
+        None  # Per-value: -0.1 to +0.1 (subtle influence)
+    )
 
     def __post_init__(self) -> None:
         """Validate distribution and stance modifiers."""
@@ -75,7 +77,9 @@ class DemographicField:
                 raise ValueError(msg)
             for mod in self.stance_modifiers:
                 if not (-1.0 <= mod <= 1.0):
-                    msg = f"Stance modifiers must be between -1.0 and 1.0 for {self.name}"
+                    msg = (
+                        f"Stance modifiers must be between -1.0 and 1.0 for {self.name}"
+                    )
                     raise ValueError(msg)
 
 
