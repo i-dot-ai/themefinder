@@ -115,6 +115,10 @@ def get_langfuse_context(
 ) -> LangfuseContext:
     """Initialise Langfuse with structured tags and metadata.
 
+    Updated for Langfuse SDK v3 which changed CallbackHandler API.
+    In v3, session_id/tags/metadata are passed via LangChain's config["metadata"]
+    using special keys: langfuse_session_id, langfuse_tags, etc.
+
     Args:
         session_id: Unique identifier for grouping traces
             (e.g., "eval_generation_20260129_120000")
@@ -149,13 +153,17 @@ def get_langfuse_context(
         git_sha = os.getenv("GITHUB_SHA", "local")[:7]
         model = os.getenv("DEPLOYMENT_NAME", "unknown")
 
+        # Build standard tags - note: model tag is only added if not provided
+        # by caller (benchmark.py provides its own model tag)
+        has_model_tag = any(t.startswith("model:") for t in (tags or []))
         standard_tags = [
             "eval",
             eval_type,
-            f"model:{model}",
             f"v{version}",
             environment,
         ]
+        if not has_model_tag:
+            standard_tags.append(f"model:{model}")
         all_tags = standard_tags + (tags or [])
 
         standard_metadata = {
@@ -167,6 +175,8 @@ def get_langfuse_context(
         }
         all_metadata = {**standard_metadata, **(metadata or {})}
 
+        # SDK v3: CallbackHandler no longer accepts session_id/tags/metadata
+        # These are now passed via LangChain config or set on trace context
         handler = CallbackHandler()
 
         logger.info(
@@ -207,25 +217,21 @@ def create_scores(
     if not context.is_enabled or not context.client:
         return
 
+    # Resolve trace_id fallback once
+    if trace_id is None and context.handler:
+        trace_id = getattr(context.handler, "last_trace_id", None)
+
     for name, value in scores.items():
-        # Skip non-numeric values (e.g., tuples like confidence intervals)
         if not isinstance(value, (int, float)):
             logger.debug(f"Skipping non-numeric score {name}={value}")
             continue
 
         try:
-            # Try to use score_current_trace() first (works inside trace_context)
             context.client.score_current_trace(
-                name=name,
-                value=float(value),
-                data_type="NUMERIC",
+                name=name, value=float(value), data_type="NUMERIC"
             )
             logger.debug(f"Attached score {name}={value} to current trace")
-        except Exception as e:
-            # Fallback to explicit trace_id if available
-            if trace_id is None and context.handler:
-                trace_id = context.handler.last_trace_id
-
+        except Exception:
             if trace_id:
                 try:
                     context.client.create_score(
@@ -235,10 +241,10 @@ def create_scores(
                         data_type="NUMERIC",
                     )
                     logger.debug(f"Attached score {name}={value} via trace_id")
-                except Exception as e2:
-                    logger.warning(f"Failed to attach score {name}: {e2}")
+                except Exception as e:
+                    logger.warning(f"Failed to attach score {name}: {e}")
             else:
-                logger.warning(f"Failed to attach score {name}: {e}")
+                logger.warning(f"Failed to attach score {name}: no trace context")
 
 
 def flush(context: LangfuseContext) -> None:
@@ -305,10 +311,11 @@ def dataset_item_trace(
             run_name=run_name,
             run_metadata=context.metadata,
         ) as root_span:
-            # Update trace-level attributes (session_id, tags)
+            # Update trace-level attributes (session_id, tags, metadata)
             root_span.update_trace(
                 session_id=context.session_id,
                 tags=context.tags,
+                metadata=context.metadata,
             )
 
             # Update handler's trace_context to nest LangChain traces under this span
@@ -325,3 +332,81 @@ def dataset_item_trace(
         # Restore original handler trace_context
         if context.handler and original_trace_context is not None:
             context.handler.trace_context = original_trace_context
+
+
+@dataclass
+class SessionMetrics:
+    """Aggregated metrics from a Langfuse session."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_usd: float = 0.0
+    latency_seconds: float = 0.0
+
+
+def extract_session_metrics(
+    client: "Langfuse | None",
+    session_id: str,
+    benchmark_tag: str | None = None,
+) -> SessionMetrics:
+    """Extract aggregated metrics from traces for a session (best-effort).
+
+    Queries Langfuse for traces and aggregates token usage, cost, and latency.
+    This is best-effort - LangChain callbacks may not properly propagate
+    session_id/tags, so metrics may be unavailable at run time.
+
+    For reliable metrics, use analyse_costs.py post-hoc which queries by
+    benchmark tag after all traces have been ingested.
+
+    Args:
+        client: Langfuse client instance.
+        session_id: Session ID to query traces for.
+        benchmark_tag: Optional benchmark tag to search by.
+
+    Returns:
+        SessionMetrics with aggregated data, or empty metrics if unavailable.
+    """
+    if not client:
+        return SessionMetrics()
+
+    try:
+        traces_data = []
+
+        # Try session_id first
+        traces = client.api.trace.list(session_id=session_id, limit=100)
+        if traces.data:
+            traces_data = traces.data
+
+        # Fall back to benchmark tag if no traces found
+        if not traces_data and benchmark_tag:
+            traces = client.api.trace.list(tags=[benchmark_tag], limit=100)
+            # Filter to only traces matching our session_id
+            traces_data = [
+                t
+                for t in traces.data
+                if session_id in (t.name or "") or session_id in (t.session_id or "")
+            ]
+
+        if not traces_data:
+            # This is expected - LangChain callbacks don't always propagate metadata
+            return SessionMetrics()
+
+        metrics = SessionMetrics()
+
+        for trace in traces_data:
+            full_trace = client.api.trace.get(trace.id)
+            metrics.cost_usd += full_trace.total_cost or 0
+            metrics.latency_seconds += full_trace.latency or 0
+
+            for obs in getattr(full_trace, "observations", []):
+                if hasattr(obs, "usage") and obs.usage:
+                    metrics.input_tokens += getattr(obs.usage, "input", 0) or 0
+                    metrics.output_tokens += getattr(obs.usage, "output", 0) or 0
+
+        metrics.total_tokens = metrics.input_tokens + metrics.output_tokens
+        return metrics
+
+    except Exception as e:
+        logger.debug(f"Could not extract session metrics: {e}")
+        return SessionMetrics()

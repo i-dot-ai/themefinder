@@ -15,22 +15,26 @@ import nest_asyncio
 nest_asyncio.apply()
 
 import dotenv
-import pandas as pd
-from langchain_openai import AzureChatOpenAI
-from themefinder import theme_condensation
-
 import langfuse_utils
+import pandas as pd
 from datasets import DatasetConfig, load_local_data
+from langchain_openai import AzureChatOpenAI
 from utils import read_and_render
+
+from themefinder import theme_condensation
 
 
 async def evaluate_condensation(
     dataset: str = "gambling_XS",
+    llm: AzureChatOpenAI | None = None,
+    langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
 ) -> dict:
     """Run condensation evaluation.
 
     Args:
         dataset: Dataset identifier (e.g., "gambling_S", "healthcare_M")
+        llm: Optional pre-configured LLM instance (for benchmark runs)
+        langfuse_ctx: Optional pre-configured Langfuse context (for benchmark runs)
 
     Returns:
         Dict containing evaluation results
@@ -38,24 +42,27 @@ async def evaluate_condensation(
     dotenv.load_dotenv()
 
     config = DatasetConfig(dataset=dataset, stage="condensation")
-    session_id = (
-        f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    )
 
-    langfuse_ctx = langfuse_utils.get_langfuse_context(
-        session_id=session_id,
-        eval_type="condensation",
-        metadata={"dataset": dataset},
-        tags=[dataset],
-    )
+    # Use provided context or create new one
+    owns_context = langfuse_ctx is None
+    if langfuse_ctx is None:
+        session_id = f"{config.name.replace('/', '_')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        langfuse_ctx = langfuse_utils.get_langfuse_context(
+            session_id=session_id,
+            eval_type="condensation",
+            metadata={"dataset": dataset},
+            tags=[dataset],
+        )
 
     callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
 
-    llm = AzureChatOpenAI(
-        azure_deployment=os.getenv("DEPLOYMENT_NAME"),
-        temperature=0,
-        callbacks=callbacks,
-    )
+    # Use provided LLM or create new one
+    if llm is None:
+        llm = AzureChatOpenAI(
+            azure_deployment=os.getenv("DEPLOYMENT_NAME"),
+            temperature=0,
+            callbacks=callbacks,
+        )
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
@@ -63,7 +70,9 @@ async def evaluate_condensation(
     else:
         result = await _run_local_fallback(config, llm, callbacks)
 
-    langfuse_utils.flush(langfuse_ctx)
+    # Only flush if we created the context
+    if owns_context:
+        langfuse_utils.flush(langfuse_ctx)
     return result
 
 
