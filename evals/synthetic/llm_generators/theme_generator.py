@@ -296,11 +296,17 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
 
                 # Check if it's a retryable error
                 is_validation_error = isinstance(e, ValidationError)
-                is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+                is_connection_error = (
+                    "ECONNRESET" in str(e)
+                    or "ENOTFOUND" in str(e)
+                    or "ECONNREFUSED" in str(e)
+                    or "DNS" in str(e)
+                    or "connection" in str(e).lower()
+                )
 
                 if is_validation_error or is_connection_error:
                     if attempt < MAX_RETRIES - 1:
-                        delay = RETRY_DELAY_SECONDS * (2 ** attempt)
+                        delay = RETRY_DELAY_SECONDS * (2**attempt)
                         logger.warning(
                             f"Retryable error ({error_type}) in theme fan-out call {call_id}, "
                             f"attempt {attempt + 1}/{MAX_RETRIES}. Retrying in {delay:.1f}s..."
@@ -319,7 +325,9 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
     all_themes = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
-            logger.error(f"Theme fan-out call {i} failed: {type(result).__name__}: {result}")
+            logger.error(
+                f"Theme fan-out call {i} failed: {type(result).__name__}: {result}"
+            )
         else:
             all_themes.extend(result)
 
@@ -393,11 +401,17 @@ Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
             error_type = type(e).__name__
 
             is_validation_error = isinstance(e, ValidationError)
-            is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+            is_connection_error = (
+                "ECONNRESET" in str(e)
+                or "ENOTFOUND" in str(e)
+                or "ECONNREFUSED" in str(e)
+                or "DNS" in str(e)
+                or "connection" in str(e).lower()
+            )
 
             if is_validation_error or is_connection_error:
                 if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAY_SECONDS * (2 ** attempt)
+                    delay = RETRY_DELAY_SECONDS * (2**attempt)
                     logger.warning(
                         f"Retryable error ({error_type}) in theme consolidation, "
                         f"attempt {attempt + 1}/{MAX_RETRIES}. Retrying in {delay:.1f}s..."

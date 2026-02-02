@@ -37,7 +37,9 @@ class ContextFieldOption(BaseModel):
 class GeneratedContextField(BaseModel):
     """LLM-generated policy context field."""
 
-    name: str = Field(description="Internal identifier (snake_case, e.g., 'student_loan_status')")
+    name: str = Field(
+        description="Internal identifier (snake_case, e.g., 'student_loan_status')"
+    )
     question_text: str = Field(
         description="Question as it would appear in a survey (e.g., 'Do you currently have a student loan?')"
     )
@@ -134,9 +136,7 @@ async def generate_context_fields(
     structured_llm = llm.with_structured_output(ContextFieldSet)
 
     # Format questions for context
-    questions_text = "\n".join(
-        f"{q.number}. {q.text}" for q in questions
-    )
+    questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
 
     human_prompt = f"""Generate {n_fields} policy-specific context questions for this UK government consultation.
 
@@ -173,11 +173,17 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
             error_type = type(e).__name__
 
             is_validation_error = isinstance(e, ValidationError)
-            is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+            is_connection_error = (
+                "ECONNRESET" in str(e)
+                or "ENOTFOUND" in str(e)
+                or "ECONNREFUSED" in str(e)
+                or "DNS" in str(e)
+                or "connection" in str(e).lower()
+            )
 
             if is_validation_error or is_connection_error:
                 if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAY_SECONDS * (2 ** attempt)
+                    delay = RETRY_DELAY_SECONDS * (2**attempt)
                     logger.warning(
                         f"Retryable error ({error_type}) in context field generation, "
                         f"attempt {attempt + 1}/{MAX_RETRIES}. Retrying in {delay:.1f}s..."
@@ -194,7 +200,9 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
     for gen_field in result.fields:
         # Normalise distributions to sum to 1.0
         total_pct = sum(opt.distribution_percent for opt in gen_field.options)
-        distribution = [opt.distribution_percent / total_pct for opt in gen_field.options]
+        distribution = [
+            opt.distribution_percent / total_pct for opt in gen_field.options
+        ]
 
         demographic_fields.append(
             DemographicField(
@@ -269,11 +277,17 @@ Focus on characteristics directly relevant to this policy."""
             error_type = type(e).__name__
 
             is_validation_error = isinstance(e, ValidationError)
-            is_connection_error = "ECONNRESET" in str(e) or "connection" in str(e).lower()
+            is_connection_error = (
+                "ECONNRESET" in str(e)
+                or "ENOTFOUND" in str(e)
+                or "ECONNREFUSED" in str(e)
+                or "DNS" in str(e)
+                or "connection" in str(e).lower()
+            )
 
             if is_validation_error or is_connection_error:
                 if attempt < MAX_RETRIES - 1:
-                    delay = RETRY_DELAY_SECONDS * (2 ** attempt)
+                    delay = RETRY_DELAY_SECONDS * (2**attempt)
                     logger.warning(
                         f"Retryable error ({error_type}) in context regeneration, "
                         f"attempt {attempt + 1}/{MAX_RETRIES}. Retrying in {delay:.1f}s..."
@@ -289,7 +303,9 @@ Focus on characteristics directly relevant to this policy."""
     demographic_fields = []
     for gen_field in result.fields:
         total_pct = sum(opt.distribution_percent for opt in gen_field.options)
-        distribution = [opt.distribution_percent / total_pct for opt in gen_field.options]
+        distribution = [
+            opt.distribution_percent / total_pct for opt in gen_field.options
+        ]
 
         demographic_fields.append(
             DemographicField(

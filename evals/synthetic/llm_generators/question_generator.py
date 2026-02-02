@@ -235,3 +235,70 @@ Generate ONE new question that:
 
     result = await structured_llm.ainvoke(messages)
     return result
+
+
+class DatasetName(BaseModel):
+    """Generated dataset name."""
+
+    name: str = Field(
+        description="Short, descriptive dataset name using snake_case (e.g., 'bbc_charter_review', 'housing_policy_2025')"
+    )
+
+
+async def generate_dataset_name(
+    topic: str,
+    questions: list[str],
+    callbacks: list | None = None,
+) -> str:
+    """Generate a short, descriptive dataset name from the consultation topic and questions.
+
+    Args:
+        topic: The consultation topic (can be long document).
+        questions: List of approved question texts.
+        callbacks: Optional LangChain callbacks.
+
+    Returns:
+        Short snake_case dataset name suitable for file paths.
+    """
+    llm = _get_question_generation_llm(callbacks)
+    structured_llm = llm.with_structured_output(DatasetName)
+
+    # Truncate topic if very long (just use first 2000 chars for context)
+    topic_excerpt = topic[:2000] + "..." if len(topic) > 2000 else topic
+
+    questions_list = "\n".join(
+        f"- {q[:100]}..." if len(q) > 100 else f"- {q}" for q in questions[:10]
+    )
+
+    human_prompt = f"""Generate a short, descriptive name for this consultation dataset.
+
+## Topic/Context
+{topic_excerpt}
+
+## Questions (first 10)
+{questions_list}
+
+## Requirements
+- Use snake_case (lowercase with underscores)
+- Keep it SHORT: 2-4 words, max 30 characters
+- Make it descriptive of the policy area
+- Examples: "bbc_charter_review", "housing_reform_2025", "nhs_workforce_plan"
+
+Generate ONE dataset name."""
+
+    messages = [
+        SystemMessage(
+            content="You generate short, descriptive dataset names for UK government consultations."
+        ),
+        HumanMessage(content=human_prompt),
+    ]
+
+    result = await structured_llm.ainvoke(messages)
+
+    # Sanitise the name to ensure it's filesystem-safe
+    name = result.name.lower().strip()
+    name = name.replace(" ", "_").replace("-", "_")
+    name = "".join(c for c in name if c.isalnum() or c == "_")
+    name = name[:30]  # Hard limit
+
+    return name if name else "consultation_dataset"

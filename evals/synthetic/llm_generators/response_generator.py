@@ -164,12 +164,23 @@ async def generate_respondent_survey(
 
                 # Check if it's a retryable error
                 is_validation_error = isinstance(e, ValidationError)
-                is_connection_error = "ECONNRESET" in error_str or "connection" in error_str.lower()
-                is_content_filter = "content_filter" in error_str or "ResponsibleAIPolicyViolation" in error_str
+                is_connection_error = (
+                    "ECONNRESET" in error_str
+                    or "ENOTFOUND" in error_str
+                    or "ECONNREFUSED" in error_str
+                    or "DNS" in error_str
+                    or "connection" in error_str.lower()
+                )
+                is_content_filter = (
+                    "content_filter" in error_str
+                    or "ResponsibleAIPolicyViolation" in error_str
+                )
 
                 if is_validation_error or is_connection_error or is_content_filter:
                     if attempt < MAX_RETRIES - 1:
-                        delay = RETRY_DELAY_SECONDS * (2 ** attempt)  # Exponential backoff
+                        delay = RETRY_DELAY_SECONDS * (
+                            2**attempt
+                        )  # Exponential backoff
                         logger.warning(
                             f"Retryable error ({error_type}) for response_id={respondent.response_id}, "
                             f"question={question.number}, attempt {attempt + 1}/{MAX_RETRIES}. "
