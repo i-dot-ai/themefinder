@@ -224,34 +224,47 @@ def load_dataset_metadata(dataset_name: str) -> DatasetMetadata | None:
 
 
 def fetch_langfuse_traces(benchmark_id: str) -> list[dict]:
-    """Fetch all traces for a benchmark from Langfuse."""
+    """Fetch all traces for a benchmark from Langfuse with pagination."""
     try:
         from langfuse import Langfuse
 
-        client = Langfuse()
-
-        traces = client.api.trace.list(
-            tags=[f"benchmark:{benchmark_id}"],
-            limit=100,
-        )
+        client = Langfuse(timeout=30)  # Increased from default 5s
 
         results = []
-        for trace in traces.data:
-            metadata = trace.metadata or {}
-            results.append(
-                {
-                    "id": trace.id,
-                    "name": trace.name,
-                    "session_id": trace.session_id,
-                    "model": metadata.get("model", "unknown"),
-                    "model_tag": metadata.get("model_tag", "unknown"),
-                    "eval_type": metadata.get("eval_type", "unknown"),
-                    "run_number": metadata.get("run_number", 0),
-                    "cost_usd": trace.total_cost or 0,
-                    "latency_s": trace.latency or 0,
-                    "tags": trace.tags or [],
-                }
+        page = 1
+        batch_size = 100
+
+        while True:
+            traces = client.api.trace.list(
+                tags=[f"benchmark:{benchmark_id}"],
+                limit=batch_size,
+                page=page,
             )
+
+            if not traces.data:
+                break
+
+            for trace in traces.data:
+                metadata = trace.metadata or {}
+                results.append(
+                    {
+                        "id": trace.id,
+                        "name": trace.name,
+                        "session_id": trace.session_id,
+                        "model": metadata.get("model", "unknown"),
+                        "model_tag": metadata.get("model_tag", "unknown"),
+                        "eval_type": metadata.get("eval_type", "unknown"),
+                        "run_number": metadata.get("run_number", 0),
+                        "cost_usd": trace.total_cost or 0,
+                        "latency_s": trace.latency or 0,
+                        "tags": trace.tags or [],
+                    }
+                )
+
+            if len(traces.data) < batch_size:
+                break  # Last page
+
+            page += 1
 
         console.print(f"[green]Fetched {len(results)} traces from Langfuse[/green]")
         return results
@@ -269,8 +282,9 @@ def load_benchmark_data(
     results_df = load_local_results(benchmark_id)
     config = load_config(benchmark_id)
 
-    # Load Langfuse data (optional)
-    langfuse_traces = [] if skip_langfuse else fetch_langfuse_traces(benchmark_id)
+    # Load Langfuse data (optional) - use langfuse_benchmark_id if different from directory
+    langfuse_id = config.get("langfuse_benchmark_id", benchmark_id)
+    langfuse_traces = [] if skip_langfuse else fetch_langfuse_traces(langfuse_id)
 
     # Detect available metrics
     detected_metrics = detect_all_metrics(results_df) if not results_df.empty else {}
