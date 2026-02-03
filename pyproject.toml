@@ -43,7 +43,8 @@ docs = [
     "mkdocs-material>=9.5.50",
 ]
 vertex = [
-    "langchain-google-vertexai>=3.2.1",
+    "langchain-google-genai>=2.0.0",  # For ChatGoogleGenerativeAI (Gemini)
+    "langchain-google-vertexai>=3.2.1",  # For ChatAnthropicVertex (Claude)
     "google-cloud-aiplatform>=1.130.0",
     "anthropic>=0.77.0",  # Required for Claude via Vertex AI Model Garden
 ]
