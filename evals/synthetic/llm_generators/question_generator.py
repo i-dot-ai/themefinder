@@ -10,6 +10,8 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 
+from themefinder.structured_output import with_structured_output
+
 
 class GeneratedQuestion(BaseModel):
     """A single generated consultation question."""
@@ -130,7 +132,7 @@ async def generate_questions(
         List of GeneratedQuestion objects.
     """
     llm = _get_question_generation_llm(callbacks)
-    structured_llm = llm.with_structured_output(QuestionSet)
+    structured_llm = with_structured_output(llm, QuestionSet)
 
     # Build context about existing questions
     existing_context = ""
@@ -200,7 +202,7 @@ async def regenerate_single_question(
         A new GeneratedQuestion.
     """
     llm = _get_question_generation_llm(callbacks)
-    structured_llm = llm.with_structured_output(GeneratedQuestion)
+    structured_llm = with_structured_output(llm, GeneratedQuestion)
 
     existing_list = (
         "\n".join(f"- {q}" for q in existing_questions)
@@ -261,7 +263,7 @@ async def generate_dataset_name(
         Short snake_case dataset name suitable for file paths.
     """
     llm = _get_question_generation_llm(callbacks)
-    structured_llm = llm.with_structured_output(DatasetName)
+    structured_llm = with_structured_output(llm, DatasetName)
 
     # Truncate topic if very long (just use first 2000 chars for context)
     topic_excerpt = topic[:2000] + "..." if len(topic) > 2000 else topic

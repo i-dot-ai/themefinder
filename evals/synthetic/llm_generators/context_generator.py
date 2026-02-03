@@ -14,6 +14,7 @@ from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import DemographicField, QuestionConfig
+from themefinder.structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ async def generate_context_fields(
         List of DemographicField objects with is_policy_context=True.
     """
     llm = _get_context_llm(callbacks)
-    structured_llm = llm.with_structured_output(ContextFieldSet)
+    structured_llm = with_structured_output(llm, ContextFieldSet)
 
     # Format questions for context
     questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
@@ -239,7 +240,7 @@ async def regenerate_context_fields(
         List of regenerated DemographicField objects.
     """
     llm = _get_context_llm(callbacks)
-    structured_llm = llm.with_structured_output(ContextFieldSet)
+    structured_llm = with_structured_output(llm, ContextFieldSet)
 
     questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
 

@@ -20,6 +20,7 @@ from themefinder.models import (
     ThemeNode,
     ThemeRefinementResponses,
 )
+from themefinder.structured_output import with_structured_output
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -172,7 +173,7 @@ async def sentiment_analysis(
     sentiment, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
-        llm.with_structured_output(SentimentAnalysisResponses),
+        with_structured_output(llm, SentimentAnalysisResponses),
         batch_size=batch_size,
         question=question,
         integrity_check=True,
@@ -228,7 +229,7 @@ async def theme_generation(
     generated_themes, _ = await batch_and_run(
         responses_df,
         prompt_template,
-        llm.with_structured_output(ThemeGenerationResponses),
+        with_structured_output(llm, ThemeGenerationResponses),
         batch_size=batch_size,
         partition_key=partition_key,
         question=question,
@@ -294,7 +295,7 @@ async def theme_condensation(
         themes_df, _ = await batch_and_run(
             themes_df,
             prompt_template,
-            llm.with_structured_output(ThemeCondensationResponses),
+            with_structured_output(llm, ThemeCondensationResponses),
             batch_size=batch_size,
             question=question,
             system_prompt=system_prompt,
@@ -316,7 +317,7 @@ async def theme_condensation(
     themes_df, _ = await batch_and_run(
         themes_df,
         prompt_template,
-        llm.with_structured_output(ThemeCondensationResponses),
+        with_structured_output(llm, ThemeCondensationResponses),
         batch_size=batch_size,
         question=question,
         system_prompt=system_prompt,
@@ -385,7 +386,7 @@ def theme_clustering(
 
     # Initialise clustering agent with structured output LLM
     agent = ThemeClusteringAgent(
-        llm.with_structured_output(HierarchicalClusteringResponse),
+        with_structured_output(llm, HierarchicalClusteringResponse),
         initial_themes,
         system_prompt,
         target_themes,
@@ -466,7 +467,7 @@ async def theme_refinement(
     refined_themes, _ = await batch_and_run(
         condensed_themes_df,
         prompt_template,
-        llm.with_structured_output(ThemeRefinementResponses),
+        with_structured_output(llm, ThemeRefinementResponses),
         batch_size=batch_size,
         question=question,
         system_prompt=system_prompt,
@@ -555,7 +556,7 @@ async def theme_mapping(
     mapping, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
-        llm.with_structured_output(ThemeMappingResponses),
+        with_structured_output(llm, ThemeMappingResponses),
         batch_size=batch_size,
         question=question,
         refined_themes=transpose_refined_themes(refined_themes_df).to_dict(
@@ -613,7 +614,7 @@ async def detail_detection(
     detailed, _ = await batch_and_run(
         responses_df,
         prompt_template,
-        llm.with_structured_output(DetailDetectionResponses),
+        with_structured_output(llm, DetailDetectionResponses),
         batch_size=batch_size,
         question=question,
         integrity_check=True,

@@ -11,6 +11,7 @@ from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import NoiseLevel, QuestionConfig, ResponseLength, ResponseType
+from themefinder.structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +113,7 @@ async def generate_respondent_survey(
     Returns:
         List of response dicts, one per question, with all required fields.
     """
-    structured_llm = llm.with_structured_output(GeneratedResponse)
+    structured_llm = with_structured_output(llm, GeneratedResponse)
     config = {"callbacks": callbacks} if callbacks else {}
 
     previous_responses: list[PreviousResponse] = []

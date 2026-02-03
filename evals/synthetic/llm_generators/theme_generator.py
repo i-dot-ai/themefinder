@@ -14,6 +14,7 @@ from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import DemographicField
+from themefinder.structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -240,7 +241,7 @@ async def _fan_out_theme_generation(
         Combined list of all themes from all calls (with duplicates).
     """
     llm = _get_generation_llm(reasoning_effort="medium", callbacks=callbacks)
-    structured_llm = llm.with_structured_output(ThemeSet)
+    structured_llm = with_structured_output(llm, ThemeSet)
 
     demographic_context = _build_demographic_context(demographic_fields)
 
@@ -358,7 +359,7 @@ async def _consolidate_themes(
     """
     # Use low reasoning for consolidation - it's mostly deduplication
     llm = _get_generation_llm(reasoning_effort="low", callbacks=callbacks)
-    structured_llm = llm.with_structured_output(ThemeSet)
+    structured_llm = with_structured_output(llm, ThemeSet)
 
     # Format raw themes for the prompt
     themes_text = "\n".join(

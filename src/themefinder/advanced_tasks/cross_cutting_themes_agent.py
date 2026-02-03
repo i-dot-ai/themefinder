@@ -5,7 +5,7 @@ high-level cross-cutting themes across multiple questions using a language model
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from langchain_core.runnables import Runnable, RunnableConfig
@@ -17,11 +17,12 @@ from tenacity import (
     wait_random_exponential,
 )
 
+from themefinder.llm_batch_processor import load_prompt_from_file
 from themefinder.models import (
     CrossCuttingThemeIdentificationResponse,
     CrossCuttingThemeMappingResponse,
 )
-from themefinder.llm_batch_processor import load_prompt_from_file
+from themefinder.structured_output import with_structured_output
 from themefinder.themefinder_logging import logger
 
 
@@ -136,8 +137,8 @@ class CrossCuttingThemesAgent:
         )
 
         # Use structured output to get concepts
-        structured_llm = self.llm.with_structured_output(
-            CrossCuttingThemeIdentificationResponse
+        structured_llm = with_structured_output(
+            self.llm, CrossCuttingThemeIdentificationResponse
         )
         result = structured_llm.invoke(prompt, config=self.config)
 
@@ -213,8 +214,8 @@ class CrossCuttingThemesAgent:
             )
 
             # Use structured output to get mappings
-            structured_llm = self.llm.with_structured_output(
-                CrossCuttingThemeMappingResponse
+            structured_llm = with_structured_output(
+                self.llm, CrossCuttingThemeMappingResponse
             )
             result = structured_llm.invoke(prompt, config=self.config)
 
