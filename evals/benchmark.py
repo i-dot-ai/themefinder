@@ -122,6 +122,7 @@ class ModelConfig:
     # Vertex AI-specific
     project_id: str | None = None  # Falls back to GOOGLE_CLOUD_PROJECT env var
     location: str = "global"  # Vertex AI region
+    thinking_budget: int | None = None  # For Gemini/Claude thinking tokens (e.g., 2048)
 
     # Common
     temperature: float = 0.0
@@ -160,10 +161,10 @@ class ModelConfig:
     def _create_vertex_gemini(self, callbacks: list | None) -> Runnable:
         """Create Vertex AI Gemini LLM instance."""
         try:
-            from langchain_google_vertexai import ChatVertexAI
+            from langchain_google_genai import ChatGoogleGenerativeAI
         except ImportError as e:
             raise ImportError(
-                "langchain-google-vertexai not installed. "
+                "langchain-google-genai not installed. "
                 "Install with: uv pip install -e '.[vertex]'"
             ) from e
 
@@ -174,14 +175,26 @@ class ModelConfig:
                 "or pass project_id to ModelConfig."
             )
 
-        return ChatVertexAI(
-            model=self.deployment,
-            project=project,
-            location=self.location,
-            temperature=self.temperature,
-            max_retries=6,
-            callbacks=callbacks or [],
-        )
+        kwargs: dict[str, Any] = {
+            "model": self.deployment,
+            "project": project,
+            "location": self.location,
+            "temperature": self.temperature,
+            "max_retries": 6,
+            "callbacks": callbacks or [],
+            "vertexai": True,
+        }
+
+        # Add thinking config based on model generation
+        if self.thinking_budget is not None:
+            if "gemini-3" in self.deployment:
+                # Gemini 3+ uses thinking_level string
+                kwargs["thinking_level"] = "low"  # 2048 tokens ≈ low
+            else:
+                # Gemini 2.5 uses thinking_budget integer
+                kwargs["thinking_budget"] = self.thinking_budget
+
+        return ChatGoogleGenerativeAI(**kwargs)
 
     def _create_vertex_claude(self, callbacks: list | None) -> Runnable:
         """Create Vertex AI Claude (Anthropic) LLM instance."""
@@ -200,19 +213,32 @@ class ModelConfig:
                 "or pass project_id to ModelConfig."
             )
 
-        return ChatAnthropicVertex(
-            model_name=self.deployment,
-            project=project,
-            location=self.location,
-            max_retries=6,
-            callbacks=callbacks or [],
-        )
+        kwargs: dict[str, Any] = {
+            "model_name": self.deployment,
+            "project": project,
+            "location": self.location,
+            "max_retries": 6,
+            "callbacks": callbacks or [],
+        }
+
+        # Add extended thinking if budget specified
+        if self.thinking_budget is not None:
+            kwargs["model_kwargs"] = {
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": self.thinking_budget,
+                }
+            }
+
+        return ChatAnthropicVertex(**kwargs)
 
     @property
     def tag(self) -> str:
         """Tag for Langfuse identification."""
         if self.reasoning_effort:
             return f"{self.name}_{self.reasoning_effort}"
+        if self.thinking_budget:
+            return f"{self.name}_thinking{self.thinking_budget}"
         return self.name
 
 
@@ -223,36 +249,70 @@ AZURE_MODELS = [
     ModelConfig(name="gpt-4.1", deployment="gpt-4.1"),
     ModelConfig(name="gpt-4.1-mini", deployment="gpt-4.1-mini"),
     ModelConfig(name="gpt-5-nano", deployment="gpt-5-nano", reasoning_effort="low"),
-    ModelConfig(name="gpt-5-nano", deployment="gpt-5-nano", reasoning_effort="medium"),
     ModelConfig(name="gpt-5-mini", deployment="gpt-5-mini", reasoning_effort="low"),
-    ModelConfig(name="gpt-5-mini", deployment="gpt-5-mini", reasoning_effort="medium"),
 ]
 
 # Vertex AI models (Gemini and Claude)
 # Requires: uv pip install -e ".[vertex]" and GOOGLE_CLOUD_PROJECT env var
 VERTEX_MODELS = [
-    # Gemini models
+    # Gemini models - standard (no thinking)
     ModelConfig(
         name="gemini-2.5-flash",
         deployment="gemini-2.5-flash",
         provider=LLMProvider.VERTEX_GEMINI,
     ),
     ModelConfig(
-        name="gemini-2.5-pro",
-        deployment="gemini-2.5-pro",
+        name="gemini-2.5-flash-lite",
+        deployment="gemini-2.5-flash-lite",
         provider=LLMProvider.VERTEX_GEMINI,
     ),
-    # Claude models via Vertex AI Model Garden
+    ModelConfig(
+        name="gemini-3-flash-preview",
+        deployment="gemini-3-flash-preview",
+        provider=LLMProvider.VERTEX_GEMINI,
+    ),
+    # Gemini models - with thinking (2048 token budget)
+    ModelConfig(
+        name="gemini-2.5-flash-thinking",
+        deployment="gemini-2.5-flash",
+        provider=LLMProvider.VERTEX_GEMINI,
+        thinking_budget=2048,
+    ),
+    ModelConfig(
+        name="gemini-2.5-flash-lite-thinking",
+        deployment="gemini-2.5-flash-lite",
+        provider=LLMProvider.VERTEX_GEMINI,
+        thinking_budget=2048,
+    ),
+    ModelConfig(
+        name="gemini-3-flash-preview-thinking",
+        deployment="gemini-3-flash-preview",
+        provider=LLMProvider.VERTEX_GEMINI,
+        thinking_budget=2048,  # Uses thinking_level="low" for Gemini 3
+    ),
+    # ModelConfig(
+    #     name="gemini-2.5-pro",
+    #     deployment="gemini-2.5-pro",
+    #     provider=LLMProvider.VERTEX_GEMINI,
+    # ),
+    # Claude models via Vertex AI Model Garden - standard (no thinking)
     ModelConfig(
         name="claude-haiku-4.5",
         deployment="claude-haiku-4-5@20251001",
         provider=LLMProvider.VERTEX_CLAUDE,
     ),
+    # Claude models - with extended thinking (2048 token budget)
     ModelConfig(
-        name="claude-sonnet-4.5",
-        deployment="claude-sonnet-4-5@20250929",
+        name="claude-haiku-4.5-thinking",
+        deployment="claude-haiku-4-5@20251001",
         provider=LLMProvider.VERTEX_CLAUDE,
+        thinking_budget=2048,
     ),
+    # ModelConfig(
+    #     name="claude-sonnet-4.5",
+    #     deployment="claude-sonnet-4-5@20250929",
+    #     provider=LLMProvider.VERTEX_CLAUDE,
+    # ),
 ]
 
 # Combined model registry by provider
