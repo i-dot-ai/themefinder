@@ -23,6 +23,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 import dotenv
+import numpy as np
 import pandas as pd
 from rich.console import Console
 from rich.table import Table
@@ -338,6 +339,8 @@ def detect_eval_metrics(df: pd.DataFrame, eval_type: str) -> dict[str, list[str]
         "generation": {
             "groundedness": r"^question_part_\d+_(groundedness|Precision Average Groundedness)$",
             "coverage": r"^question_part_\d+_(coverage|Recall Average topic Representation)$",
+            "specificity": r"^question_part_\d+_specificity$",
+            "redundancy": r"^question_part_\d+_redundancy$",
         },
     }
 
@@ -457,6 +460,61 @@ def aggregate_performance_metrics(data: BenchmarkData, eval_type: str) -> pd.Dat
                             "n": len(values),
                         }
                     )
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+def calculate_consistency_metrics(data: BenchmarkData) -> pd.DataFrame:
+    """Calculate score consistency metrics (std, coefficient of variation) per model+eval.
+
+    Groups existing benchmark data by model_tag and eval type, computes
+    standard deviation and coefficient of variation across runs.
+    Flags models with CV > 0.15 as inconsistent.
+
+    Args:
+        data: BenchmarkData with results_df populated.
+
+    Returns:
+        DataFrame with columns: model_tag, eval, metric, mean, std, cv, flagged.
+    """
+    if data.results_df.empty or not data.detected_metrics:
+        return pd.DataFrame()
+
+    rows = []
+
+    for eval_type, metrics_dict in data.detected_metrics.items():
+        eval_df = data.results_df[data.results_df["eval"] == eval_type]
+        if eval_df.empty:
+            continue
+
+        for metric_group, cols in metrics_dict.items():
+            for model in eval_df["model_tag"].unique():
+                model_df = eval_df[eval_df["model_tag"] == model]
+
+                # Collect all values across question parts for this metric group
+                all_values = []
+                for col in cols:
+                    if col in model_df.columns:
+                        values = model_df[col].dropna().tolist()
+                        all_values.extend(values)
+
+                if len(all_values) < 2:
+                    continue
+
+                mean_val = float(np.mean(all_values))
+                std_val = float(np.std(all_values, ddof=1))
+                cv = std_val / mean_val if mean_val > 0 else 0.0
+
+                rows.append({
+                    "model_tag": model,
+                    "eval": eval_type,
+                    "metric": metric_group,
+                    "mean": round(mean_val, 3),
+                    "std": round(std_val, 3),
+                    "cv": round(cv, 3),
+                    "n": len(all_values),
+                    "flagged": cv > 0.15,
+                })
 
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -667,6 +725,7 @@ def generate_html_report(data: BenchmarkData, output_path: str) -> None:
             models, model_costs, model_latencies, eval_types, eval_costs
         ),
         _html_performance_section(data),
+        _html_consistency_section(data),
         _html_footer(),
     ]
 
@@ -1259,6 +1318,57 @@ def _html_question_tab(data: BenchmarkData, qp: int) -> str:
                     <tbody>{"".join(rows)}</tbody>
                 </table>
             </div>
+        </div>
+"""
+
+
+def _html_consistency_section(data: BenchmarkData) -> str:
+    """Generate consistency metrics section for the HTML report."""
+    consistency_df = calculate_consistency_metrics(data)
+    if consistency_df.empty:
+        return ""
+
+    # Build table rows
+    rows = []
+    for _, row in consistency_df.iterrows():
+        flag_icon = "&#9888;" if row["flagged"] else ""
+        cv_class = "poor" if row["flagged"] else "good"
+        rows.append(
+            f"<tr>"
+            f"<td><strong>{row['model_tag']}</strong></td>"
+            f"<td>{row['eval']}</td>"
+            f"<td>{row['metric']}</td>"
+            f"<td class='num'>{row['mean']:.3f}</td>"
+            f"<td class='num'>{row['std']:.3f}</td>"
+            f"<td class='num {cv_class}'>{row['cv']:.3f} {flag_icon}</td>"
+            f"<td class='num'>{row['n']}</td>"
+            f"</tr>"
+        )
+
+    flagged_count = consistency_df["flagged"].sum()
+    flag_summary = ""
+    if flagged_count > 0:
+        flag_summary = f"<p style='color: #fbbf24; font-size: 0.85em; margin-top: 8px;'>&#9888; {int(flagged_count)} model/metric combinations with CV &gt; 0.15 (inconsistent scoring)</p>"
+
+    return f"""
+        <div class="section-header">Consistency Analysis</div>
+        <div class="card">
+            <div class="card-title">Score Consistency Across Runs (CV &gt; 0.15 flagged)</div>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Model</th>
+                        <th>Eval</th>
+                        <th>Metric</th>
+                        <th class='num'>Mean</th>
+                        <th class='num'>Std</th>
+                        <th class='num'>CV</th>
+                        <th class='num'>N</th>
+                    </tr>
+                </thead>
+                <tbody>{"".join(rows)}</tbody>
+            </table>
+            {flag_summary}
         </div>
 """
 
