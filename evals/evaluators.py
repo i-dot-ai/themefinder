@@ -7,6 +7,7 @@ Each evaluator returns a Langfuse Evaluation object with name, value, and option
 import json
 import logging
 import random
+from functools import lru_cache
 from typing import Any
 
 from langchain_core.output_parsers.json import parse_json_markdown
@@ -538,6 +539,13 @@ def create_title_specificity_evaluator(llm: Any):
     return specificity_evaluator
 
 
+@lru_cache(maxsize=1)
+def _get_sentence_model():
+    """Load and cache the sentence-transformers model (loaded once per process)."""
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+
 def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.85) -> dict[str, Any]:
     """Calculate semantic redundancy between theme titles using sentence embeddings.
 
@@ -552,7 +560,7 @@ def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.8
         Dict with redundancy ratio, flagged pairs, and details.
     """
     try:
-        from sentence_transformers import SentenceTransformer
+        _get_sentence_model()
     except ImportError:
         logger.warning("sentence-transformers not installed, skipping redundancy check")
         return {"ratio": 0.0, "n_redundant_pairs": 0, "n_total_pairs": 0, "flagged_pairs": []}
@@ -568,7 +576,7 @@ def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.8
     if len(titles) < 2:
         return {"ratio": 0.0, "n_redundant_pairs": 0, "n_total_pairs": 0, "flagged_pairs": []}
 
-    model = SentenceTransformer("all-MiniLM-L6-v2")
+    model = _get_sentence_model()
     embeddings = model.encode(titles, convert_to_tensor=True)
 
     # Compute pairwise cosine similarity

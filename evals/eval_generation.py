@@ -178,7 +178,14 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list, j
                 )
                 for evaluator in llm_evaluators
             ]
-            llm_results = await asyncio.gather(*llm_tasks, return_exceptions=True)
+            try:
+                llm_results = await asyncio.wait_for(
+                    asyncio.gather(*llm_tasks, return_exceptions=True),
+                    timeout=300,
+                )
+            except asyncio.TimeoutError:
+                logger.error("LLM evaluators timed out after 300s")
+                llm_results = [TimeoutError("LLM evaluators timed out")] * len(llm_evaluators)
 
             # Run redundancy evaluator synchronously (embedding-based, no LLM call)
             redundancy_result = redundancy_evaluator(

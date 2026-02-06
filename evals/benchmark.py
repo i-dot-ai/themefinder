@@ -584,8 +584,11 @@ class BenchmarkRunner:
         # Set benchmark context for structured file logging
         token = _benchmark_context.set((model_config.name, eval_type, run_number))
         try:
-            return await self._execute_eval(
-                model_config, run_number, eval_type, error_counter
+            return await asyncio.wait_for(
+                self._execute_eval(
+                    model_config, run_number, eval_type, error_counter
+                ),
+                timeout=1200,
             )
         finally:
             _benchmark_context.reset(token)
