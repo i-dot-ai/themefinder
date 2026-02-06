@@ -155,6 +155,9 @@ async def _run_with_langfuse(
             item_key = item.metadata.get("question_part", item.id)
             all_scores[f"{item_key}_f1"] = eval_result.value
 
+            # Include pipeline output for disk persistence
+            all_scores[f"{item_key}_output"] = output
+
     print(f"Mapping Eval Results: {ctx.session_id}")
     return all_scores
 

@@ -27,6 +27,7 @@ async def evaluate_refinement(
     dataset: str = "gambling_XS",
     llm: AzureChatOpenAI | None = None,
     langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
+    judge_llm: AzureChatOpenAI | None = None,
 ) -> dict:
     """Run refinement evaluation.
 

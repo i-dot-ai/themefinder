@@ -6,8 +6,11 @@ against a ground truth theme framework.
 
 import argparse
 import asyncio
+import contextvars
+import logging
 import os
 from datetime import datetime
+from functools import partial
 
 import nest_asyncio
 
@@ -18,17 +21,25 @@ import dotenv
 import langfuse_utils
 import pandas as pd
 from datasets import DatasetConfig, load_local_data
-from evaluators import create_coverage_evaluator, create_groundedness_evaluator
+from evaluators import (
+    create_coverage_evaluator,
+    create_groundedness_evaluator,
+    create_redundancy_evaluator,
+    create_title_specificity_evaluator,
+)
 from langchain_openai import AzureChatOpenAI
 from metrics import calculate_generation_metrics
 
 from themefinder import theme_condensation, theme_generation, theme_refinement
+
+logger = logging.getLogger("themefinder.evals.generation")
 
 
 async def evaluate_generation(
     dataset: str = "gambling_XS",
     llm: AzureChatOpenAI | None = None,
     langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
+    judge_llm: AzureChatOpenAI | None = None,
 ) -> dict:
     """Run generation evaluation.
 
@@ -67,7 +78,7 @@ async def evaluate_generation(
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(langfuse_ctx, config, llm, callbacks)
+        result = await _run_with_langfuse(langfuse_ctx, config, llm, callbacks, judge_llm=judge_llm)
     else:
         result = await _run_local_fallback(config, llm, callbacks)
 
@@ -77,7 +88,7 @@ async def evaluate_generation(
     return result
 
 
-async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -> dict:
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list, judge_llm=None) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
@@ -85,6 +96,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         config: DatasetConfig
         llm: LangChain LLM instance
         callbacks: LangChain callbacks list
+        judge_llm: Optional dedicated judge LLM (defaults to task llm)
 
     Returns:
         Dict containing evaluation scores
@@ -97,9 +109,14 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         )
         return await _run_local_fallback(config, llm, callbacks)
 
+    # Use dedicated judge LLM if provided, otherwise fall back to task LLM
+    eval_llm = judge_llm or llm
+
     # Create evaluator functions
-    groundedness_evaluator = create_groundedness_evaluator(llm)
-    coverage_evaluator = create_coverage_evaluator(llm)
+    groundedness_evaluator = create_groundedness_evaluator(eval_llm)
+    coverage_evaluator = create_coverage_evaluator(eval_llm)
+    specificity_evaluator = create_title_specificity_evaluator(eval_llm)
+    redundancy_evaluator = create_redundancy_evaluator()
 
     all_scores = {}
     items = list(dataset.items)
@@ -131,30 +148,80 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
                 question=question,
             )
 
-            output = {"themes": refined_df.to_dict(orient="records")}
+            # Parse combined "label: description" topic field into separate fields
+            # for evaluators that need the label alone (specificity, redundancy)
+            themes = []
+            for record in refined_df.to_dict(orient="records"):
+                if "topic" in record and ":" in record["topic"]:
+                    label, description = record["topic"].split(":", 1)
+                    record["topic_label"] = label.strip()
+                    record["topic_description"] = description.strip()
+                themes.append(record)
+            output = {"themes": themes}
 
             # Update trace with output
             if trace:
                 trace.update(output=output)
 
-            # Run evaluators and attach scores
-            for evaluator in [groundedness_evaluator, coverage_evaluator]:
-                eval_result = evaluator(
-                    output=output,
-                    expected_output=item.expected_output,
+            # Run LLM-based evaluators concurrently (copy context per task for logging)
+            loop = asyncio.get_event_loop()
+            llm_evaluators = [groundedness_evaluator, coverage_evaluator, specificity_evaluator]
+            llm_tasks = [
+                loop.run_in_executor(
+                    None,
+                    partial(
+                        contextvars.copy_context().run,
+                        evaluator,
+                        output=output,
+                        expected_output=item.expected_output,
+                    ),
                 )
+                for evaluator in llm_evaluators
+            ]
+            llm_results = await asyncio.gather(*llm_tasks, return_exceptions=True)
+
+            # Run redundancy evaluator synchronously (embedding-based, no LLM call)
+            redundancy_result = redundancy_evaluator(
+                output=output, expected_output=item.expected_output
+            )
+
+            # Process all results
+            all_eval_results = list(llm_results) + [redundancy_result]
+            item_key = item.metadata.get("question_part", item.id)
+            for eval_result in all_eval_results:
+                if isinstance(eval_result, Exception):
+                    logger.error(f"Evaluator failed: {eval_result}")
+                    continue
 
                 if trace_id and ctx.client:
-                    ctx.client.create_score(
-                        trace_id=trace_id,
-                        name=eval_result.name,
-                        value=eval_result.value,
-                        data_type="NUMERIC",
-                    )
+                    # Extract name, value, comment from either Evaluation object or dict
+                    if isinstance(eval_result, dict):
+                        eval_name = eval_result.get("name", "unknown")
+                        eval_value = eval_result.get("value", 0.0)
+                        eval_comment = eval_result.get("comment")
+                    else:
+                        eval_name = eval_result.name
+                        eval_value = eval_result.value
+                        eval_comment = getattr(eval_result, "comment", None)
+
+                    score_kwargs = {
+                        "trace_id": trace_id,
+                        "name": eval_name,
+                        "value": eval_value,
+                        "data_type": "NUMERIC",
+                    }
+                    if eval_comment:
+                        score_kwargs["comment"] = eval_comment
+                    ctx.client.create_score(**score_kwargs)
 
                 # Collect for return
-                item_key = item.metadata.get("question_part", item.id)
-                all_scores[f"{item_key}_{eval_result.name}"] = eval_result.value
+                if isinstance(eval_result, dict):
+                    all_scores[f"{item_key}_{eval_result.get('name', 'unknown')}"] = eval_result.get("value", 0.0)
+                else:
+                    all_scores[f"{item_key}_{eval_result.name}"] = eval_result.value
+
+            # Include pipeline output for disk persistence
+            all_scores[f"{item_key}_output"] = output
 
     print(f"Theme Generation Eval Results: {ctx.session_id}")
     return all_scores

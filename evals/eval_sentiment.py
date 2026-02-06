@@ -119,7 +119,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm) -> dict:
                 zip(
                     result_df["response_id"].astype(str),
                     result_df["position"].map(
-                        {"DISAGREEMENT": "DISAGREE", "AGREEMENT": "AGREE"}
+                        {"DISAGREEMENT": "DISAGREE", "AGREEMENT": "AGREE", "UNCLEAR": "UNCLEAR"}
                     ),
                 )
             )
@@ -146,6 +146,9 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm) -> dict:
             # Collect for return
             item_key = item.metadata.get("question_part", item.id)
             all_scores[f"{item_key}_accuracy"] = eval_result.value
+
+            # Include pipeline output for disk persistence
+            all_scores[f"{item_key}_output"] = output
 
     print(f"Sentiment Eval Results: {ctx.session_id}")
     return all_scores

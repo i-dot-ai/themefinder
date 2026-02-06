@@ -34,6 +34,7 @@ import os
 os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
 
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
@@ -103,6 +104,45 @@ class ValidationErrorCounter(logging.Handler):
             if "validation error" in msg.lower():
                 self.validation_errors += 1
                 self.error_details.append(msg[:200])
+
+
+# Benchmark context for structured logging — holds (model, eval_type, run_number)
+_benchmark_context: ContextVar[tuple[str, str, int] | None] = ContextVar(
+    "_benchmark_context", default=None
+)
+
+
+class _SingleLineFormatter(logging.Formatter):
+    """Collapses multiline messages onto a single line for grepability."""
+
+    def format(self, record: logging.LogRecord) -> str:
+        result = super().format(record)
+        return result.replace("\n", "\\n")
+
+
+class BenchmarkLogFilter(logging.Filter):
+    """Injects benchmark context into log records and filters by namespace."""
+
+    ACCEPTED_PREFIXES = ("themefinder", "theme_finder", "synthetic")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        name = record.name
+        is_relevant = (
+            name.startswith(self.ACCEPTED_PREFIXES)
+            or "/themefinder/" in name  # models.py uses __file__ as logger name
+        )
+        if not is_relevant:
+            return False
+
+        ctx = _benchmark_context.get(None)
+        if ctx is not None:
+            record.model_name, record.eval_type, record.run_number = ctx
+        else:
+            record.model_name = "-"
+            record.eval_type = "-"
+            record.run_number = "-"
+
+        return True
 
 
 @dataclass
@@ -271,25 +311,9 @@ VERTEX_MODELS = [
         deployment="gemini-3-flash-preview",
         provider=LLMProvider.VERTEX_GEMINI,
     ),
-    # Gemini models - with thinking (2048 token budget)
-    ModelConfig(
-        name="gemini-2.5-flash-thinking",
-        deployment="gemini-2.5-flash",
-        provider=LLMProvider.VERTEX_GEMINI,
-        thinking_budget=2048,
-    ),
-    ModelConfig(
-        name="gemini-2.5-flash-lite-thinking",
-        deployment="gemini-2.5-flash-lite",
-        provider=LLMProvider.VERTEX_GEMINI,
-        thinking_budget=2048,
-    ),
-    ModelConfig(
-        name="gemini-3-flash-preview-thinking",
-        deployment="gemini-3-flash-preview",
-        provider=LLMProvider.VERTEX_GEMINI,
-        thinking_budget=2048,  # Uses thinking_level="low" for Gemini 3
-    ),
+    # Gemini thinking models removed: thinking_budget conflicts with
+    # structured output in google-genai SDK, causing empty {} responses.
+    # See: https://github.com/googleapis/python-genai/issues/782
     # ModelConfig(
     #     name="gemini-2.5-pro",
     #     deployment="gemini-2.5-pro",
@@ -342,6 +366,7 @@ class BenchmarkConfig:
             "refinement",
         ]
     )
+    judge_model: str | None = None  # Azure deployment name for judge LLM (e.g. "gpt-4o-2024-08-06")
 
 
 @dataclass
@@ -357,6 +382,7 @@ class RunResult:
     scores: dict[str, float]
     timestamp: datetime
     duration_seconds: float = 0.0  # Wall-clock duration of eval
+    outputs: dict[str, Any] = field(default_factory=dict)  # Non-numeric pipeline outputs
 
     # Token metrics (from Langfuse)
     input_tokens: int = 0
@@ -379,8 +405,37 @@ class BenchmarkRunner:
         self._output_path: Path | None = None
         self._results_lock = asyncio.Lock()
 
+    def _create_log_handler(self) -> logging.FileHandler:
+        """Create file handler for structured benchmark logging."""
+        log_path = self._get_output_path() / "benchmark.log"
+        handler = logging.FileHandler(log_path, encoding="utf-8")
+        handler.setLevel(logging.INFO)
+        handler.setFormatter(_SingleLineFormatter(
+            "%(asctime)s | %(eval_type)s | %(model_name)s | run:%(run_number)s"
+            " | %(levelname)s | %(name)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        ))
+        handler.addFilter(BenchmarkLogFilter())
+        return handler
+
     async def run(self) -> list[RunResult]:
         """Execute full benchmark suite with deployments in parallel, variants sequential."""
+        # Set up structured file logging for this benchmark run
+        root_logger = logging.getLogger()
+        original_level = root_logger.level
+        log_handler = self._create_log_handler()
+        root_logger.addHandler(log_handler)
+        root_logger.setLevel(logging.DEBUG)
+
+        try:
+            return await self._run_benchmark()
+        finally:
+            root_logger.removeHandler(log_handler)
+            log_handler.close()
+            root_logger.setLevel(original_level)
+
+    async def _run_benchmark(self) -> list[RunResult]:
+        """Inner benchmark execution (wrapped by run() for logging setup)."""
         total_runs = (
             len(self.config.models)
             * self.config.runs_per_model
@@ -478,6 +533,7 @@ class BenchmarkRunner:
                                 self.results.append(result)
                                 self._print_scores(result.scores)
                                 self._save_incremental()
+                                self._save_outputs(result)
                             break  # Success, exit retry loop
 
                         except Exception as e:
@@ -525,6 +581,23 @@ class BenchmarkRunner:
         error_counter: ValidationErrorCounter,
     ) -> RunResult:
         """Run a single evaluation."""
+        # Set benchmark context for structured file logging
+        token = _benchmark_context.set((model_config.name, eval_type, run_number))
+        try:
+            return await self._execute_eval(
+                model_config, run_number, eval_type, error_counter
+            )
+        finally:
+            _benchmark_context.reset(token)
+
+    async def _execute_eval(
+        self,
+        model_config: ModelConfig,
+        run_number: int,
+        eval_type: str,
+        error_counter: ValidationErrorCounter,
+    ) -> RunResult:
+        """Execute a single evaluation (called within benchmark context)."""
         # Reset error counter for this run
         error_counter.reset()
 
@@ -562,15 +635,34 @@ class BenchmarkRunner:
         callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
         llm = model_config.create_llm(callbacks=callbacks)
 
+        # Create dedicated judge LLM if configured (separates judge from task model)
+        judge_llm = None
+        if self.config.judge_model:
+            judge_llm = AzureChatOpenAI(
+                azure_deployment=self.config.judge_model,
+                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+                api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
+                temperature=0,
+                timeout=600,
+                callbacks=callbacks,
+            )
+
         # Run the evaluation with timing, wrapped in trace_context for v3 API
         # This ensures session_id/tags/metadata are properly attached to traces
         start_time = time.perf_counter()
+        # Only pass judge_llm to evals that use LLM-as-judge
+        evals_with_judge = {"generation", "condensation", "refinement"}
+
         with langfuse_utils.trace_context(langfuse_ctx, name=f"{eval_type}_eval"):
-            scores = await eval_func(
-                dataset=self.config.dataset,
-                llm=llm,
-                langfuse_ctx=langfuse_ctx,
-            )
+            kwargs = {
+                "dataset": self.config.dataset,
+                "llm": llm,
+                "langfuse_ctx": langfuse_ctx,
+            }
+            if judge_llm and eval_type in evals_with_judge:
+                kwargs["judge_llm"] = judge_llm
+            scores = await eval_func(**kwargs)
         end_time = time.perf_counter()
         duration_seconds = end_time - start_time
 
@@ -583,8 +675,16 @@ class BenchmarkRunner:
             benchmark_tag=f"benchmark:{self.benchmark_id}",
         )
 
+        # Split returned dict into numeric scores and non-numeric outputs
+        all_scores = {}
+        all_outputs = {}
+        for key, value in (scores or {}).items():
+            if isinstance(value, (int, float)):
+                all_scores[key] = value
+            else:
+                all_outputs[key] = value
+
         # Add validation error metrics to scores
-        all_scores = scores or {}
         all_scores["validation_errors"] = error_counter.validation_errors
         all_scores["total_warnings"] = error_counter.total_warnings
 
@@ -596,6 +696,7 @@ class BenchmarkRunner:
             dataset=self.config.dataset,
             session_id=session_id,
             scores=all_scores,
+            outputs=all_outputs,
             timestamp=datetime.now(),
             duration_seconds=duration_seconds,
             input_tokens=metrics.input_tokens,
@@ -653,6 +754,7 @@ class BenchmarkRunner:
             "dataset": self.config.dataset,
             "runs_per_model": self.config.runs_per_model,
             "evals": self.config.evals,
+            "judge_model": self.config.judge_model,
             "models": [
                 {
                     "name": m.name,
@@ -664,6 +766,18 @@ class BenchmarkRunner:
         }
         with open(output_path / "config.json", "w") as f:
             json.dump(config_dict, f, indent=2)
+
+    def _save_outputs(self, result: RunResult) -> None:
+        """Save non-numeric pipeline outputs as JSON for a single run."""
+        if not result.outputs:
+            return
+
+        outputs_dir = self._get_output_path() / "outputs"
+        outputs_dir.mkdir(exist_ok=True)
+
+        filename = f"{result.model_tag}_{result.eval_type}_run{result.run_number}.json"
+        with open(outputs_dir / filename, "w") as f:
+            json.dump(result.outputs, f, indent=2, default=str)
 
     def generate_summary_table(self) -> pd.DataFrame:
         """Generate summary DataFrame from results."""
@@ -930,6 +1044,11 @@ Examples:
         default="global",
         help="Vertex AI location (default: global)",
     )
+    parser.add_argument(
+        "--judge-model",
+        default=None,
+        help="Azure deployment name for judge LLM (e.g. gpt-4o-2024-08-06). If set, judge evaluations use this model instead of the task model.",
+    )
     args = parser.parse_args()
 
     # Get models based on provider or specific model names
@@ -969,6 +1088,7 @@ Examples:
         models=models,
         runs_per_model=args.runs,
         evals=args.evals,
+        judge_model=args.judge_model,
     )
 
     runner = BenchmarkRunner(config)

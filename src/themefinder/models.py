@@ -271,6 +271,8 @@ class ThemeCondensationResponses(BaseModel):
 class RefinedTheme(ValidatedModel):
     """Model for a single refined theme"""
 
+    # TODO: Split into separate topic_label + topic_description fields to match
+    # Theme/CondensedTheme models. Currently evals must parse the combined string.
     topic: str = Field(
         ..., description="Topic label and description combined with a colon separator"
     )

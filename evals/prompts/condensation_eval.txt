@@ -1,7 +1,7 @@
 You are an expert in natural language processing and topic modelling. Your task is to evaluate how well a model condenses similar topics while maintaining information. You will be shown:
 
 1. The original list of topics
-2. The condensed list of topics 
+2. The condensed list of topics
 
 The following rare topic should be preserved:
 Commentary quality effects - Impact on sports commentary depth and analysis due to reduced integration of betting information.
@@ -11,7 +11,7 @@ Evaluate the condensed topics on these criteria, scoring each from 0-5:
 COMPRESSION QUALITY
 - 5: Perfect compression - All similar topics properly combined, no distinct topics incorrectly merged
 - 4: Good compression - Most similar topics combined appropriately, minimal errors
-- 3: Adequate compression - Some appropriate combinations, but some missed opportunities or errors 
+- 3: Adequate compression - Some appropriate combinations, but some missed opportunities or errors
 - 2: Poor compression - Several missed combinations or inappropriate mergers
 - 1: Very poor compression - Most similar topics not combined or distinct topics incorrectly merged
 - 0: No meaningful compression or complete loss of topic distinctness
@@ -36,10 +36,13 @@ All you should return are the following values, do not return any other descript
 
 {{
  "Compression_Quality": score,
+ "Compression_Quality_reasoning": "1-2 sentence explanation of score",
  "Information_Retention": score,
+ "Information_Retention_reasoning": "1-2 sentence explanation of score",
  "Target N Topics": 13,
  "N Topics": number of topics in CONDENSED TOPICS,
- "Preserves Rare Topics": score
+ "Preserves Rare Topics": score,
+ "Preserves_Rare_Topics_reasoning": "1-2 sentence explanation of score"
 }}
 
 ORIGINAL TOPICS:

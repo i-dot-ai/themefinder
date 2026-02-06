@@ -22,8 +22,12 @@ NEW TOPICS:
 Output your response in the following format, do not return anything else:
 
 {{
-  "Information Retention":  X,
+  "Information Retention": X,
+  "Information_Retention_reasoning": "1-2 sentence explanation of score",
   "Response References": X,
+  "Response_References_reasoning": "1-2 sentence explanation of score",
   "Distinctiveness": X,
-  "Fluency/Readability X,
+  "Distinctiveness_reasoning": "1-2 sentence explanation of score",
+  "Fluency/Readability": X,
+  "Fluency_Readability_reasoning": "1-2 sentence explanation of score"
 }}

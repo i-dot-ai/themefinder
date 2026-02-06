@@ -18,6 +18,7 @@ import dotenv
 import langfuse_utils
 import pandas as pd
 from datasets import DatasetConfig, load_local_data
+from evaluators import calculate_redundancy_score
 from langchain_openai import AzureChatOpenAI
 from utils import read_and_render
 
@@ -28,6 +29,7 @@ async def evaluate_condensation(
     dataset: str = "gambling_XS",
     llm: AzureChatOpenAI | None = None,
     langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
+    judge_llm: AzureChatOpenAI | None = None,
 ) -> dict:
     """Run condensation evaluation.
 
@@ -118,15 +120,33 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
                 question=question,
             )
 
-            output = {"condensed_themes": condensed_df.to_dict(orient="records")}
+            condensed_records = condensed_df.to_dict(orient="records")
+            output = {"condensed_themes": condensed_records}
 
             # Update trace with output
             if trace:
                 trace.update(output=output)
 
-            # Collect for return (qualitative - no numeric scores)
+            # Calculate redundancy score for condensed themes
+            redundancy = calculate_redundancy_score(condensed_records)
+
+            if trace_id and ctx.client:
+                comment = f"{redundancy['n_redundant_pairs']}/{redundancy['n_total_pairs']} pairs above threshold"
+                if redundancy["flagged_pairs"]:
+                    pair_strs = [f"  {p['theme_a']} ↔ {p['theme_b']} ({p['similarity']})" for p in redundancy["flagged_pairs"]]
+                    comment += "\n" + "\n".join(pair_strs)
+                ctx.client.create_score(
+                    trace_id=trace_id,
+                    name="redundancy",
+                    value=round(redundancy["ratio"], 2),
+                    data_type="NUMERIC",
+                    comment=comment,
+                )
+
+            # Collect for return
             item_key = item.metadata.get("question_part", item.id)
             all_results[f"{item_key}_output"] = output
+            all_results[f"{item_key}_redundancy"] = round(redundancy["ratio"], 2)
 
     print(f"Condensation Eval Results: {ctx.session_id}")
     return all_results
