@@ -8,11 +8,6 @@ import asyncio
 import os
 from datetime import datetime
 
-import nest_asyncio
-
-# Allow nested asyncio.run() calls for async evaluation context
-nest_asyncio.apply()
-
 import dotenv
 import langfuse_utils
 import pandas as pd
@@ -223,6 +218,10 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
 
 
 if __name__ == "__main__":
+    import nest_asyncio
+
+    nest_asyncio.apply()
+
     parser = argparse.ArgumentParser(description="Run theme refinement evaluation")
     parser.add_argument(
         "--dataset",

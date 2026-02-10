@@ -29,6 +29,11 @@ import json
 import logging
 import os
 
+import nest_asyncio
+
+# Allow nested asyncio.run() calls (needed by eval modules)
+nest_asyncio.apply()
+
 # Fix DNS resolution issues with gRPC 1.58.0+ (must be set before gRPC imports)
 # Switches from buggy C-ares resolver to native resolver
 os.environ.setdefault("GRPC_DNS_RESOLVER", "native")

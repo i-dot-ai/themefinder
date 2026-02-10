@@ -89,6 +89,8 @@ jobs:
           if [ "$EVAL_TYPE" = "all" ]; then
             echo "Running all evals for $DATASET..."
             uv run python eval_generation.py --dataset "$DATASET" 2>&1 | tee results.txt
+            uv run python eval_condensation.py --dataset "$DATASET" 2>&1 | tee -a results.txt
+            uv run python eval_refinement.py --dataset "$DATASET" 2>&1 | tee -a results.txt
             uv run python eval_sentiment.py --dataset "$DATASET" 2>&1 | tee -a results.txt
             uv run python eval_mapping.py --dataset "$DATASET" 2>&1 | tee -a results.txt
           else
@@ -96,14 +98,8 @@ jobs:
             uv run python "eval_${EVAL_TYPE}.py" --dataset "$DATASET" 2>&1 | tee results.txt
           fi
 
-          # Extract key metrics for Slack (generation eval)
-          if grep -q "Precision Average Groundedness" results.txt; then
-            echo "eval_success=true" >> $GITHUB_OUTPUT
-            PRECISION=$(grep -oP "Precision Average Groundedness.*?np.float64\(\K[0-9.]+" results.txt | tail -1)
-            RECALL=$(grep -oP "Recall Average topic Representation.*?np.float64\(\K[0-9.]+" results.txt | tail -1)
-            echo "precision=$PRECISION" >> $GITHUB_OUTPUT
-            echo "recall=$RECALL" >> $GITHUB_OUTPUT
-          elif grep -q "AI Agreement Accuracy\|Langfuse experiment" results.txt; then
+          # Check for successful eval output
+          if grep -q "Eval Results\|experiment\|accuracy\|f1" results.txt; then
             echo "eval_success=true" >> $GITHUB_OUTPUT
           else
             echo "eval_success=false" >> $GITHUB_OUTPUT
@@ -130,7 +126,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "✅ *ThemeFinder Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n*Dataset:* ${{ github.event.inputs.dataset || 'gambling_XS' }} · *Type:* ${{ github.event.inputs.eval_type || 'generation' }}\n• Precision: ${{ steps.eval.outputs.precision }}/5\n• Recall: ${{ steps.eval.outputs.recall }}/5\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                    "text": "✅ *ThemeFinder Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n*Dataset:* ${{ github.event.inputs.dataset || 'gambling_XS' }} · *Type:* ${{ github.event.inputs.eval_type || 'generation' }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
                   }
                 }
               ]

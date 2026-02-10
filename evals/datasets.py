@@ -301,15 +301,13 @@ def load_local_mapping_data(config: DatasetConfig) -> list[dict]:
 
 
 def load_local_condensation_data(config: DatasetConfig) -> list[dict]:
-    """Load condensation eval data from local files.
-
-    Note: Uses the generated themes as input for condensation testing.
+    """Load theme eval data from local files (used by condensation and refinement).
 
     Args:
         config: Dataset configuration
 
     Returns:
-        List of dicts with input (themes) and expected_output
+        List of dicts with input (question + themes) and no expected_output
     """
     items = []
     for question_part in _get_question_parts(config):
@@ -336,40 +334,8 @@ def load_local_condensation_data(config: DatasetConfig) -> list[dict]:
     return items
 
 
-def load_local_refinement_data(config: DatasetConfig) -> list[dict]:
-    """Load refinement eval data from local files.
-
-    Note: Uses the generated themes as input for refinement testing.
-
-    Args:
-        config: Dataset configuration
-
-    Returns:
-        List of dicts with input (themes) and expected_output
-    """
-    items = []
-    for question_part in _get_question_parts(config):
-        question = _load_question(config, question_part)
-        themes = _load_themes(config, question_part)
-
-        items.append(
-            {
-                "input": {
-                    "question": question,
-                    "themes": [
-                        {
-                            "topic_label": t["topic_label"],
-                            "topic_description": t["topic_description"],
-                        }
-                        for t in themes
-                    ],
-                },
-                "expected_output": None,  # Qualitative evaluation
-                "metadata": {"question_part": question_part},
-            }
-        )
-
-    return items
+# Refinement uses the same data shape as condensation
+load_local_refinement_data = load_local_condensation_data
 
 
 def load_local_data(config: DatasetConfig) -> list[dict]:

@@ -4,7 +4,6 @@ Provides evaluator functions that can be used with Langfuse's run_experiment() A
 Each evaluator returns a Langfuse Evaluation object with name, value, and optional comment.
 """
 
-import json
 import logging
 import random
 from functools import lru_cache
@@ -17,6 +16,16 @@ from sklearn import metrics
 from sklearn.preprocessing import MultiLabelBinarizer
 
 logger = logging.getLogger("themefinder.evals.evaluators")
+
+
+def _make_evaluation(name: str, value: float, comment: str = ""):
+    """Create an evaluation result, using Langfuse Evaluation if available."""
+    try:
+        from langfuse import Evaluation
+
+        return Evaluation(name=name, value=value, comment=comment)
+    except ImportError:
+        return {"name": name, "value": value, "comment": comment}
 
 # Minimum score (0-5) to consider a topic well-grounded or captured
 GROUNDEDNESS_THRESHOLD = 3
@@ -199,48 +208,19 @@ def create_groundedness_evaluator(llm: Any):
     Returns:
         Evaluator function compatible with run_experiment()
     """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        logger.warning("Langfuse not available, using dict fallback")
-        Evaluation = dict  # Fallback for local testing
-
     def groundedness_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
-        """Evaluate how well generated themes are grounded in expected themes.
-
-        Args:
-            output: Task output containing "themes" key
-            expected_output: Expected output containing "themes" key
-
-        Returns:
-            Langfuse Evaluation with groundedness score (0-5 scale)
-        """
+        """Evaluate how well generated themes are grounded in expected themes."""
         try:
             result = _calculate_groundedness_scores(
                 output.get("themes", []),
                 expected_output.get("themes", {}),
                 llm,
             )
-
             comment = _build_comment(result, "groundedness")
-
-            if Evaluation == dict:
-                return {
-                    "name": "groundedness",
-                    "value": round(result["average"], 2),
-                    "comment": comment,
-                }
-
-            return Evaluation(
-                name="groundedness",
-                value=round(result["average"], 2),
-                comment=comment,
-            )
+            return _make_evaluation("groundedness", round(result["average"], 2), comment)
         except Exception as e:
             logger.error(f"Groundedness evaluation failed: {e}")
-            if Evaluation == dict:
-                return {"name": "groundedness", "value": 0.0, "comment": f"Error: {e}"}
-            return Evaluation(name="groundedness", value=0.0, comment=f"Error: {e}")
+            return _make_evaluation("groundedness", 0.0, f"Error: {e}")
 
     return groundedness_evaluator
 
@@ -254,48 +234,19 @@ def create_coverage_evaluator(llm: Any):
     Returns:
         Evaluator function compatible with run_experiment()
     """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        logger.warning("Langfuse not available, using dict fallback")
-        Evaluation = dict
-
     def coverage_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
-        """Evaluate how well expected themes are covered by generated themes.
-
-        Args:
-            output: Task output containing "themes" key
-            expected_output: Expected output containing "themes" key
-
-        Returns:
-            Langfuse Evaluation with coverage score (0-5 scale)
-        """
+        """Evaluate how well expected themes are covered by generated themes."""
         try:
             result = _calculate_coverage_scores(
                 output.get("themes", []),
                 expected_output.get("themes", {}),
                 llm,
             )
-
             comment = _build_comment(result, "coverage")
-
-            if Evaluation == dict:
-                return {
-                    "name": "coverage",
-                    "value": round(result["average"], 2),
-                    "comment": comment,
-                }
-
-            return Evaluation(
-                name="coverage",
-                value=round(result["average"], 2),
-                comment=comment,
-            )
+            return _make_evaluation("coverage", round(result["average"], 2), comment)
         except Exception as e:
             logger.error(f"Coverage evaluation failed: {e}")
-            if Evaluation == dict:
-                return {"name": "coverage", "value": 0.0, "comment": f"Error: {e}"}
-            return Evaluation(name="coverage", value=0.0, comment=f"Error: {e}")
+            return _make_evaluation("coverage", 0.0, f"Error: {e}")
 
     return coverage_evaluator
 
@@ -303,34 +254,13 @@ def create_coverage_evaluator(llm: Any):
 def sentiment_accuracy_evaluator(
     *, output: dict, expected_output: dict, **kwargs
 ) -> Any:
-    """Aggregate accuracy evaluator for sentiment analysis.
-
-    Args:
-        output: Task output containing "positions" dict mapping response_id to position
-        expected_output: Expected output containing "positions" dict
-
-    Returns:
-        Langfuse Evaluation with accuracy score (0-1 scale)
-    """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        Evaluation = dict
-
+    """Aggregate accuracy evaluator for sentiment analysis."""
     try:
         output_positions = output.get("positions", {})
         expected_positions = expected_output.get("positions", {})
 
         if not expected_positions:
-            if Evaluation == dict:
-                return {
-                    "name": "accuracy",
-                    "value": 0.0,
-                    "comment": "No expected positions",
-                }
-            return Evaluation(
-                name="accuracy", value=0.0, comment="No expected positions"
-            )
+            return _make_evaluation("accuracy", 0.0, "No expected positions")
 
         correct = sum(
             1
@@ -340,54 +270,20 @@ def sentiment_accuracy_evaluator(
         total = len(expected_positions)
         accuracy = correct / total if total > 0 else 0.0
 
-        if Evaluation == dict:
-            return {
-                "name": "accuracy",
-                "value": round(accuracy, 3),
-                "comment": f"{correct}/{total} correct predictions",
-            }
-
-        return Evaluation(
-            name="accuracy",
-            value=round(accuracy, 3),
-            comment=f"{correct}/{total} correct predictions",
-        )
+        return _make_evaluation("accuracy", round(accuracy, 3), f"{correct}/{total} correct predictions")
     except Exception as e:
         logger.error(f"Sentiment accuracy evaluation failed: {e}")
-        if Evaluation == dict:
-            return {"name": "accuracy", "value": 0.0, "comment": f"Error: {e}"}
-        return Evaluation(name="accuracy", value=0.0, comment=f"Error: {e}")
+        return _make_evaluation("accuracy", 0.0, f"Error: {e}")
 
 
 def mapping_f1_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
-    """Multi-label F1 evaluator for theme mapping.
-
-    Args:
-        output: Task output containing "labels" dict mapping response_id to label list
-        expected_output: Expected output containing "mappings" dict
-
-    Returns:
-        Langfuse Evaluation with F1 score (0-1 scale)
-    """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        Evaluation = dict
-
+    """Multi-label F1 evaluator for theme mapping."""
     try:
         output_labels = output.get("labels", {})
         expected_mappings = expected_output.get("mappings", {})
 
         if not expected_mappings:
-            if Evaluation == dict:
-                return {
-                    "name": "f1_score",
-                    "value": 0.0,
-                    "comment": "No expected mappings",
-                }
-            return Evaluation(
-                name="f1_score", value=0.0, comment="No expected mappings"
-            )
+            return _make_evaluation("f1_score", 0.0, "No expected mappings")
 
         # Convert to lists for MultiLabelBinarizer
         response_ids = list(expected_mappings.keys())
@@ -406,23 +302,10 @@ def mapping_f1_evaluator(*, output: dict, expected_output: dict, **kwargs) -> An
         y_pred_bin = mlb.transform(y_pred)
         f1 = metrics.f1_score(y_true_bin, y_pred_bin, average="samples")
 
-        if Evaluation == dict:
-            return {
-                "name": "f1_score",
-                "value": round(f1, 3),
-                "comment": f"Evaluated on {len(response_ids)} responses",
-            }
-
-        return Evaluation(
-            name="f1_score",
-            value=round(f1, 3),
-            comment=f"Evaluated on {len(response_ids)} responses",
-        )
+        return _make_evaluation("f1_score", round(f1, 3), f"Evaluated on {len(response_ids)} responses")
     except Exception as e:
         logger.error(f"Mapping F1 evaluation failed: {e}")
-        if Evaluation == dict:
-            return {"name": "f1_score", "value": 0.0, "comment": f"Error: {e}"}
-        return Evaluation(name="f1_score", value=0.0, comment=f"Error: {e}")
+        return _make_evaluation("f1_score", 0.0, f"Error: {e}")
 
 
 def _calculate_title_specificity(
@@ -495,18 +378,8 @@ def create_title_specificity_evaluator(llm: Any):
     Returns:
         Evaluator function compatible with run_experiment().
     """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        logger.warning("Langfuse not available, using dict fallback")
-        Evaluation = dict
-
     def specificity_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
-        """Evaluate how specific the generated theme titles are.
-
-        Returns:
-            Langfuse Evaluation with specificity ratio (0-1 scale).
-        """
+        """Evaluate how specific the generated theme titles are."""
         try:
             result = _calculate_title_specificity(
                 output.get("themes", []),
@@ -518,23 +391,10 @@ def create_title_specificity_evaluator(llm: Any):
             if vague_titles:
                 comment += f"\nVague: {', '.join(vague_titles)}"
 
-            if Evaluation == dict:
-                return {
-                    "name": "specificity",
-                    "value": round(result["ratio"], 2),
-                    "comment": comment,
-                }
-
-            return Evaluation(
-                name="specificity",
-                value=round(result["ratio"], 2),
-                comment=comment,
-            )
+            return _make_evaluation("specificity", round(result["ratio"], 2), comment)
         except Exception as e:
             logger.error(f"Specificity evaluation failed: {e}")
-            if Evaluation == dict:
-                return {"name": "specificity", "value": 0.0, "comment": f"Error: {e}"}
-            return Evaluation(name="specificity", value=0.0, comment=f"Error: {e}")
+            return _make_evaluation("specificity", 0.0, f"Error: {e}")
 
     return specificity_evaluator
 
@@ -585,22 +445,8 @@ def create_condensation_quality_evaluator(llm: Any):
     Returns:
         Evaluator function that returns a list of Evaluation objects.
     """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        logger.warning("Langfuse not available, using dict fallback")
-        Evaluation = dict
-
     def condensation_evaluator(*, output: dict, expected_output: dict, **kwargs) -> list:
-        """Evaluate condensation quality on compression and information retention.
-
-        Args:
-            output: Task output containing "themes" key (condensed themes).
-            expected_output: Expected output containing "themes" key (original themes).
-
-        Returns:
-            List of Evaluation objects (one per metric).
-        """
+        """Evaluate condensation quality on compression and information retention."""
         try:
             result = _calculate_condensation_scores(
                 output.get("themes", []),
@@ -608,35 +454,13 @@ def create_condensation_quality_evaluator(llm: Any):
                 llm,
             )
 
-            evaluations = []
-            for metric in ("compression_quality", "information_retention"):
-                score = result.get(metric, 0)
-                reasoning = result.get(f"{metric}_reasoning", "")
-
-                if Evaluation == dict:
-                    evaluations.append({
-                        "name": metric,
-                        "value": round(float(score), 2),
-                        "comment": reasoning,
-                    })
-                else:
-                    evaluations.append(Evaluation(
-                        name=metric,
-                        value=round(float(score), 2),
-                        comment=reasoning,
-                    ))
-
-            return evaluations
-
+            return [
+                _make_evaluation(metric, round(float(result.get(metric, 0)), 2), result.get(f"{metric}_reasoning", ""))
+                for metric in ("compression_quality", "information_retention")
+            ]
         except Exception as e:
             logger.error(f"Condensation quality evaluation failed: {e}")
-            fallback = []
-            for metric in ("compression_quality", "information_retention"):
-                if Evaluation == dict:
-                    fallback.append({"name": metric, "value": 0.0, "comment": f"Error: {e}"})
-                else:
-                    fallback.append(Evaluation(name=metric, value=0.0, comment=f"Error: {e}"))
-            return fallback
+            return [_make_evaluation(metric, 0.0, f"Error: {e}") for metric in ("compression_quality", "information_retention")]
 
     return condensation_evaluator
 
@@ -696,22 +520,8 @@ def create_refinement_quality_evaluator(llm: Any):
     Returns:
         Evaluator function that returns a list of Evaluation objects.
     """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        logger.warning("Langfuse not available, using dict fallback")
-        Evaluation = dict
-
     def refinement_evaluator(*, output: dict, expected_output: dict, **kwargs) -> list:
-        """Evaluate refinement quality on four dimensions.
-
-        Args:
-            output: Task output containing "themes" key (refined themes).
-            expected_output: Expected output containing "themes" key (original themes).
-
-        Returns:
-            List of Evaluation objects (one per metric).
-        """
+        """Evaluate refinement quality on four dimensions."""
         try:
             result = _calculate_refinement_scores(
                 output.get("themes", []),
@@ -719,35 +529,13 @@ def create_refinement_quality_evaluator(llm: Any):
                 llm,
             )
 
-            evaluations = []
-            for metric in REFINEMENT_METRICS:
-                score = result.get(metric, 0)
-                reasoning = result.get(f"{metric}_reasoning", "")
-
-                if Evaluation == dict:
-                    evaluations.append({
-                        "name": metric,
-                        "value": round(float(score), 2),
-                        "comment": reasoning,
-                    })
-                else:
-                    evaluations.append(Evaluation(
-                        name=metric,
-                        value=round(float(score), 2),
-                        comment=reasoning,
-                    ))
-
-            return evaluations
-
+            return [
+                _make_evaluation(metric, round(float(result.get(metric, 0)), 2), result.get(f"{metric}_reasoning", ""))
+                for metric in REFINEMENT_METRICS
+            ]
         except Exception as e:
             logger.error(f"Refinement quality evaluation failed: {e}")
-            fallback = []
-            for metric in REFINEMENT_METRICS:
-                if Evaluation == dict:
-                    fallback.append({"name": metric, "value": 0.0, "comment": f"Error: {e}"})
-                else:
-                    fallback.append(Evaluation(name=metric, value=0.0, comment=f"Error: {e}"))
-            return fallback
+            return [_make_evaluation(metric, 0.0, f"Error: {e}") for metric in REFINEMENT_METRICS]
 
     return refinement_evaluator
 
@@ -826,18 +614,8 @@ def create_redundancy_evaluator():
     Returns:
         Evaluator function compatible with run_experiment().
     """
-    try:
-        from langfuse import Evaluation
-    except ImportError:
-        logger.warning("Langfuse not available, using dict fallback")
-        Evaluation = dict
-
     def redundancy_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
-        """Evaluate semantic redundancy among generated themes.
-
-        Returns:
-            Langfuse Evaluation with redundancy ratio (0-1 scale, lower is better).
-        """
+        """Evaluate semantic redundancy among generated themes."""
         try:
             result = calculate_redundancy_score(output.get("themes", []))
 
@@ -846,22 +624,9 @@ def create_redundancy_evaluator():
                 pair_strs = [f"  {p['theme_a']} ↔ {p['theme_b']} ({p['similarity']})" for p in result["flagged_pairs"]]
                 comment += "\n" + "\n".join(pair_strs)
 
-            if Evaluation == dict:
-                return {
-                    "name": "redundancy",
-                    "value": round(result["ratio"], 2),
-                    "comment": comment,
-                }
-
-            return Evaluation(
-                name="redundancy",
-                value=round(result["ratio"], 2),
-                comment=comment,
-            )
+            return _make_evaluation("redundancy", round(result["ratio"], 2), comment)
         except Exception as e:
             logger.error(f"Redundancy evaluation failed: {e}")
-            if Evaluation == dict:
-                return {"name": "redundancy", "value": 0.0, "comment": f"Error: {e}"}
-            return Evaluation(name="redundancy", value=0.0, comment=f"Error: {e}")
+            return _make_evaluation("redundancy", 0.0, f"Error: {e}")
 
     return redundancy_evaluator
