@@ -520,6 +520,103 @@ def calculate_consistency_metrics(data: BenchmarkData) -> pd.DataFrame:
 
 
 # =============================================================================
+# Composite Performance Index (TQI)
+# =============================================================================
+
+# Stage weights for the ThemeFinder Quality Index
+STAGE_WEIGHTS = {"generation": 0.40, "sentiment": 0.30, "mapping": 0.30}
+GENERATION_WEIGHTS = {"groundedness": 0.45, "coverage": 0.45, "specificity": 0.10}
+GENERATION_SCALE = {"groundedness": 5.0, "coverage": 5.0, "specificity": 1.0}
+
+
+def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
+    """Calculate composite ThemeFinder Quality Index (TQI) per model.
+
+    Combines generation, sentiment, and mapping stage scores into a single
+    0-1 composite using statistically-derived weights.
+
+    Returns DataFrame with columns:
+        model_tag, generation_score, sentiment_score, mapping_score, composite
+    """
+    if data.results_df.empty or not data.detected_metrics:
+        return pd.DataFrame()
+
+    df = data.results_df
+    models = sorted(df["model_tag"].unique())
+    rows = []
+
+    for model in models:
+        model_df = df[df["model_tag"] == model]
+        scores: dict[str, float | None] = {}
+
+        # --- Generation stage score ---
+        gen_metrics = data.detected_metrics.get("generation", {})
+        gen_df = model_df[model_df["eval"] == "generation"]
+        if gen_df.empty or not gen_metrics:
+            scores["generation"] = None
+        else:
+            weighted_sum = 0.0
+            total_weight = 0.0
+            for metric_name, weight in GENERATION_WEIGHTS.items():
+                cols = gen_metrics.get(metric_name, [])
+                if not cols:
+                    continue
+                values = gen_df[cols].values.flatten()
+                values = values[~np.isnan(values.astype(float))]
+                if len(values) == 0:
+                    continue
+                scale = GENERATION_SCALE.get(metric_name, 1.0)
+                normalised = float(np.mean(values)) / scale
+                weighted_sum += weight * normalised
+                total_weight += weight
+
+            if total_weight > 0:
+                scores["generation"] = weighted_sum / total_weight
+            else:
+                scores["generation"] = None
+
+        # --- Sentiment stage score ---
+        sent_metrics = data.detected_metrics.get("sentiment", {})
+        sent_df = model_df[model_df["eval"] == "sentiment"]
+        accuracy_cols = sent_metrics.get("accuracy", [])
+        if sent_df.empty or not accuracy_cols:
+            scores["sentiment"] = None
+        else:
+            values = sent_df[accuracy_cols].values.flatten()
+            values = values[~np.isnan(values.astype(float))]
+            scores["sentiment"] = float(np.mean(values)) if len(values) > 0 else None
+
+        # --- Mapping stage score ---
+        map_metrics = data.detected_metrics.get("mapping", {})
+        map_df = model_df[model_df["eval"] == "mapping"]
+        f1_cols = map_metrics.get("f1", [])
+        if map_df.empty or not f1_cols:
+            scores["mapping"] = None
+        else:
+            values = map_df[f1_cols].values.flatten()
+            values = values[~np.isnan(values.astype(float))]
+            scores["mapping"] = float(np.mean(values)) if len(values) > 0 else None
+
+        # --- Composite ---
+        if all(scores[s] is not None for s in STAGE_WEIGHTS):
+            composite = sum(
+                STAGE_WEIGHTS[s] * scores[s] for s in STAGE_WEIGHTS  # type: ignore[operator]
+            )
+        else:
+            composite = None
+
+        rows.append({
+            "model_tag": model,
+            "generation_score": scores["generation"],
+            "sentiment_score": scores["sentiment"],
+            "mapping_score": scores["mapping"],
+            "composite": composite,
+        })
+
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
+# =============================================================================
 # Terminal Output
 # =============================================================================
 
@@ -657,6 +754,33 @@ def print_all_performance_tables(data: BenchmarkData) -> None:
             print_performance_table(data, eval_type, metric_group)
 
 
+def print_composite_table(data: BenchmarkData) -> None:
+    """Print composite TQI scores by model."""
+    composite_df = calculate_composite_scores(data)
+    if composite_df.empty:
+        return
+
+    table = Table(title="ThemeFinder Quality Index (TQI)")
+    table.add_column("Model", style="cyan")
+    table.add_column("Generation", justify="right")
+    table.add_column("Sentiment", justify="right")
+    table.add_column("Mapping", justify="right")
+    table.add_column("TQI", justify="right", style="bold")
+
+    # Sort by composite descending
+    composite_df = composite_df.sort_values("composite", ascending=False, na_position="last")
+
+    for _, row in composite_df.iterrows():
+        gen = f"{row['generation_score']:.3f}" if pd.notna(row["generation_score"]) else "-"
+        sent = f"{row['sentiment_score']:.3f}" if pd.notna(row["sentiment_score"]) else "-"
+        mapp = f"{row['mapping_score']:.3f}" if pd.notna(row["mapping_score"]) else "-"
+        tqi = f"{row['composite']:.3f}" if pd.notna(row["composite"]) else "-"
+        table.add_row(row["model_tag"], gen, sent, mapp, tqi)
+
+    console.print(table)
+    console.print()
+
+
 # =============================================================================
 # HTML Report Generation
 # =============================================================================
@@ -725,6 +849,7 @@ def generate_html_report(data: BenchmarkData, output_path: str) -> None:
             models, model_costs, model_latencies, eval_types, eval_costs
         ),
         _html_performance_section(data),
+        _html_composite_section(data),
         _html_consistency_section(data),
         _html_footer(),
     ]
@@ -926,8 +1051,14 @@ def _html_model_summary_table(data: BenchmarkData) -> str:
         "generation": "groundedness",
     }
 
+    # Calculate composite scores
+    composite_df = calculate_composite_scores(data)
+    has_composite = not composite_df.empty and composite_df["composite"].notna().any()
+
     # Build header
     header_cells = ["<th>Model</th>"]
+    if has_composite:
+        header_cells.append("<th class='num'>TQI</th>")
     for et in eval_types:
         if et in primary_metrics:
             header_cells.append(f"<th class='num'>{et.title()}</th>")
@@ -940,6 +1071,16 @@ def _html_model_summary_table(data: BenchmarkData) -> str:
     for model in models:
         model_df = df[df["model_tag"] == model]
         cells = [f"<td><strong>{model}</strong></td>"]
+
+        # TQI composite score
+        if has_composite:
+            model_composite = composite_df[composite_df["model_tag"] == model]
+            if not model_composite.empty and pd.notna(model_composite["composite"].values[0]):
+                tqi = model_composite["composite"].values[0]
+                css_class = "good" if tqi >= 0.8 else "medium" if tqi >= 0.6 else "poor"
+                cells.append(f"<td class='num {css_class}'><strong>{tqi:.3f}</strong></td>")
+            else:
+                cells.append("<td class='num'>-</td>")
 
         # Performance metrics for each eval
         for et in eval_types:
@@ -1373,6 +1514,165 @@ def _html_consistency_section(data: BenchmarkData) -> str:
 """
 
 
+def _html_composite_section(data: BenchmarkData) -> str:
+    """Generate composite TQI section with stacked bar chart and heatmap."""
+    composite_df = calculate_composite_scores(data)
+    if composite_df.empty or composite_df["composite"].isna().all():
+        return ""
+
+    # Filter to models with complete composite scores, sort by TQI descending
+    valid_df = composite_df.dropna(subset=["composite"]).sort_values(
+        "composite", ascending=True  # ascending for horizontal bar (bottom = best)
+    )
+    if valid_df.empty:
+        return ""
+
+    models = valid_df["model_tag"].tolist()
+    gen_contributions = (valid_df["generation_score"] * STAGE_WEIGHTS["generation"]).tolist()
+    sent_contributions = (valid_df["sentiment_score"] * STAGE_WEIGHTS["sentiment"]).tolist()
+    map_contributions = (valid_df["mapping_score"] * STAGE_WEIGHTS["mapping"]).tolist()
+    composites = valid_df["composite"].tolist()
+
+    # --- Stacked bar chart data ---
+    stacked_traces = json.dumps([
+        {
+            "name": f"Generation ({int(STAGE_WEIGHTS['generation'] * 100)}%)",
+            "y": models,
+            "x": gen_contributions,
+            "type": "bar",
+            "orientation": "h",
+            "marker": {"color": "#f472b6"},
+            "hovertemplate": "%{y}: %{x:.3f}<extra>Generation</extra>",
+        },
+        {
+            "name": f"Sentiment ({int(STAGE_WEIGHTS['sentiment'] * 100)}%)",
+            "y": models,
+            "x": sent_contributions,
+            "type": "bar",
+            "orientation": "h",
+            "marker": {"color": "#38bdf8"},
+            "hovertemplate": "%{y}: %{x:.3f}<extra>Sentiment</extra>",
+        },
+        {
+            "name": f"Mapping ({int(STAGE_WEIGHTS['mapping'] * 100)}%)",
+            "y": models,
+            "x": map_contributions,
+            "type": "bar",
+            "orientation": "h",
+            "marker": {"color": "#4ade80"},
+            "hovertemplate": "%{y}: %{x:.3f}<extra>Mapping</extra>",
+        },
+    ])
+
+    # --- Heatmap data ---
+    # Columns: individual normalised metrics + stage scores + composite
+    heatmap_models = list(reversed(models))  # top = best
+    heatmap_cols = ["Grnd", "Cov", "Spec", "Gen", "Sent", "Map", "TQI"]
+    heatmap_z = []
+    heatmap_text = []
+
+    for model in heatmap_models:
+        row_data = valid_df[valid_df["model_tag"] == model].iloc[0]
+
+        # Get raw normalised metrics for this model
+        model_df = data.results_df[data.results_df["model_tag"] == model]
+        gen_df = model_df[model_df["eval"] == "generation"]
+        gen_metrics = data.detected_metrics.get("generation", {})
+
+        raw_values = {}
+        for metric_name in ["groundedness", "coverage", "specificity"]:
+            cols = gen_metrics.get(metric_name, [])
+            if cols and not gen_df.empty:
+                vals = gen_df[cols].values.flatten()
+                vals = vals[~np.isnan(vals.astype(float))]
+                if len(vals) > 0:
+                    scale = GENERATION_SCALE.get(metric_name, 1.0)
+                    raw_values[metric_name] = float(np.mean(vals)) / scale
+
+        z_row = [
+            raw_values.get("groundedness", float("nan")),
+            raw_values.get("coverage", float("nan")),
+            raw_values.get("specificity", float("nan")),
+            row_data["generation_score"],
+            row_data["sentiment_score"],
+            row_data["mapping_score"],
+            row_data["composite"],
+        ]
+        text_row = [f"{v:.3f}" if pd.notna(v) else "-" for v in z_row]
+        heatmap_z.append(z_row)
+        heatmap_text.append(text_row)
+
+    heatmap_trace = json.dumps([{
+        "z": heatmap_z,
+        "x": heatmap_cols,
+        "y": heatmap_models,
+        "type": "heatmap",
+        "colorscale": [
+            [0.0, "#0f172a"], [0.4, "#1e3a5f"], [0.6, "#2563eb"],
+            [0.8, "#38bdf8"], [1.0, "#4ade80"],
+        ],
+        "zmin": 0,
+        "zmax": 1,
+        "text": heatmap_text,
+        "texttemplate": "%{text}",
+        "textfont": {"size": 11, "family": "Roboto Mono", "color": "#e2e8f0"},
+        "hovertemplate": "%{y} | %{x}: %{z:.3f}<extra></extra>",
+        "showscale": False,
+    }])
+
+    # Composite annotation labels at end of each bar
+    annotations = json.dumps([
+        {
+            "x": composites[i],
+            "y": models[i],
+            "text": f"  {composites[i]:.3f}",
+            "showarrow": False,
+            "xanchor": "left",
+            "font": {"size": 11, "color": "#e2e8f0", "family": "Roboto Mono"},
+        }
+        for i in range(len(models))
+    ])
+
+    bar_height = max(200, len(models) * 50)
+    heatmap_height = max(180, len(heatmap_models) * 40 + 60)
+
+    return f"""
+        <div class="section-header">ThemeFinder Quality Index (TQI)</div>
+        <div class="grid grid-2">
+            <div class="card">
+                <div class="card-title">Composite Score Breakdown</div>
+                <div id="tqi-stacked-bar" style="height: {bar_height}px;"></div>
+            </div>
+            <div class="card">
+                <div class="card-title">Normalised Metric Heatmap</div>
+                <div id="tqi-heatmap" style="height: {heatmap_height}px;"></div>
+            </div>
+        </div>
+        <script>
+            Plotly.newPlot('tqi-stacked-bar', {stacked_traces}, {{
+                barmode: 'stack',
+                margin: {{t: 10, b: 30, l: 140, r: 60}},
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: {{color: '#94a3b8', size: 11, family: 'Inter'}},
+                xaxis: {{gridcolor: '#334155', range: [0, 1.05], title: 'Score'}},
+                yaxis: {{gridcolor: '#334155'}},
+                legend: {{orientation: 'h', y: -0.15, font: {{size: 10}}}},
+                annotations: {annotations}
+            }}, {{responsive: true, displayModeBar: false}});
+
+            Plotly.newPlot('tqi-heatmap', {heatmap_trace}, {{
+                margin: {{t: 10, b: 40, l: 140, r: 20}},
+                paper_bgcolor: 'rgba(0,0,0,0)',
+                plot_bgcolor: 'rgba(0,0,0,0)',
+                font: {{color: '#94a3b8', size: 11, family: 'Inter'}},
+                xaxis: {{side: 'top'}},
+                yaxis: {{autorange: true}}
+            }}, {{responsive: true, displayModeBar: false}});
+        </script>
+"""
+
+
 def _html_footer() -> str:
     """Generate HTML footer."""
     return """
@@ -1443,6 +1743,7 @@ def main():
     print_model_table(data)
     print_eval_table(data)
     print_all_performance_tables(data)
+    print_composite_table(data)
 
     # Generate HTML report
     output_path = args.output or f"benchmark_report_{args.benchmark}.html"
