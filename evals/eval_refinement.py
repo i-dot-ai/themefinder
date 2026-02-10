@@ -18,6 +18,7 @@ import langfuse_utils
 import pandas as pd
 from datasets import DatasetConfig, load_local_data
 from langchain_openai import AzureChatOpenAI
+from evaluators import create_refinement_quality_evaluator
 from utils import read_and_render
 
 from themefinder import theme_refinement
@@ -64,9 +65,12 @@ async def evaluate_refinement(
             callbacks=callbacks,
         )
 
+    # Select judge LLM (falls back to task LLM if not provided)
+    eval_llm = judge_llm or llm
+
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(langfuse_ctx, config, llm, callbacks)
+        result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm, callbacks)
     else:
         result = await _run_local_fallback(config, llm, callbacks)
 
@@ -76,15 +80,14 @@ async def evaluate_refinement(
     return result
 
 
-async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -> dict:
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callbacks: list) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
-
-    Note: Refinement uses qualitative LLM evaluation, so no numeric evaluators.
 
     Args:
         ctx: LangfuseContext
         config: DatasetConfig
-        llm: LangChain LLM instance
+        llm: LangChain LLM instance (task model)
+        eval_llm: LangChain LLM instance (judge model, may be same as llm)
         callbacks: LangChain callbacks list
 
     Returns:
@@ -98,6 +101,8 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
         )
         return await _run_local_fallback(config, llm, callbacks)
 
+    refinement_evaluator = create_refinement_quality_evaluator(eval_llm)
+
     all_results = {}
     items = list(dataset.items)
 
@@ -110,6 +115,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
             # Extract input
             themes_df = pd.DataFrame(item.input["themes"])
             question = item.input.get("question", "")
+            original_records = themes_df.to_dict(orient="records")
 
             # Run refinement
             refined_df, _ = await theme_refinement(
@@ -118,15 +124,43 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list) -
                 question=question,
             )
 
-            output = {"refined_themes": refined_df.to_dict(orient="records")}
+            refined_records = refined_df.to_dict(orient="records")
+            output = {"refined_themes": refined_records}
 
             # Update trace with output
             if trace:
                 trace.update(output=output)
 
-            # Collect for return (qualitative - no numeric scores)
+            # LLM-as-judge: 4-dimension quality evaluation
+            quality_results = refinement_evaluator(
+                output={"themes": refined_records},
+                expected_output={"themes": original_records},
+            )
+
+            # Record each evaluation as a Langfuse score
+            for evaluation in quality_results:
+                score_name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
+                score_value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+                score_comment = evaluation.get("comment", "") if isinstance(evaluation, dict) else evaluation.comment
+
+                if trace_id and ctx.client:
+                    ctx.client.create_score(
+                        trace_id=trace_id,
+                        name=score_name,
+                        value=score_value,
+                        data_type="NUMERIC",
+                        comment=score_comment,
+                    )
+
+            # Collect for return
             item_key = item.metadata.get("question_part", item.id)
             all_results[f"{item_key}_output"] = output
+
+            # Add quality scores to results (numeric — will go to CSV columns)
+            for evaluation in quality_results:
+                name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
+                value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+                all_results[f"{item_key}_{name}"] = value
 
     print(f"Refinement Eval Results: {ctx.session_id}")
     return all_results

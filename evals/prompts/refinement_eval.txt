@@ -1,33 +1,82 @@
-You are part of an evaluation process for LLM outputs in a topic modeling algorithm analyzing responses to a question about government policy. You will be presented with two lists of topics:
+You are an expert in natural language processing and topic modelling. Your task is to evaluate how well a model refines topic labels and descriptions. You will be shown:
 
-1. ORIGINAL TOPICS: These explicitly tie topics to whether a person agrees or disagrees with the question.
-2. NEW TOPICS: These are generated from ORIGINAL TOPICS after a refinement step.
+1. ORIGINAL TOPICS: The topics before refinement.
+2. NEW TOPICS: The topics after a refinement step that improves labels and descriptions.
 
-Your task is to evaluate the NEW TOPICS based on the ORIGINAL TOPICS and produce a JSON output with the following metrics, each scored on a scale of 0 to 5 (where 0 is the worst and 5 is the best):
+Evaluate the NEW TOPICS based on the ORIGINAL TOPICS on four criteria, each scored from 0 to 5:
 
-1. Information Retention: How well do the NEW TOPICS preserve the key information from the ORIGINAL TOPICS? (5 = all important details retained, 0 = significant information loss)
+## Information Retention
 
-2. Response References: do topics in NEW TOPICS make references to responses (i.e. "the majority of responses", "Some responses", "Respondents") or do they only contain the content of a topic  (5 =  No topics use language that refers to multiple responses, 0 = many topics explicitly refer to multiple responses)
+How well do the NEW TOPICS preserve key information from the ORIGINAL TOPICS?
 
-3. Distinctiveness: How well do the NEW TOPICS represent distinct concepts without overlap? (5 = perfectly distinct, 0 = significant overlap)
+- 5: All important details retained, nothing meaningful lost
+- 4: Most important information preserved, only minor details lost
+- 3: Core concepts preserved but significant details lost
+- 2: Important information missing from refined topics
+- 1: Most key information lost during refinement
+- 0: Essential information completely lost
 
-4. Fluency/Readability: Are the NEW TOPICS well worded, do they start with a brief topic label that gives a clear summary of the content. This should be followed by a topic description that provides more detail on the topic label (without just repeating it) (5 = all topics have good topic labels and descriptions, 0 = many topics have poor topic labels and descriptions)
+## Response References
+
+Do the NEW TOPICS avoid language that references survey responses directly? Topics should describe the content itself, not how respondents expressed it.
+
+- 5: No topics use language that refers to responses (e.g. "respondents said", "the majority of responses")
+- 4: At most one topic contains a minor response reference
+- 3: A few topics reference responses but most are content-focused
+- 2: Many topics refer to responses rather than describing content directly
+- 1: Most topics are framed around what respondents said
+- 0: Nearly all topics reference responses instead of describing content
+
+## Distinctiveness
+
+How well do the NEW TOPICS represent distinct concepts without overlap?
+
+- 5: All topics are clearly distinct with no conceptual overlap
+- 4: Nearly all distinct, one or two minor overlaps
+- 3: Most distinct but some noticeable overlap between topics
+- 2: Several topics overlap significantly
+- 1: Most topics overlap or are poorly differentiated
+- 0: Topics are largely redundant or indistinguishable
+
+## Fluency
+
+Are the NEW TOPICS well structured with clear labels and informative descriptions?
+
+- 5: All topics have concise, descriptive labels followed by detailed descriptions that expand on (not repeat) the label
+- 4: Most topics are well structured with clear labels and good descriptions
+- 3: Topics are generally readable but some labels are vague or descriptions merely repeat the label
+- 2: Several topics have poor labels or uninformative descriptions
+- 1: Most topics are poorly worded or structured
+- 0: Topics are unreadable or incomprehensible
+
+## Calibration Examples
+
+**High quality refinement** (information_retention: 5, response_references: 5, distinctiveness: 4, fluency: 5):
+Original topic: "People saying they want better access to services". Refined to: "Service accessibility gaps: Limited availability of essential services in rural and underserved areas creates barriers to healthcare, education, and social support." The refined version removes the response reference ("people saying"), adds a specific label, and expands the description with concrete detail. One minor overlap exists with another topic about healthcare specifically.
+
+**Poor refinement** (information_retention: 2, response_references: 1, distinctiveness: 3, fluency: 2):
+Original topic: "Concerns about environmental regulations being too strict". Refined to: "Many respondents feel regulations are problematic: The majority of responses indicate that current rules are seen as excessive by participants." The refined version loses the environmental specificity, introduces multiple response references, and the description merely restates the label.
+
+## Instructions
+
+1. First, reason about how the refinement performed on each criterion.
+2. Then provide your scores in strict JSON format.
+
+Return only the following JSON, no other text:
+
+{{
+  "information_retention": <score 0-5>,
+  "information_retention_reasoning": "1-2 sentence explanation",
+  "response_references": <score 0-5>,
+  "response_references_reasoning": "1-2 sentence explanation",
+  "distinctiveness": <score 0-5>,
+  "distinctiveness_reasoning": "1-2 sentence explanation",
+  "fluency": <score 0-5>,
+  "fluency_reasoning": "1-2 sentence explanation"
+}}
 
 ORIGINAL TOPICS:
 {original_topics}
 
 NEW TOPICS:
 {new_topics}
-
-Output your response in the following format, do not return anything else:
-
-{{
-  "Information Retention": X,
-  "Information_Retention_reasoning": "1-2 sentence explanation of score",
-  "Response References": X,
-  "Response_References_reasoning": "1-2 sentence explanation of score",
-  "Distinctiveness": X,
-  "Distinctiveness_reasoning": "1-2 sentence explanation of score",
-  "Fluency/Readability": X,
-  "Fluency_Readability_reasoning": "1-2 sentence explanation of score"
-}}

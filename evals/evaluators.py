@@ -539,6 +539,219 @@ def create_title_specificity_evaluator(llm: Any):
     return specificity_evaluator
 
 
+def _calculate_condensation_scores(
+    condensed_themes: list[dict] | dict,
+    original_themes: list[dict] | dict,
+    llm: Any,
+) -> dict[str, Any]:
+    """Calculate condensation quality scores using LLM-as-judge.
+
+    Args:
+        condensed_themes: Condensed themes (list of dicts or dict).
+        original_themes: Original themes before condensation.
+        llm: LangChain LLM instance.
+
+    Returns:
+        Dict with compression_quality, information_retention, and reasoning.
+    """
+    from utils import read_and_render
+
+    response = llm.invoke(
+        read_and_render(
+            "condensation_eval.txt",
+            {
+                "original_topics": original_themes,
+                "condensed_topics": condensed_themes,
+            },
+        )
+    )
+
+    parsed = parse_json_markdown(response.content)
+
+    return {
+        "compression_quality": parsed.get("compression_quality", 0),
+        "compression_quality_reasoning": parsed.get("compression_quality_reasoning", ""),
+        "information_retention": parsed.get("information_retention", 0),
+        "information_retention_reasoning": parsed.get("information_retention_reasoning", ""),
+    }
+
+
+def create_condensation_quality_evaluator(llm: Any):
+    """Factory for condensation quality evaluator (compression + information retention).
+
+    Args:
+        llm: LangChain LLM instance for scoring.
+
+    Returns:
+        Evaluator function that returns a list of Evaluation objects.
+    """
+    try:
+        from langfuse import Evaluation
+    except ImportError:
+        logger.warning("Langfuse not available, using dict fallback")
+        Evaluation = dict
+
+    def condensation_evaluator(*, output: dict, expected_output: dict, **kwargs) -> list:
+        """Evaluate condensation quality on compression and information retention.
+
+        Args:
+            output: Task output containing "themes" key (condensed themes).
+            expected_output: Expected output containing "themes" key (original themes).
+
+        Returns:
+            List of Evaluation objects (one per metric).
+        """
+        try:
+            result = _calculate_condensation_scores(
+                output.get("themes", []),
+                expected_output.get("themes", []),
+                llm,
+            )
+
+            evaluations = []
+            for metric in ("compression_quality", "information_retention"):
+                score = result.get(metric, 0)
+                reasoning = result.get(f"{metric}_reasoning", "")
+
+                if Evaluation == dict:
+                    evaluations.append({
+                        "name": metric,
+                        "value": round(float(score), 2),
+                        "comment": reasoning,
+                    })
+                else:
+                    evaluations.append(Evaluation(
+                        name=metric,
+                        value=round(float(score), 2),
+                        comment=reasoning,
+                    ))
+
+            return evaluations
+
+        except Exception as e:
+            logger.error(f"Condensation quality evaluation failed: {e}")
+            fallback = []
+            for metric in ("compression_quality", "information_retention"):
+                if Evaluation == dict:
+                    fallback.append({"name": metric, "value": 0.0, "comment": f"Error: {e}"})
+                else:
+                    fallback.append(Evaluation(name=metric, value=0.0, comment=f"Error: {e}"))
+            return fallback
+
+    return condensation_evaluator
+
+
+REFINEMENT_METRICS = (
+    "information_retention",
+    "response_references",
+    "distinctiveness",
+    "fluency",
+)
+
+
+def _calculate_refinement_scores(
+    refined_themes: list[dict] | dict,
+    original_themes: list[dict] | dict,
+    llm: Any,
+) -> dict[str, Any]:
+    """Calculate refinement quality scores using LLM-as-judge.
+
+    Args:
+        refined_themes: Refined themes (list of dicts or dict).
+        original_themes: Original themes before refinement.
+        llm: LangChain LLM instance.
+
+    Returns:
+        Dict with four metric scores and reasoning.
+    """
+    from utils import read_and_render
+
+    response = llm.invoke(
+        read_and_render(
+            "refinement_eval.txt",
+            {
+                "original_topics": original_themes,
+                "new_topics": refined_themes,
+            },
+        )
+    )
+
+    parsed = parse_json_markdown(response.content)
+
+    return {
+        metric: parsed.get(metric, 0)
+        for metric in REFINEMENT_METRICS
+    } | {
+        f"{metric}_reasoning": parsed.get(f"{metric}_reasoning", "")
+        for metric in REFINEMENT_METRICS
+    }
+
+
+def create_refinement_quality_evaluator(llm: Any):
+    """Factory for refinement quality evaluator (4 dimensions).
+
+    Args:
+        llm: LangChain LLM instance for scoring.
+
+    Returns:
+        Evaluator function that returns a list of Evaluation objects.
+    """
+    try:
+        from langfuse import Evaluation
+    except ImportError:
+        logger.warning("Langfuse not available, using dict fallback")
+        Evaluation = dict
+
+    def refinement_evaluator(*, output: dict, expected_output: dict, **kwargs) -> list:
+        """Evaluate refinement quality on four dimensions.
+
+        Args:
+            output: Task output containing "themes" key (refined themes).
+            expected_output: Expected output containing "themes" key (original themes).
+
+        Returns:
+            List of Evaluation objects (one per metric).
+        """
+        try:
+            result = _calculate_refinement_scores(
+                output.get("themes", []),
+                expected_output.get("themes", []),
+                llm,
+            )
+
+            evaluations = []
+            for metric in REFINEMENT_METRICS:
+                score = result.get(metric, 0)
+                reasoning = result.get(f"{metric}_reasoning", "")
+
+                if Evaluation == dict:
+                    evaluations.append({
+                        "name": metric,
+                        "value": round(float(score), 2),
+                        "comment": reasoning,
+                    })
+                else:
+                    evaluations.append(Evaluation(
+                        name=metric,
+                        value=round(float(score), 2),
+                        comment=reasoning,
+                    ))
+
+            return evaluations
+
+        except Exception as e:
+            logger.error(f"Refinement quality evaluation failed: {e}")
+            fallback = []
+            for metric in REFINEMENT_METRICS:
+                if Evaluation == dict:
+                    fallback.append({"name": metric, "value": 0.0, "comment": f"Error: {e}"})
+                else:
+                    fallback.append(Evaluation(name=metric, value=0.0, comment=f"Error: {e}"))
+            return fallback
+
+    return refinement_evaluator
+
+
 @lru_cache(maxsize=1)
 def _get_sentence_model():
     """Load and cache the sentence-transformers model (loaded once per process)."""

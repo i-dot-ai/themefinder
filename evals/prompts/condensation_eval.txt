@@ -1,48 +1,52 @@
 You are an expert in natural language processing and topic modelling. Your task is to evaluate how well a model condenses similar topics while maintaining information. You will be shown:
 
-1. The original list of topics
-2. The condensed list of topics
+1. The ORIGINAL list of topics (before condensation)
+2. The CONDENSED list of topics (after condensation)
 
-The following rare topic should be preserved:
-Commentary quality effects - Impact on sports commentary depth and analysis due to reduced integration of betting information.
+Evaluate the condensed topics on two criteria, each scored from 0 to 5:
 
-Evaluate the condensed topics on these criteria, scoring each from 0-5:
+## Compression Quality
 
-COMPRESSION QUALITY
-- 5: Perfect compression - All similar topics properly combined, no distinct topics incorrectly merged
-- 4: Good compression - Most similar topics combined appropriately, minimal errors
-- 3: Adequate compression - Some appropriate combinations, but some missed opportunities or errors
-- 2: Poor compression - Several missed combinations or inappropriate mergers
-- 1: Very poor compression - Most similar topics not combined or distinct topics incorrectly merged
+How well are similar topics merged while keeping distinct topics separate?
+
+- 5: All similar topics properly combined, no distinct topics incorrectly merged
+- 4: Most similar topics combined appropriately, minimal errors
+- 3: Some appropriate combinations, but missed opportunities or minor errors
+- 2: Several missed combinations or inappropriate mergers
+- 1: Most similar topics not combined or distinct topics incorrectly merged
 - 0: No meaningful compression or complete loss of topic distinctness
 
-INFORMATION RETENTION
-- 5: Complete retention - All key information preserved in condensed topics
-- 4: Strong retention - Most important information preserved, minor details lost
-- 3: Moderate retention - Core concepts preserved but significant details lost
-- 2: Weak retention - Important information missing from condensed topics
-- 1: Very weak retention - Most key information lost in condensation
-- 0: Critical failure - Essential information completely lost
+## Information Retention
 
-PRESERVES RARE TOPICS
-- 5: Rare topic preserved as distinct category with full detail
-- 4: Rare topic clearly identifiable with most details preserved
-- 3: Rare topic merged but core message about commentary impact retained
-- 2: Rare topic heavily diluted but slightly detectable
-- 1: Rare topic completely lost or unrecognizably merged
+How well is the key information from the original topics preserved?
 
+- 5: All key information preserved in condensed topics
+- 4: Most important information preserved, only minor details lost
+- 3: Core concepts preserved but significant details lost
+- 2: Important information missing from condensed topics
+- 1: Most key information lost in condensation
+- 0: Essential information completely lost
 
-All you should return are the following values, do not return any other description:
+## Calibration Examples
+
+**High quality condensation** (compression_quality: 5, information_retention: 4):
+Original topics included "Lack of affordable options", "High cost of entry-level products", and "Price barriers for low-income groups" as separate topics. The condensed output merged these into a single topic "Affordability barriers: High costs and limited options create barriers for low-income groups seeking entry-level products." All three related concepts are captured in one well-worded topic. A minor detail about specific product types was lost, but the core message is preserved.
+
+**Poor condensation** (compression_quality: 1, information_retention: 2):
+Original topics included "Environmental impact of packaging", "Carbon emissions from delivery", and "Staff working conditions" as separate topics. The condensed output merged all three into "Sustainability concerns: Various environmental and social issues." This incorrectly merges the distinct environmental and social/labour concepts, and the vague description loses almost all specific information from the originals.
+
+## Instructions
+
+1. First, reason about how the condensation performed on each criterion.
+2. Then provide your scores in strict JSON format.
+
+Return only the following JSON, no other text:
 
 {{
- "Compression_Quality": score,
- "Compression_Quality_reasoning": "1-2 sentence explanation of score",
- "Information_Retention": score,
- "Information_Retention_reasoning": "1-2 sentence explanation of score",
- "Target N Topics": 13,
- "N Topics": number of topics in CONDENSED TOPICS,
- "Preserves Rare Topics": score,
- "Preserves_Rare_Topics_reasoning": "1-2 sentence explanation of score"
+  "compression_quality": <score 0-5>,
+  "compression_quality_reasoning": "1-2 sentence explanation",
+  "information_retention": <score 0-5>,
+  "information_retention_reasoning": "1-2 sentence explanation"
 }}
 
 ORIGINAL TOPICS:

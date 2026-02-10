@@ -342,6 +342,17 @@ def detect_eval_metrics(df: pd.DataFrame, eval_type: str) -> dict[str, list[str]
             "specificity": r"^question_part_\d+_specificity$",
             "redundancy": r"^question_part_\d+_redundancy$",
         },
+        "condensation": {
+            "compression_quality": r"^question_part_\d+_compression_quality$",
+            "information_retention": r"^question_part_\d+_information_retention$",
+            "redundancy": r"^question_part_\d+_redundancy$",
+        },
+        "refinement": {
+            "information_retention": r"^question_part_\d+_information_retention$",
+            "response_references": r"^question_part_\d+_response_references$",
+            "distinctiveness": r"^question_part_\d+_distinctiveness$",
+            "fluency": r"^question_part_\d+_fluency$",
+        },
     }
 
     eval_patterns = patterns.get(eval_type, {})
@@ -524,19 +535,89 @@ def calculate_consistency_metrics(data: BenchmarkData) -> pd.DataFrame:
 # =============================================================================
 
 # Stage weights for the ThemeFinder Quality Index
-STAGE_WEIGHTS = {"generation": 0.40, "sentiment": 0.30, "mapping": 0.30}
+STAGE_WEIGHTS = {
+    "generation": 0.30,
+    "condensation": 0.10,
+    "refinement": 0.10,
+    "sentiment": 0.25,
+    "mapping": 0.25,
+}
+
 GENERATION_WEIGHTS = {"groundedness": 0.45, "coverage": 0.45, "specificity": 0.10}
 GENERATION_SCALE = {"groundedness": 5.0, "coverage": 5.0, "specificity": 1.0}
+
+CONDENSATION_WEIGHTS = {
+    "compression_quality": 0.40,
+    "information_retention": 0.40,
+    "redundancy_inv": 0.20,  # 1 - redundancy (lower is better)
+}
+CONDENSATION_SCALE = {
+    "compression_quality": 5.0,
+    "information_retention": 5.0,
+    "redundancy_inv": 1.0,
+}
+
+REFINEMENT_WEIGHTS = {
+    "information_retention": 0.25,
+    "response_references": 0.25,
+    "distinctiveness": 0.25,
+    "fluency": 0.25,
+}
+REFINEMENT_SCALE = {k: 5.0 for k in REFINEMENT_WEIGHTS}
+
+
+def _weighted_stage_score(
+    stage_df: pd.DataFrame,
+    metrics_dict: dict[str, list[str]],
+    weights: dict[str, float],
+    scales: dict[str, float],
+    invert: set[str] | None = None,
+) -> float | None:
+    """Calculate a weighted stage score from detected metric columns.
+
+    Args:
+        stage_df: DataFrame filtered to one model + one eval type.
+        metrics_dict: Detected metric columns {metric_name: [col_names]}.
+        weights: Weight per metric (keys must match metrics_dict or use suffixed names).
+        scales: Max raw value per metric (for normalisation to 0-1).
+        invert: Set of metric names to invert (1 - normalised value).
+
+    Returns:
+        Weighted average in [0, 1], or None if no data.
+    """
+    invert = invert or set()
+    weighted_sum = 0.0
+    total_weight = 0.0
+
+    for metric_name, weight in weights.items():
+        # Handle suffixed weight keys (e.g. "redundancy_inv" → "redundancy")
+        col_key = metric_name.removesuffix("_inv")
+        cols = metrics_dict.get(col_key, [])
+        if not cols:
+            continue
+        values = stage_df[cols].values.flatten()
+        values = values[~np.isnan(values.astype(float))]
+        if len(values) == 0:
+            continue
+        scale = scales.get(metric_name, 1.0)
+        normalised = float(np.mean(values)) / scale
+        if metric_name in invert:
+            normalised = 1.0 - normalised
+        weighted_sum += weight * normalised
+        total_weight += weight
+
+    return weighted_sum / total_weight if total_weight > 0 else None
 
 
 def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
     """Calculate composite ThemeFinder Quality Index (TQI) per model.
 
-    Combines generation, sentiment, and mapping stage scores into a single
-    0-1 composite using statistically-derived weights.
+    Combines generation, condensation, refinement, sentiment, and mapping
+    stage scores into a single 0-1 composite using statistically-derived weights.
 
     Returns DataFrame with columns:
-        model_tag, generation_score, sentiment_score, mapping_score, composite
+        model_tag, generation_score, condensation_score, refinement_score,
+        sentiment_score, mapping_score, composite
     """
     if data.results_df.empty or not data.detected_metrics:
         return pd.DataFrame()
@@ -552,28 +633,24 @@ def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
         # --- Generation stage score ---
         gen_metrics = data.detected_metrics.get("generation", {})
         gen_df = model_df[model_df["eval"] == "generation"]
-        if gen_df.empty or not gen_metrics:
-            scores["generation"] = None
-        else:
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for metric_name, weight in GENERATION_WEIGHTS.items():
-                cols = gen_metrics.get(metric_name, [])
-                if not cols:
-                    continue
-                values = gen_df[cols].values.flatten()
-                values = values[~np.isnan(values.astype(float))]
-                if len(values) == 0:
-                    continue
-                scale = GENERATION_SCALE.get(metric_name, 1.0)
-                normalised = float(np.mean(values)) / scale
-                weighted_sum += weight * normalised
-                total_weight += weight
+        scores["generation"] = _weighted_stage_score(
+            gen_df, gen_metrics, GENERATION_WEIGHTS, GENERATION_SCALE,
+        ) if not gen_df.empty and gen_metrics else None
 
-            if total_weight > 0:
-                scores["generation"] = weighted_sum / total_weight
-            else:
-                scores["generation"] = None
+        # --- Condensation stage score ---
+        cond_metrics = data.detected_metrics.get("condensation", {})
+        cond_df = model_df[model_df["eval"] == "condensation"]
+        scores["condensation"] = _weighted_stage_score(
+            cond_df, cond_metrics, CONDENSATION_WEIGHTS, CONDENSATION_SCALE,
+            invert={"redundancy_inv"},
+        ) if not cond_df.empty and cond_metrics else None
+
+        # --- Refinement stage score ---
+        ref_metrics = data.detected_metrics.get("refinement", {})
+        ref_df = model_df[model_df["eval"] == "refinement"]
+        scores["refinement"] = _weighted_stage_score(
+            ref_df, ref_metrics, REFINEMENT_WEIGHTS, REFINEMENT_SCALE,
+        ) if not ref_df.empty and ref_metrics else None
 
         # --- Sentiment stage score ---
         sent_metrics = data.detected_metrics.get("sentiment", {})
@@ -608,6 +685,8 @@ def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
         rows.append({
             "model_tag": model,
             "generation_score": scores["generation"],
+            "condensation_score": scores["condensation"],
+            "refinement_score": scores["refinement"],
             "sentiment_score": scores["sentiment"],
             "mapping_score": scores["mapping"],
             "composite": composite,
@@ -762,9 +841,11 @@ def print_composite_table(data: BenchmarkData) -> None:
 
     table = Table(title="ThemeFinder Quality Index (TQI)")
     table.add_column("Model", style="cyan")
-    table.add_column("Generation", justify="right")
-    table.add_column("Sentiment", justify="right")
-    table.add_column("Mapping", justify="right")
+    table.add_column("Gen", justify="right")
+    table.add_column("Cond", justify="right")
+    table.add_column("Ref", justify="right")
+    table.add_column("Sent", justify="right")
+    table.add_column("Map", justify="right")
     table.add_column("TQI", justify="right", style="bold")
 
     # Sort by composite descending
@@ -772,10 +853,12 @@ def print_composite_table(data: BenchmarkData) -> None:
 
     for _, row in composite_df.iterrows():
         gen = f"{row['generation_score']:.3f}" if pd.notna(row["generation_score"]) else "-"
+        cond = f"{row['condensation_score']:.3f}" if pd.notna(row["condensation_score"]) else "-"
+        ref = f"{row['refinement_score']:.3f}" if pd.notna(row["refinement_score"]) else "-"
         sent = f"{row['sentiment_score']:.3f}" if pd.notna(row["sentiment_score"]) else "-"
         mapp = f"{row['mapping_score']:.3f}" if pd.notna(row["mapping_score"]) else "-"
         tqi = f"{row['composite']:.3f}" if pd.notna(row["composite"]) else "-"
-        table.add_row(row["model_tag"], gen, sent, mapp, tqi)
+        table.add_row(row["model_tag"], gen, cond, ref, sent, mapp, tqi)
 
     console.print(table)
     console.print()
@@ -1046,9 +1129,11 @@ def _html_model_summary_table(data: BenchmarkData) -> str:
 
     # Get primary metric for each eval type
     primary_metrics = {
+        "generation": "groundedness",
+        "condensation": "compression_quality",
+        "refinement": "information_retention",
         "sentiment": "accuracy",
         "mapping": "f1",
-        "generation": "groundedness",
     }
 
     # Calculate composite scores
@@ -1529,6 +1614,8 @@ def _html_composite_section(data: BenchmarkData) -> str:
 
     models = valid_df["model_tag"].tolist()
     gen_contributions = (valid_df["generation_score"] * STAGE_WEIGHTS["generation"]).tolist()
+    cond_contributions = (valid_df["condensation_score"] * STAGE_WEIGHTS["condensation"]).tolist()
+    ref_contributions = (valid_df["refinement_score"] * STAGE_WEIGHTS["refinement"]).tolist()
     sent_contributions = (valid_df["sentiment_score"] * STAGE_WEIGHTS["sentiment"]).tolist()
     map_contributions = (valid_df["mapping_score"] * STAGE_WEIGHTS["mapping"]).tolist()
     composites = valid_df["composite"].tolist()
@@ -1543,6 +1630,24 @@ def _html_composite_section(data: BenchmarkData) -> str:
             "orientation": "h",
             "marker": {"color": "#f472b6"},
             "hovertemplate": "%{y}: %{x:.3f}<extra>Generation</extra>",
+        },
+        {
+            "name": f"Condensation ({int(STAGE_WEIGHTS['condensation'] * 100)}%)",
+            "y": models,
+            "x": cond_contributions,
+            "type": "bar",
+            "orientation": "h",
+            "marker": {"color": "#fbbf24"},
+            "hovertemplate": "%{y}: %{x:.3f}<extra>Condensation</extra>",
+        },
+        {
+            "name": f"Refinement ({int(STAGE_WEIGHTS['refinement'] * 100)}%)",
+            "y": models,
+            "x": ref_contributions,
+            "type": "bar",
+            "orientation": "h",
+            "marker": {"color": "#a78bfa"},
+            "hovertemplate": "%{y}: %{x:.3f}<extra>Refinement</extra>",
         },
         {
             "name": f"Sentiment ({int(STAGE_WEIGHTS['sentiment'] * 100)}%)",
@@ -1567,7 +1672,7 @@ def _html_composite_section(data: BenchmarkData) -> str:
     # --- Heatmap data ---
     # Columns: individual normalised metrics + stage scores + composite
     heatmap_models = list(reversed(models))  # top = best
-    heatmap_cols = ["Grnd", "Cov", "Spec", "Gen", "Sent", "Map", "TQI"]
+    heatmap_cols = ["Grnd", "Cov", "Spec", "Gen", "Cond", "Ref", "Sent", "Map", "TQI"]
     heatmap_z = []
     heatmap_text = []
 
@@ -1594,6 +1699,8 @@ def _html_composite_section(data: BenchmarkData) -> str:
             raw_values.get("coverage", float("nan")),
             raw_values.get("specificity", float("nan")),
             row_data["generation_score"],
+            row_data["condensation_score"],
+            row_data["refinement_score"],
             row_data["sentiment_score"],
             row_data["mapping_score"],
             row_data["composite"],
