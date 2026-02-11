@@ -397,6 +397,18 @@ For themes about a policy proposal:
 
 ---
 
+## Architecture Tradeoffs
+
+### Condensation: Bounded Passes vs Target-Based Loop (Feb 2026)
+
+Removed the `target_themes=50` iterative while-loop from `theme_condensation()`. Previously, condensation looped indefinitely until themes dropped below 50 -- with large datasets this meant 5-15+ sequential LLM iterations, making generation evals take 4+ hours on 900 responses.
+
+Now capped at **3 passes max**. Pass 1 always runs; passes 2-3 only fire if themes still exceed the batch size (75). The model decides organically how many themes to produce -- no artificial target count.
+
+**Quality tradeoff:** Larger datasets may produce more final themes. This is intentional. Monitor `condensation_compression_quality` and `redundancy` scores to verify quality is maintained.
+
+---
+
 ## Sources
 
 - [LLM-as-a-Judge Guide - Evidently AI](https://www.evidentlyai.com/llm-guide/llm-as-a-judge)
