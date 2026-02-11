@@ -4,7 +4,6 @@ from pydantic import ValidationError
 from themefinder.models import (
     Position,
     EvidenceRich,
-    ValidatedModel,
     Theme,
     ThemeGenerationResponses,
     CondensedTheme,
@@ -14,48 +13,6 @@ from themefinder.models import (
     DetailDetectionOutput,
     DetailDetectionResponses,
 )
-
-
-class TestValidatedModelAdditional:
-    class NestedModel(ValidatedModel):
-        attr: str
-
-    class ContainerModel(ValidatedModel):
-        items: list["TestValidatedModelAdditional.NestedModel"]
-        other_list: list[str]
-
-    class MockModel(ValidatedModel):
-        field1: str
-        field2: list[str] | None = None
-        field3: list[str] | None = None
-
-    def test_validate_unique_attribute_in_list(self):
-        model = self.ContainerModel(
-            items=[
-                self.NestedModel(attr="value1"),
-                self.NestedModel(attr="value2"),
-            ],
-            other_list=["a", "b"],
-        )
-        model.validate_unique_attribute_in_list("items", "attr")
-
-        model = self.ContainerModel(
-            items=[
-                self.NestedModel(attr="same"),
-                self.NestedModel(attr="same"),
-            ],
-            other_list=["a", "b"],
-        )
-        with pytest.raises(ValueError, match="must be unique across all items"):
-            model.validate_unique_attribute_in_list("items", "attr")
-
-    def test_validate_equal_lengths(self):
-        model = self.MockModel(field1="test", field2=["a", "b"], field3=["x", "y"])
-        model.validate_equal_lengths("field2", "field3")
-
-        model = self.MockModel(field1="test", field2=["a", "b"], field3=["x"])
-        with pytest.raises(ValueError, match="must all have the same length"):
-            model.validate_equal_lengths("field2", "field3")
 
 
 class TestTheme:
