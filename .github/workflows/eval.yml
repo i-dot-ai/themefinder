@@ -101,11 +101,22 @@ jobs:
             echo "eval_success=false" >> $GITHUB_OUTPUT
           fi
 
+          # Capture benchmark ID and summary for Slack
+          BENCHMARK_ID=$(grep "BENCHMARK_ID=" results.txt | tail -1 | cut -d= -f2)
+          echo "benchmark_id=$BENCHMARK_ID" >> $GITHUB_OUTPUT
+
+          # Extract score summary lines
+          SCORES=$(grep -E "^\s+(question|f1|accuracy)" results.txt | head -6 | sed 's/^[[:space:]]*//' | tr '\n' ' · ' || echo "")
+          echo "scores=$SCORES" >> $GITHUB_OUTPUT
+
       - name: Upload results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: eval-results-${{ github.run_id }}
-          path: evals/results.txt
+          path: |
+            evals/benchmark_results/
+            evals/results.txt
           retention-days: 90
 
       - name: Notify Slack on success
@@ -122,7 +133,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "✅ *ThemeFinder Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n*Dataset:* ${{ github.event.inputs.dataset || 'gambling_XS' }} · *Type:* ${{ github.event.inputs.eval_type || 'generation' }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                    "text": "✅ *ThemeFinder Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n*Dataset:* ${{ github.event.inputs.dataset || 'gambling_XS' }} · *Benchmark:* `${{ steps.eval.outputs.benchmark_id }}`\n${{ steps.eval.outputs.scores }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run · Download Report>"
                   }
                 }
               ]

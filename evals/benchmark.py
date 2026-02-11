@@ -1139,6 +1139,20 @@ Examples:
     # Save results
     runner.save_results()
 
+    # Generate HTML report
+    try:
+        from visualise_benchmark import generate_html_report, load_benchmark_data
+
+        data = load_benchmark_data(runner.benchmark_id, skip_langfuse=True)
+        report_path = str(runner._get_output_path() / "report.html")
+        generate_html_report(data, report_path)
+        console.print(f"[green]HTML report: {report_path}[/green]")
+    except Exception as e:
+        console.print(f"[yellow]Could not generate HTML report: {e}[/yellow]")
+
+    # Machine-parseable output for CI
+    print(f"BENCHMARK_ID={runner.benchmark_id}")
+
 
 if __name__ == "__main__":
     asyncio.run(main())
