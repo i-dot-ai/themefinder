@@ -334,7 +334,6 @@ class ThemeMappingOutput(ValidatedModel):
         """
         Run all validations for ThemeMappingOutput.
         """
-        self.validate_non_empty_fields()
         self.validate_unique_items("labels")
         return self
 
@@ -351,7 +350,6 @@ class ThemeMappingResponses(ValidatedModel):
         """
         Validate that response_ids are unique.
         """
-        self.validate_non_empty_fields()
         response_ids = [resp.response_id for resp in self.responses]
         if len(response_ids) != len(set(response_ids)):
             raise ValueError("Response IDs must be unique")

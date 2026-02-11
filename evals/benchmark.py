@@ -330,13 +330,15 @@ VERTEX_MODELS = [
         deployment="claude-haiku-4-5@20251001",
         provider=LLMProvider.VERTEX_CLAUDE,
     ),
-    # Claude models - with extended thinking (2048 token budget)
-    ModelConfig(
-        name="claude-haiku-4.5-thinking",
-        deployment="claude-haiku-4-5@20251001",
-        provider=LLMProvider.VERTEX_CLAUDE,
-        thinking_budget=2048,
-    ),
+    # Claude thinking model disabled: thinking_budget conflicts with
+    # tool_choice in ThemeFinder pipeline (structured output requires forced tool use).
+    # See: "Thinking may not be enabled when tool_choice forces tool use."
+    # ModelConfig(
+    #     name="claude-haiku-4.5-thinking",
+    #     deployment="claude-haiku-4-5@20251001",
+    #     provider=LLMProvider.VERTEX_CLAUDE,
+    #     thinking_budget=2048,
+    # ),
     # ModelConfig(
     #     name="claude-sonnet-4.5",
     #     deployment="claude-sonnet-4-5@20250929",
@@ -914,7 +916,7 @@ def query_langfuse_costs(benchmark_id: str) -> pd.DataFrame:
         client = Langfuse()
 
         # Fetch traces with benchmark tag
-        traces = client.fetch_traces(
+        traces = client.api.trace.list(
             tags=[f"benchmark:{benchmark_id}"],
             limit=1000,
         )
@@ -1057,7 +1059,19 @@ Examples:
         default=None,
         help="Azure deployment name for judge LLM (e.g. gpt-4o-2024-08-06). If set, judge evaluations use this model instead of the task model.",
     )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        help="Quick CI smoke test: gambling_XS dataset, 1 run, azure provider, gpt-4.1-mini only.",
+    )
     args = parser.parse_args()
+
+    # Apply --quick preset (overrides other args)
+    if args.quick:
+        args.dataset = "gambling_XS"
+        args.runs = 1
+        args.provider = "azure"
+        args.models = ["gpt-4.1-mini"]
 
     # Get models based on provider or specific model names
     if args.models:

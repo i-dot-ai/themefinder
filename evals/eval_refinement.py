@@ -14,7 +14,6 @@ import pandas as pd
 from datasets import DatasetConfig, load_local_data
 from langchain_openai import AzureChatOpenAI
 from evaluators import create_refinement_quality_evaluator
-from utils import read_and_render
 
 from themefinder import theme_refinement
 
@@ -67,7 +66,7 @@ async def evaluate_refinement(
     if langfuse_ctx.is_enabled:
         result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm, callbacks)
     else:
-        result = await _run_local_fallback(config, llm, callbacks)
+        result = await _run_local_fallback(config, llm, eval_llm)
 
     # Only flush if we created the context
     if owns_context:
@@ -94,7 +93,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
         print(
             f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
         )
-        return await _run_local_fallback(config, llm, callbacks)
+        return await _run_local_fallback(config, llm, eval_llm)
 
     refinement_evaluator = create_refinement_quality_evaluator(eval_llm)
 
@@ -161,24 +160,26 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
     return all_results
 
 
-async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> dict:
+async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
     """Run evaluation without Langfuse (local development).
 
     Args:
         config: DatasetConfig
-        llm: LangChain LLM instance
-        callbacks: LangChain callbacks list
+        llm: LangChain LLM instance (task model)
+        eval_llm: LangChain LLM instance (judge model)
 
     Returns:
-        Dict containing evaluation response
+        Dict containing evaluation scores
     """
     data_items = load_local_data(config)
+    refinement_evaluator = create_refinement_quality_evaluator(eval_llm)
     all_results = {}
 
     for item in data_items:
         question_part = item.get("metadata", {}).get("question_part", "unknown")
         themes_df = pd.DataFrame(item["input"]["themes"])
         question = item["input"].get("question", "")
+        original_records = themes_df.to_dict(orient="records")
 
         with langfuse_utils.trace_context(
             langfuse_utils.LangfuseContext(client=None, handler=None)
@@ -189,31 +190,22 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
                 question=question,
             )
 
-        # Qualitative evaluation via LLM
-        # Original themes have topic_label, topic_description, and combined topic
-        original_themes = themes_df[["topic_label", "topic_description"]].to_dict(
-            orient="records"
+        refined_records = refined_df.to_dict(orient="records")
+        all_results[f"{question_part}_output"] = {"refined_themes": refined_records}
+
+        # LLM-as-judge: 4-dimension quality evaluation
+        quality_results = refinement_evaluator(
+            output={"themes": refined_records},
+            expected_output={"themes": original_records},
         )
-        # Refined themes have combined topic column - parse it back for comparison
-        refined_themes = []
-        for _, row in refined_df.iterrows():
-            topic_parts = row["topic"].split(": ", 1)
-            refined_themes.append(
-                {
-                    "topic_label": topic_parts[0] if len(topic_parts) > 0 else "",
-                    "topic_description": topic_parts[1] if len(topic_parts) > 1 else "",
-                }
-            )
 
-        eval_prompt = read_and_render(
-            "refinement_eval.txt",
-            {"original_topics": original_themes, "new_topics": refined_themes},
-        )
-        response = llm.invoke(eval_prompt)
-        print(f"Theme Refinement ({question_part}): \n {response.content}")
+        for evaluation in quality_results:
+            name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
+            value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+            all_results[f"{question_part}_{name}"] = value
+            print(f"  {question_part}/{name}: {value}")
 
-        all_results[f"{question_part}_evaluation"] = response.content
-
+    print(f"Refinement Eval Results (local)")
     return all_results
 
 

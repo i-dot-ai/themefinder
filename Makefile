@@ -2,7 +2,7 @@
 
 run_evals:
 	@echo "Running quick benchmark (1 run, gpt-4.1-mini)..."
-	cd evals && uv run python benchmark.py --dataset gambling_XS --runs 1 --provider azure --models gpt-4.1-mini
+	cd evals && uv run python benchmark.py --quick
 
 run_benchmark:
 	@echo "Running full benchmark..."

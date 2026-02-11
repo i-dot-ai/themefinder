@@ -88,14 +88,10 @@ jobs:
 
           if [ "$EVAL_TYPE" = "all" ]; then
             echo "Running all evals for $DATASET..."
-            uv run python eval_generation.py --dataset "$DATASET" 2>&1 | tee results.txt
-            uv run python eval_condensation.py --dataset "$DATASET" 2>&1 | tee -a results.txt
-            uv run python eval_refinement.py --dataset "$DATASET" 2>&1 | tee -a results.txt
-            uv run python eval_sentiment.py --dataset "$DATASET" 2>&1 | tee -a results.txt
-            uv run python eval_mapping.py --dataset "$DATASET" 2>&1 | tee -a results.txt
+            uv run python benchmark.py --quick 2>&1 | tee results.txt
           else
             echo "Running $EVAL_TYPE eval for $DATASET..."
-            uv run python "eval_${EVAL_TYPE}.py" --dataset "$DATASET" 2>&1 | tee results.txt
+            uv run python benchmark.py --quick --evals "$EVAL_TYPE" 2>&1 | tee results.txt
           fi
 
           # Check for successful eval output

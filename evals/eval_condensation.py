@@ -15,7 +15,6 @@ import pandas as pd
 from datasets import DatasetConfig, load_local_data
 from evaluators import calculate_redundancy_score, create_condensation_quality_evaluator
 from langchain_openai import AzureChatOpenAI
-from utils import read_and_render
 
 from themefinder import theme_condensation
 
@@ -68,7 +67,7 @@ async def evaluate_condensation(
     if langfuse_ctx.is_enabled:
         result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm, callbacks)
     else:
-        result = await _run_local_fallback(config, llm, callbacks)
+        result = await _run_local_fallback(config, llm, eval_llm)
 
     # Only flush if we created the context
     if owns_context:
@@ -95,7 +94,7 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
         print(
             f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
         )
-        return await _run_local_fallback(config, llm, callbacks)
+        return await _run_local_fallback(config, llm, eval_llm)
 
     condensation_evaluator = create_condensation_quality_evaluator(eval_llm)
 
@@ -179,24 +178,26 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
     return all_results
 
 
-async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> dict:
+async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
     """Run evaluation without Langfuse (local development).
 
     Args:
         config: DatasetConfig
-        llm: LangChain LLM instance
-        callbacks: LangChain callbacks list
+        llm: LangChain LLM instance (task model)
+        eval_llm: LangChain LLM instance (judge model)
 
     Returns:
-        Dict containing evaluation response
+        Dict containing evaluation scores
     """
     data_items = load_local_data(config)
+    condensation_evaluator = create_condensation_quality_evaluator(eval_llm)
     all_results = {}
 
     for item in data_items:
         question_part = item.get("metadata", {}).get("question_part", "unknown")
         themes_df = pd.DataFrame(item["input"]["themes"])
         question = item["input"]["question"]
+        original_records = themes_df.to_dict(orient="records")
 
         with langfuse_utils.trace_context(
             langfuse_utils.LangfuseContext(client=None, handler=None)
@@ -207,23 +208,26 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
                 question=question,
             )
 
-        # Qualitative evaluation via LLM
-        original_themes = themes_df[["topic_label", "topic_description"]].to_dict(
-            orient="records"
-        )
-        condensed_themes = condensed_df[["topic_label", "topic_description"]].to_dict(
-            orient="records"
+        condensed_records = condensed_df.to_dict(orient="records")
+        all_results[f"{question_part}_output"] = {"condensed_themes": condensed_records}
+
+        # LLM-as-judge: compression quality + information retention
+        quality_results = condensation_evaluator(
+            output={"themes": condensed_records},
+            expected_output={"themes": original_records},
         )
 
-        eval_prompt = read_and_render(
-            "condensation_eval.txt",
-            {"original_topics": original_themes, "condensed_topics": condensed_themes},
-        )
-        response = llm.invoke(eval_prompt)
-        print(f"Theme Condensation ({question_part}): \n {response.content}")
+        for evaluation in quality_results:
+            name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
+            value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+            all_results[f"{question_part}_{name}"] = value
+            print(f"  {question_part}/{name}: {value}")
 
-        all_results[f"{question_part}_evaluation"] = response.content
+        # Redundancy score
+        redundancy = calculate_redundancy_score(condensed_records)
+        all_results[f"{question_part}_redundancy"] = round(redundancy["ratio"], 2)
 
+    print(f"Condensation Eval Results (local)")
     return all_results
 
 
