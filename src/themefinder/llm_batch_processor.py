@@ -290,26 +290,9 @@ async def call_llm(
     llm: Runnable,
     concurrency: int = 10,
     integrity_check: bool = False,
-    max_conversation_retries: int = 5,
     config: RunnableConfig | None = None,
 ) -> tuple[list[dict], list[int]]:
-    """Process multiple batches of prompts concurrently through an LLM with retry logic.
-
-    When integrity_check is True and response IDs are missing, uses conversational
-    retry to ask the LLM to complete the missing IDs before falling back to
-    single-batch retry.
-
-    Args:
-        batch_prompts: List of BatchPrompt objects to process.
-        llm: LangChain Runnable (typically with structured output).
-        concurrency: Maximum concurrent LLM calls.
-        integrity_check: If True, verify all response IDs are returned.
-        max_conversation_retries: Maximum conversational retry attempts when
-            IDs are missing (default 5).
-
-    Returns:
-        Tuple of (processed responses, failed response IDs).
-    """
+    """Process multiple batches of prompts concurrently through an LLM with retry logic."""
     semaphore = asyncio.Semaphore(concurrency)
 
     @retry(
@@ -342,68 +325,13 @@ async def call_llm(
                 logger.warning(e)
                 return [], batch_prompt.response_ids
 
-            if not integrity_check:
-                return responses, []
-
-            # Check for missing response IDs and use conversational retry
-            missing_ids = get_missing_response_ids(
-                batch_prompt.response_ids, all_results
-            )
-
-            if not missing_ids:
-                return responses, []
-
-            # Conversational retry: tell the LLM what's missing and ask it to complete
-            collected_responses = list(responses)
-            conversation_history = [batch_prompt.prompt_string]
-
-            for retry_attempt in range(max_conversation_retries):
-                if not missing_ids:
-                    break
-
-                logger.info(
-                    f"Conversational retry {retry_attempt + 1}/{max_conversation_retries}: "
-                    f"asking for {len(missing_ids)} missing response IDs"
+            if integrity_check:
+                failed_ids = get_missing_response_ids(
+                    batch_prompt.response_ids, all_results
                 )
-
-                # Build follow-up message
-                follow_up = _build_missing_ids_message(missing_ids)
-                conversation_history.append(follow_up)
-
-                try:
-                    # Re-invoke with the follow-up request
-                    retry_response = await llm.ainvoke(follow_up, config=config)
-                    retry_results = (
-                        retry_response.dict()
-                        if hasattr(retry_response, "dict")
-                        else retry_response
-                    )
-                    retry_responses = (
-                        retry_results["responses"]
-                        if isinstance(retry_results, dict)
-                        else retry_results.responses
-                    )
-
-                    # Collect only genuinely new responses (deduplicate by response_id)
-                    existing_ids = {int(r["response_id"]) for r in collected_responses}
-                    new_responses = [
-                        r
-                        for r in retry_responses
-                        if int(r["response_id"]) not in existing_ids
-                    ]
-                    collected_responses.extend(new_responses)
-
-                    # Check what's still missing
-                    all_collected = {"responses": collected_responses}
-                    missing_ids = get_missing_response_ids(
-                        batch_prompt.response_ids, all_collected
-                    )
-
-                except (openai.BadRequestError, ValueError, ValidationError) as e:
-                    logger.warning(f"Conversational retry failed: {e}")
-                    break
-
-            return collected_responses, missing_ids
+                return responses, failed_ids
+            else:
+                return responses, []
 
     results = await asyncio.gather(
         *[async_llm_call(batch_prompt) for batch_prompt in batch_prompts]
@@ -416,23 +344,6 @@ async def call_llm(
     ]
 
     return valid_inputs, failed_response_ids
-
-
-def _build_missing_ids_message(missing_ids: list[int]) -> str:
-    """Build a follow-up message asking the LLM to provide missing response IDs.
-
-    Args:
-        missing_ids: List of response IDs that were not returned.
-
-    Returns:
-        Formatted message requesting the missing responses.
-    """
-    ids_str = ", ".join(str(id) for id in sorted(missing_ids))
-    return (
-        f"Your previous response was missing outputs for the following response IDs: {ids_str}\n\n"
-        f"Please provide the analysis for ONLY these {len(missing_ids)} missing response IDs. "
-        f"Use the exact same output format as before."
-    )
 
 
 def get_missing_response_ids(
@@ -491,7 +402,6 @@ def process_llm_responses(
 def calculate_string_token_length(input_text: str, model: str = None) -> int:
     """
     Calculates the number of tokens in a given string using the specified model's tokenizer.
-    Falls back to character-based estimation for non-OpenAI models.
 
     Args:
         input_text (str): The input string to tokenize.
@@ -501,13 +411,11 @@ def calculate_string_token_length(input_text: str, model: str = None) -> int:
     Returns:
         int: The number of tokens in the input string.
     """
+    # Use the MODEL_NAME env var if no model is provided; otherwise default to "gpt-4o"
     model = model or os.environ.get("MODEL_NAME", "gpt-4o")
-    try:
-        tokenizer_encoding = tiktoken.encoding_for_model(model)
-        return len(tokenizer_encoding.encode(input_text))
-    except KeyError:
-        # Fallback for non-OpenAI models: ~4 characters per token
-        return len(input_text) // 4
+    tokenizer_encoding = tiktoken.encoding_for_model(model)
+    number_of_tokens = len(tokenizer_encoding.encode(input_text))
+    return number_of_tokens
 
 
 def build_prompt(
