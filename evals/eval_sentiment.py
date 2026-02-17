@@ -114,7 +114,11 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm) -> dict:
                 zip(
                     result_df["response_id"].astype(str),
                     result_df["position"].map(
-                        {"DISAGREEMENT": "DISAGREE", "AGREEMENT": "AGREE", "UNCLEAR": "UNCLEAR"}
+                        {
+                            "DISAGREEMENT": "DISAGREE",
+                            "AGREEMENT": "AGREE",
+                            "UNCLEAR": "UNCLEAR",
+                        }
                     ),
                 )
             )

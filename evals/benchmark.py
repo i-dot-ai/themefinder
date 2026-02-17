@@ -28,16 +28,6 @@ import asyncio
 import json
 import logging
 import os
-
-import nest_asyncio
-
-# Allow nested asyncio.run() calls (needed by eval modules)
-nest_asyncio.apply()
-
-# Fix DNS resolution issues with gRPC 1.58.0+ (must be set before gRPC imports)
-# Switches from buggy C-ares resolver to native resolver
-os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
-
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -47,11 +37,19 @@ from pathlib import Path
 from typing import Any
 
 import dotenv
+import nest_asyncio
 import pandas as pd
 from langchain_core.runnables import Runnable
 from langchain_openai import AzureChatOpenAI
 from rich.console import Console
 from rich.table import Table
+
+# Allow nested asyncio.run() calls (needed by eval modules)
+nest_asyncio.apply()
+
+# Fix DNS resolution issues with gRPC 1.58.0+ (must be set before gRPC imports)
+# Switches from buggy C-ares resolver to native resolver
+os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
 
 
 class LLMProvider(str, Enum):
@@ -62,12 +60,12 @@ class LLMProvider(str, Enum):
     VERTEX_CLAUDE = "vertex_claude"
 
 
-import langfuse_utils
-from eval_condensation import evaluate_condensation
-from eval_generation import evaluate_generation
-from eval_mapping import evaluate_mapping
-from eval_refinement import evaluate_refinement
-from eval_sentiment import evaluate_sentiment
+import langfuse_utils  # noqa: E402
+from eval_condensation import evaluate_condensation  # noqa: E402
+from eval_generation import evaluate_generation  # noqa: E402
+from eval_mapping import evaluate_mapping  # noqa: E402
+from eval_refinement import evaluate_refinement  # noqa: E402
+from eval_sentiment import evaluate_sentiment  # noqa: E402
 
 console = Console()
 
@@ -373,7 +371,9 @@ class BenchmarkConfig:
             "refinement",
         ]
     )
-    judge_model: str | None = None  # Azure deployment name for judge LLM (e.g. "gpt-4o-2024-08-06")
+    judge_model: str | None = (
+        None  # Azure deployment name for judge LLM (e.g. "gpt-4o-2024-08-06")
+    )
 
 
 @dataclass
@@ -389,7 +389,9 @@ class RunResult:
     scores: dict[str, float]
     timestamp: datetime
     duration_seconds: float = 0.0  # Wall-clock duration of eval
-    outputs: dict[str, Any] = field(default_factory=dict)  # Non-numeric pipeline outputs
+    outputs: dict[str, Any] = field(
+        default_factory=dict
+    )  # Non-numeric pipeline outputs
 
     # Token metrics (from Langfuse)
     input_tokens: int = 0
@@ -417,11 +419,13 @@ class BenchmarkRunner:
         log_path = self._get_output_path() / "benchmark.log"
         handler = logging.FileHandler(log_path, encoding="utf-8")
         handler.setLevel(logging.INFO)
-        handler.setFormatter(_SingleLineFormatter(
-            "%(asctime)s | %(eval_type)s | %(model_name)s | run:%(run_number)s"
-            " | %(levelname)s | %(name)s | %(message)s",
-            datefmt="%Y-%m-%d %H:%M:%S",
-        ))
+        handler.setFormatter(
+            _SingleLineFormatter(
+                "%(asctime)s | %(eval_type)s | %(model_name)s | run:%(run_number)s"
+                " | %(levelname)s | %(name)s | %(message)s",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
+        )
         handler.addFilter(BenchmarkLogFilter())
         return handler
 
@@ -465,7 +469,7 @@ class BenchmarkRunner:
             f"  Models: {len(self.config.models)} across {len(deployment_groups)} deployments"
         )
         console.print(
-            f"  Strategy: [bold]parallel by deployment, sequential within[/bold]"
+            "  Strategy: [bold]parallel by deployment, sequential within[/bold]"
         )
         console.print(f"  Runs per model: {self.config.runs_per_model}")
         console.print(f"  Evals: {', '.join(self.config.evals)}")
@@ -523,7 +527,6 @@ class BenchmarkRunner:
                     # Retry loop for transient network errors
                     max_eval_retries = 3
                     retry_delay = 2.0
-                    last_error = None
 
                     for attempt in range(max_eval_retries):
                         try:
@@ -544,7 +547,6 @@ class BenchmarkRunner:
                             break  # Success, exit retry loop
 
                         except Exception as e:
-                            last_error = e
                             error_str = str(e)
 
                             # Check if error is retryable (transient network issues)
@@ -592,9 +594,7 @@ class BenchmarkRunner:
         token = _benchmark_context.set((model_config.name, eval_type, run_number))
         try:
             return await asyncio.wait_for(
-                self._execute_eval(
-                    model_config, run_number, eval_type, error_counter
-                ),
+                self._execute_eval(model_config, run_number, eval_type, error_counter),
                 timeout=1200,
             )
         finally:
@@ -1117,7 +1117,7 @@ Examples:
 
     # Print configuration summary
     providers_used = sorted(set(m.provider.value for m in models))
-    console.print(f"\n[bold cyan]ThemeFinder Benchmark[/bold cyan]")
+    console.print("\n[bold cyan]ThemeFinder Benchmark[/bold cyan]")
     console.print(f"  Provider(s): {', '.join(providers_used)}")
     console.print(f"  Models: {[m.name for m in models]}")
     if any(m.provider != LLMProvider.AZURE_OPENAI for m in models):

@@ -73,7 +73,9 @@ async def evaluate_generation(
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(langfuse_ctx, config, llm, callbacks, judge_llm=judge_llm)
+        result = await _run_with_langfuse(
+            langfuse_ctx, config, llm, callbacks, judge_llm=judge_llm
+        )
     else:
         result = await _run_local_fallback(config, llm, callbacks)
 
@@ -83,7 +85,9 @@ async def evaluate_generation(
     return result
 
 
-async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list, judge_llm=None) -> dict:
+async def _run_with_langfuse(
+    ctx, config: DatasetConfig, llm, callbacks: list, judge_llm=None
+) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
@@ -160,7 +164,11 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list, j
 
             # Run LLM-based evaluators concurrently (copy context per task for logging)
             loop = asyncio.get_event_loop()
-            llm_evaluators = [groundedness_evaluator, coverage_evaluator, specificity_evaluator]
+            llm_evaluators = [
+                groundedness_evaluator,
+                coverage_evaluator,
+                specificity_evaluator,
+            ]
             llm_tasks = [
                 loop.run_in_executor(
                     None,
@@ -180,7 +188,9 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list, j
                 )
             except asyncio.TimeoutError:
                 logger.error("LLM evaluators timed out after 300s")
-                llm_results = [TimeoutError("LLM evaluators timed out")] * len(llm_evaluators)
+                llm_results = [TimeoutError("LLM evaluators timed out")] * len(
+                    llm_evaluators
+                )
 
             # Run redundancy evaluator synchronously (embedding-based, no LLM call)
             redundancy_result = redundancy_evaluator(
@@ -218,7 +228,9 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, callbacks: list, j
 
                 # Collect for return
                 if isinstance(eval_result, dict):
-                    all_scores[f"{item_key}_{eval_result.get('name', 'unknown')}"] = eval_result.get("value", 0.0)
+                    all_scores[f"{item_key}_{eval_result.get('name', 'unknown')}"] = (
+                        eval_result.get("value", 0.0)
+                    )
                 else:
                     all_scores[f"{item_key}_{eval_result.name}"] = eval_result.value
 

@@ -12,8 +12,8 @@ import dotenv
 import langfuse_utils
 import pandas as pd
 from datasets import DatasetConfig, load_local_data
-from langchain_openai import AzureChatOpenAI
 from evaluators import create_refinement_quality_evaluator
+from langchain_openai import AzureChatOpenAI
 
 from themefinder import theme_refinement
 
@@ -64,7 +64,9 @@ async def evaluate_refinement(
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm, callbacks)
+        result = await _run_with_langfuse(
+            langfuse_ctx, config, llm, eval_llm, callbacks
+        )
     else:
         result = await _run_local_fallback(config, llm, eval_llm)
 
@@ -74,7 +76,9 @@ async def evaluate_refinement(
     return result
 
 
-async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callbacks: list) -> dict:
+async def _run_with_langfuse(
+    ctx, config: DatasetConfig, llm, eval_llm, callbacks: list
+) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
@@ -133,9 +137,21 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
 
             # Record each evaluation as a Langfuse score
             for evaluation in quality_results:
-                score_name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
-                score_value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
-                score_comment = evaluation.get("comment", "") if isinstance(evaluation, dict) else evaluation.comment
+                score_name = (
+                    evaluation.get("name", "")
+                    if isinstance(evaluation, dict)
+                    else evaluation.name
+                )
+                score_value = (
+                    evaluation.get("value", 0.0)
+                    if isinstance(evaluation, dict)
+                    else evaluation.value
+                )
+                score_comment = (
+                    evaluation.get("comment", "")
+                    if isinstance(evaluation, dict)
+                    else evaluation.comment
+                )
 
                 if trace_id and ctx.client:
                     ctx.client.create_score(
@@ -152,8 +168,16 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
 
             # Add quality scores to results (numeric — will go to CSV columns)
             for evaluation in quality_results:
-                name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
-                value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+                name = (
+                    evaluation.get("name", "")
+                    if isinstance(evaluation, dict)
+                    else evaluation.name
+                )
+                value = (
+                    evaluation.get("value", 0.0)
+                    if isinstance(evaluation, dict)
+                    else evaluation.value
+                )
                 all_results[f"{item_key}_{name}"] = value
 
     print(f"Refinement Eval Results: {ctx.session_id}")
@@ -200,12 +224,20 @@ async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
         )
 
         for evaluation in quality_results:
-            name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
-            value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+            name = (
+                evaluation.get("name", "")
+                if isinstance(evaluation, dict)
+                else evaluation.name
+            )
+            value = (
+                evaluation.get("value", 0.0)
+                if isinstance(evaluation, dict)
+                else evaluation.value
+            )
             all_results[f"{question_part}_{name}"] = value
             print(f"  {question_part}/{name}: {value}")
 
-    print(f"Refinement Eval Results (local)")
+    print("Refinement Eval Results (local)")
     return all_results
 
 

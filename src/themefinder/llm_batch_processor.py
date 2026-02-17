@@ -322,7 +322,9 @@ async def call_llm(
     async def async_llm_call(batch_prompt) -> tuple[list[dict], list[int]]:
         async with semaphore:
             try:
-                llm_response = await llm.ainvoke(batch_prompt.prompt_string, config=config)
+                llm_response = await llm.ainvoke(
+                    batch_prompt.prompt_string, config=config
+                )
                 all_results = (
                     llm_response.dict()
                     if hasattr(llm_response, "dict")
@@ -383,9 +385,7 @@ async def call_llm(
                     )
 
                     # Collect only genuinely new responses (deduplicate by response_id)
-                    existing_ids = {
-                        int(r["response_id"]) for r in collected_responses
-                    }
+                    existing_ids = {int(r["response_id"]) for r in collected_responses}
                     new_responses = [
                         r
                         for r in retry_responses

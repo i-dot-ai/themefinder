@@ -516,16 +516,18 @@ def calculate_consistency_metrics(data: BenchmarkData) -> pd.DataFrame:
                 std_val = float(np.std(all_values, ddof=1))
                 cv = std_val / mean_val if mean_val > 0 else 0.0
 
-                rows.append({
-                    "model_tag": model,
-                    "eval": eval_type,
-                    "metric": metric_group,
-                    "mean": round(mean_val, 3),
-                    "std": round(std_val, 3),
-                    "cv": round(cv, 3),
-                    "n": len(all_values),
-                    "flagged": cv > 0.15,
-                })
+                rows.append(
+                    {
+                        "model_tag": model,
+                        "eval": eval_type,
+                        "metric": metric_group,
+                        "mean": round(mean_val, 3),
+                        "std": round(std_val, 3),
+                        "cv": round(cv, 3),
+                        "n": len(all_values),
+                        "flagged": cv > 0.15,
+                    }
+                )
 
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -633,24 +635,45 @@ def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
         # --- Generation stage score ---
         gen_metrics = data.detected_metrics.get("generation", {})
         gen_df = model_df[model_df["eval"] == "generation"]
-        scores["generation"] = _weighted_stage_score(
-            gen_df, gen_metrics, GENERATION_WEIGHTS, GENERATION_SCALE,
-        ) if not gen_df.empty and gen_metrics else None
+        scores["generation"] = (
+            _weighted_stage_score(
+                gen_df,
+                gen_metrics,
+                GENERATION_WEIGHTS,
+                GENERATION_SCALE,
+            )
+            if not gen_df.empty and gen_metrics
+            else None
+        )
 
         # --- Condensation stage score ---
         cond_metrics = data.detected_metrics.get("condensation", {})
         cond_df = model_df[model_df["eval"] == "condensation"]
-        scores["condensation"] = _weighted_stage_score(
-            cond_df, cond_metrics, CONDENSATION_WEIGHTS, CONDENSATION_SCALE,
-            invert={"redundancy_inv"},
-        ) if not cond_df.empty and cond_metrics else None
+        scores["condensation"] = (
+            _weighted_stage_score(
+                cond_df,
+                cond_metrics,
+                CONDENSATION_WEIGHTS,
+                CONDENSATION_SCALE,
+                invert={"redundancy_inv"},
+            )
+            if not cond_df.empty and cond_metrics
+            else None
+        )
 
         # --- Refinement stage score ---
         ref_metrics = data.detected_metrics.get("refinement", {})
         ref_df = model_df[model_df["eval"] == "refinement"]
-        scores["refinement"] = _weighted_stage_score(
-            ref_df, ref_metrics, REFINEMENT_WEIGHTS, REFINEMENT_SCALE,
-        ) if not ref_df.empty and ref_metrics else None
+        scores["refinement"] = (
+            _weighted_stage_score(
+                ref_df,
+                ref_metrics,
+                REFINEMENT_WEIGHTS,
+                REFINEMENT_SCALE,
+            )
+            if not ref_df.empty and ref_metrics
+            else None
+        )
 
         # --- Sentiment stage score ---
         sent_metrics = data.detected_metrics.get("sentiment", {})
@@ -677,20 +700,23 @@ def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
         # --- Composite ---
         if all(scores[s] is not None for s in STAGE_WEIGHTS):
             composite = sum(
-                STAGE_WEIGHTS[s] * scores[s] for s in STAGE_WEIGHTS  # type: ignore[operator]
+                STAGE_WEIGHTS[s] * scores[s]
+                for s in STAGE_WEIGHTS  # type: ignore[operator]
             )
         else:
             composite = None
 
-        rows.append({
-            "model_tag": model,
-            "generation_score": scores["generation"],
-            "condensation_score": scores["condensation"],
-            "refinement_score": scores["refinement"],
-            "sentiment_score": scores["sentiment"],
-            "mapping_score": scores["mapping"],
-            "composite": composite,
-        })
+        rows.append(
+            {
+                "model_tag": model,
+                "generation_score": scores["generation"],
+                "condensation_score": scores["condensation"],
+                "refinement_score": scores["refinement"],
+                "sentiment_score": scores["sentiment"],
+                "mapping_score": scores["mapping"],
+                "composite": composite,
+            }
+        )
 
     return pd.DataFrame(rows) if rows else pd.DataFrame()
 
@@ -849,13 +875,29 @@ def print_composite_table(data: BenchmarkData) -> None:
     table.add_column("TQI", justify="right", style="bold")
 
     # Sort by composite descending
-    composite_df = composite_df.sort_values("composite", ascending=False, na_position="last")
+    composite_df = composite_df.sort_values(
+        "composite", ascending=False, na_position="last"
+    )
 
     for _, row in composite_df.iterrows():
-        gen = f"{row['generation_score']:.3f}" if pd.notna(row["generation_score"]) else "-"
-        cond = f"{row['condensation_score']:.3f}" if pd.notna(row["condensation_score"]) else "-"
-        ref = f"{row['refinement_score']:.3f}" if pd.notna(row["refinement_score"]) else "-"
-        sent = f"{row['sentiment_score']:.3f}" if pd.notna(row["sentiment_score"]) else "-"
+        gen = (
+            f"{row['generation_score']:.3f}"
+            if pd.notna(row["generation_score"])
+            else "-"
+        )
+        cond = (
+            f"{row['condensation_score']:.3f}"
+            if pd.notna(row["condensation_score"])
+            else "-"
+        )
+        ref = (
+            f"{row['refinement_score']:.3f}"
+            if pd.notna(row["refinement_score"])
+            else "-"
+        )
+        sent = (
+            f"{row['sentiment_score']:.3f}" if pd.notna(row["sentiment_score"]) else "-"
+        )
         mapp = f"{row['mapping_score']:.3f}" if pd.notna(row["mapping_score"]) else "-"
         tqi = f"{row['composite']:.3f}" if pd.notna(row["composite"]) else "-"
         table.add_row(row["model_tag"], gen, cond, ref, sent, mapp, tqi)
@@ -1160,10 +1202,14 @@ def _html_model_summary_table(data: BenchmarkData) -> str:
         # TQI composite score
         if has_composite:
             model_composite = composite_df[composite_df["model_tag"] == model]
-            if not model_composite.empty and pd.notna(model_composite["composite"].values[0]):
+            if not model_composite.empty and pd.notna(
+                model_composite["composite"].values[0]
+            ):
                 tqi = model_composite["composite"].values[0]
                 css_class = "good" if tqi >= 0.8 else "medium" if tqi >= 0.6 else "poor"
-                cells.append(f"<td class='num {css_class}'><strong>{tqi:.3f}</strong></td>")
+                cells.append(
+                    f"<td class='num {css_class}'><strong>{tqi:.3f}</strong></td>"
+                )
             else:
                 cells.append("<td class='num'>-</td>")
 
@@ -1242,7 +1288,7 @@ def _html_cost_latency_charts(
 ) -> str:
     """Generate compact cost and latency charts in a grid."""
     has_cost = model_costs and any(c > 0 for c in model_costs)
-    has_latency = model_latencies and any(l > 0 for l in model_latencies)
+    has_latency = model_latencies and any(latency > 0 for latency in model_latencies)
 
     if not has_cost and not has_latency:
         return ""
@@ -1303,7 +1349,7 @@ def _html_cost_latency_charts(
             y: {json.dumps(model_latencies)},
             type: 'bar',
             marker: {{color: '#38bdf8'}},
-            text: {json.dumps([f"{l:.0f}s" for l in model_latencies])},
+            text: {json.dumps([f"{latency:.0f}s" for latency in model_latencies])},
             textposition: 'outside',
             textfont: {{size: 10, family: 'Roboto Mono'}}
         }}], Object.assign({{}}, chartLayout, {{yaxis: Object.assign({{}}, chartLayout.yaxis, {{title: 'Seconds'}})}}), chartConfig);
@@ -1607,67 +1653,78 @@ def _html_composite_section(data: BenchmarkData) -> str:
 
     # Filter to models with complete composite scores, sort by TQI descending
     valid_df = composite_df.dropna(subset=["composite"]).sort_values(
-        "composite", ascending=True  # ascending for horizontal bar (bottom = best)
+        "composite",
+        ascending=True,  # ascending for horizontal bar (bottom = best)
     )
     if valid_df.empty:
         return ""
 
     models = valid_df["model_tag"].tolist()
-    gen_contributions = (valid_df["generation_score"] * STAGE_WEIGHTS["generation"]).tolist()
-    cond_contributions = (valid_df["condensation_score"] * STAGE_WEIGHTS["condensation"]).tolist()
-    ref_contributions = (valid_df["refinement_score"] * STAGE_WEIGHTS["refinement"]).tolist()
-    sent_contributions = (valid_df["sentiment_score"] * STAGE_WEIGHTS["sentiment"]).tolist()
+    gen_contributions = (
+        valid_df["generation_score"] * STAGE_WEIGHTS["generation"]
+    ).tolist()
+    cond_contributions = (
+        valid_df["condensation_score"] * STAGE_WEIGHTS["condensation"]
+    ).tolist()
+    ref_contributions = (
+        valid_df["refinement_score"] * STAGE_WEIGHTS["refinement"]
+    ).tolist()
+    sent_contributions = (
+        valid_df["sentiment_score"] * STAGE_WEIGHTS["sentiment"]
+    ).tolist()
     map_contributions = (valid_df["mapping_score"] * STAGE_WEIGHTS["mapping"]).tolist()
     composites = valid_df["composite"].tolist()
 
     # --- Stacked bar chart data ---
-    stacked_traces = json.dumps([
-        {
-            "name": f"Generation ({int(STAGE_WEIGHTS['generation'] * 100)}%)",
-            "y": models,
-            "x": gen_contributions,
-            "type": "bar",
-            "orientation": "h",
-            "marker": {"color": "#f472b6"},
-            "hovertemplate": "%{y}: %{x:.3f}<extra>Generation</extra>",
-        },
-        {
-            "name": f"Condensation ({int(STAGE_WEIGHTS['condensation'] * 100)}%)",
-            "y": models,
-            "x": cond_contributions,
-            "type": "bar",
-            "orientation": "h",
-            "marker": {"color": "#fbbf24"},
-            "hovertemplate": "%{y}: %{x:.3f}<extra>Condensation</extra>",
-        },
-        {
-            "name": f"Refinement ({int(STAGE_WEIGHTS['refinement'] * 100)}%)",
-            "y": models,
-            "x": ref_contributions,
-            "type": "bar",
-            "orientation": "h",
-            "marker": {"color": "#a78bfa"},
-            "hovertemplate": "%{y}: %{x:.3f}<extra>Refinement</extra>",
-        },
-        {
-            "name": f"Sentiment ({int(STAGE_WEIGHTS['sentiment'] * 100)}%)",
-            "y": models,
-            "x": sent_contributions,
-            "type": "bar",
-            "orientation": "h",
-            "marker": {"color": "#38bdf8"},
-            "hovertemplate": "%{y}: %{x:.3f}<extra>Sentiment</extra>",
-        },
-        {
-            "name": f"Mapping ({int(STAGE_WEIGHTS['mapping'] * 100)}%)",
-            "y": models,
-            "x": map_contributions,
-            "type": "bar",
-            "orientation": "h",
-            "marker": {"color": "#4ade80"},
-            "hovertemplate": "%{y}: %{x:.3f}<extra>Mapping</extra>",
-        },
-    ])
+    stacked_traces = json.dumps(
+        [
+            {
+                "name": f"Generation ({int(STAGE_WEIGHTS['generation'] * 100)}%)",
+                "y": models,
+                "x": gen_contributions,
+                "type": "bar",
+                "orientation": "h",
+                "marker": {"color": "#f472b6"},
+                "hovertemplate": "%{y}: %{x:.3f}<extra>Generation</extra>",
+            },
+            {
+                "name": f"Condensation ({int(STAGE_WEIGHTS['condensation'] * 100)}%)",
+                "y": models,
+                "x": cond_contributions,
+                "type": "bar",
+                "orientation": "h",
+                "marker": {"color": "#fbbf24"},
+                "hovertemplate": "%{y}: %{x:.3f}<extra>Condensation</extra>",
+            },
+            {
+                "name": f"Refinement ({int(STAGE_WEIGHTS['refinement'] * 100)}%)",
+                "y": models,
+                "x": ref_contributions,
+                "type": "bar",
+                "orientation": "h",
+                "marker": {"color": "#a78bfa"},
+                "hovertemplate": "%{y}: %{x:.3f}<extra>Refinement</extra>",
+            },
+            {
+                "name": f"Sentiment ({int(STAGE_WEIGHTS['sentiment'] * 100)}%)",
+                "y": models,
+                "x": sent_contributions,
+                "type": "bar",
+                "orientation": "h",
+                "marker": {"color": "#38bdf8"},
+                "hovertemplate": "%{y}: %{x:.3f}<extra>Sentiment</extra>",
+            },
+            {
+                "name": f"Mapping ({int(STAGE_WEIGHTS['mapping'] * 100)}%)",
+                "y": models,
+                "x": map_contributions,
+                "type": "bar",
+                "orientation": "h",
+                "marker": {"color": "#4ade80"},
+                "hovertemplate": "%{y}: %{x:.3f}<extra>Mapping</extra>",
+            },
+        ]
+    )
 
     # --- Heatmap data ---
     # Columns: individual normalised metrics + stage scores + composite
@@ -1709,36 +1766,45 @@ def _html_composite_section(data: BenchmarkData) -> str:
         heatmap_z.append(z_row)
         heatmap_text.append(text_row)
 
-    heatmap_trace = json.dumps([{
-        "z": heatmap_z,
-        "x": heatmap_cols,
-        "y": heatmap_models,
-        "type": "heatmap",
-        "colorscale": [
-            [0.0, "#0f172a"], [0.4, "#1e3a5f"], [0.6, "#2563eb"],
-            [0.8, "#38bdf8"], [1.0, "#4ade80"],
-        ],
-        "zmin": 0,
-        "zmax": 1,
-        "text": heatmap_text,
-        "texttemplate": "%{text}",
-        "textfont": {"size": 11, "family": "Roboto Mono", "color": "#e2e8f0"},
-        "hovertemplate": "%{y} | %{x}: %{z:.3f}<extra></extra>",
-        "showscale": False,
-    }])
+    heatmap_trace = json.dumps(
+        [
+            {
+                "z": heatmap_z,
+                "x": heatmap_cols,
+                "y": heatmap_models,
+                "type": "heatmap",
+                "colorscale": [
+                    [0.0, "#0f172a"],
+                    [0.4, "#1e3a5f"],
+                    [0.6, "#2563eb"],
+                    [0.8, "#38bdf8"],
+                    [1.0, "#4ade80"],
+                ],
+                "zmin": 0,
+                "zmax": 1,
+                "text": heatmap_text,
+                "texttemplate": "%{text}",
+                "textfont": {"size": 11, "family": "Roboto Mono", "color": "#e2e8f0"},
+                "hovertemplate": "%{y} | %{x}: %{z:.3f}<extra></extra>",
+                "showscale": False,
+            }
+        ]
+    )
 
     # Composite annotation labels at end of each bar
-    annotations = json.dumps([
-        {
-            "x": composites[i],
-            "y": models[i],
-            "text": f"  {composites[i]:.3f}",
-            "showarrow": False,
-            "xanchor": "left",
-            "font": {"size": 11, "color": "#e2e8f0", "family": "Roboto Mono"},
-        }
-        for i in range(len(models))
-    ])
+    annotations = json.dumps(
+        [
+            {
+                "x": composites[i],
+                "y": models[i],
+                "text": f"  {composites[i]:.3f}",
+                "showarrow": False,
+                "xanchor": "left",
+                "font": {"size": 11, "color": "#e2e8f0", "family": "Roboto Mono"},
+            }
+            for i in range(len(models))
+        ]
+    )
 
     bar_height = max(200, len(models) * 50)
     heatmap_height = max(180, len(heatmap_models) * 40 + 60)

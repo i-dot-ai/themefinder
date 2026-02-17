@@ -119,7 +119,9 @@ async def _run_with_langfuse(
                 refined_themes_df=topics_df,
             )
             if not unprocessable_df.empty:
-                print(f"  Warning: {len(unprocessable_df)} responses could not be processed")
+                print(
+                    f"  Warning: {len(unprocessable_df)} responses could not be processed"
+                )
 
             # Build labels map
             labels = dict(
@@ -199,7 +201,9 @@ async def _run_local_fallback(
             refined_themes_df=topics_df[["topic_id", "topic"]],
         )
         if not unprocessable_df.empty:
-            print(f"  Warning: {len(unprocessable_df)} responses could not be processed")
+            print(
+                f"  Warning: {len(unprocessable_df)} responses could not be processed"
+            )
 
         # Merge for comparison
         responses_df["topics"] = (

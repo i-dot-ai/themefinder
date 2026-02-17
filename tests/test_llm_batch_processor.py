@@ -904,7 +904,9 @@ async def test_call_llm_conversational_retry(mock_llm):
     Verifies that the system asks for missing IDs and merges results.
     """
 
-    batch_prompts = [BatchPrompt(prompt_string="initial prompt", response_ids=[1, 2, 3])]
+    batch_prompts = [
+        BatchPrompt(prompt_string="initial prompt", response_ids=[1, 2, 3])
+    ]
 
     # First response is missing response_id 3
     first_response = MagicMock()
@@ -946,7 +948,9 @@ async def test_call_llm_conversational_retry_max_attempts(mock_llm):
     Test that conversational retry respects max attempts.
     Verifies that after max_conversation_retries, remaining IDs are returned as failed.
     """
-    batch_prompts = [BatchPrompt(prompt_string="initial prompt", response_ids=[1, 2, 3])]
+    batch_prompts = [
+        BatchPrompt(prompt_string="initial prompt", response_ids=[1, 2, 3])
+    ]
 
     # LLM always returns only response_id 1, never provides 2 or 3
     incomplete_response = MagicMock()

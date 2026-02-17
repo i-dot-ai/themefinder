@@ -27,6 +27,7 @@ def _make_evaluation(name: str, value: float, comment: str = ""):
     except ImportError:
         return {"name": name, "value": value, "comment": comment}
 
+
 # Minimum score (0-5) to consider a topic well-grounded or captured
 GROUNDEDNESS_THRESHOLD = 3
 
@@ -82,21 +83,25 @@ def _parse_evaluation_response(response_content: str) -> dict[str, Any]:
             decision = evaluation.get("decision", "NO").upper()
             score = DECISION_SCORES.get(decision, 0)
             scores.append(score)
-            details.append({
-                "theme": theme_label,
-                "matched_to": evaluation.get("matched_to", "none"),
-                "decision": decision,
-                "reasoning": evaluation.get("reasoning", ""),
-                "score": score,
-            })
+            details.append(
+                {
+                    "theme": theme_label,
+                    "matched_to": evaluation.get("matched_to", "none"),
+                    "decision": decision,
+                    "reasoning": evaluation.get("reasoning", ""),
+                    "score": score,
+                }
+            )
         elif isinstance(evaluation, (int, float)):
             # Backwards compatibility with old 0-5 format
             scores.append(evaluation)
-            details.append({
-                "theme": theme_label,
-                "decision": "LEGACY",
-                "score": evaluation,
-            })
+            details.append(
+                {
+                    "theme": theme_label,
+                    "decision": "LEGACY",
+                    "score": evaluation,
+                }
+            )
 
     return {
         "scores": scores,
@@ -117,7 +122,11 @@ def _build_comment(result: dict[str, Any], metric_name: str) -> str:
     Returns:
         Comment string with threshold summary and per-theme decisions.
     """
-    threshold_label = "themes below threshold" if metric_name == "groundedness" else "themes not captured"
+    threshold_label = (
+        "themes below threshold"
+        if metric_name == "groundedness"
+        else "themes not captured"
+    )
     summary = f"{result['n_below_threshold']}/{result['n_total']} {threshold_label}"
 
     details = result.get("details", [])
@@ -208,6 +217,7 @@ def create_groundedness_evaluator(llm: Any):
     Returns:
         Evaluator function compatible with run_experiment()
     """
+
     def groundedness_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
         """Evaluate how well generated themes are grounded in expected themes."""
         try:
@@ -217,7 +227,9 @@ def create_groundedness_evaluator(llm: Any):
                 llm,
             )
             comment = _build_comment(result, "groundedness")
-            return _make_evaluation("groundedness", round(result["average"], 2), comment)
+            return _make_evaluation(
+                "groundedness", round(result["average"], 2), comment
+            )
         except Exception as e:
             logger.error(f"Groundedness evaluation failed: {e}")
             return _make_evaluation("groundedness", 0.0, f"Error: {e}")
@@ -234,6 +246,7 @@ def create_coverage_evaluator(llm: Any):
     Returns:
         Evaluator function compatible with run_experiment()
     """
+
     def coverage_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
         """Evaluate how well expected themes are covered by generated themes."""
         try:
@@ -270,7 +283,9 @@ def sentiment_accuracy_evaluator(
         total = len(expected_positions)
         accuracy = correct / total if total > 0 else 0.0
 
-        return _make_evaluation("accuracy", round(accuracy, 3), f"{correct}/{total} correct predictions")
+        return _make_evaluation(
+            "accuracy", round(accuracy, 3), f"{correct}/{total} correct predictions"
+        )
     except Exception as e:
         logger.error(f"Sentiment accuracy evaluation failed: {e}")
         return _make_evaluation("accuracy", 0.0, f"Error: {e}")
@@ -302,7 +317,9 @@ def mapping_f1_evaluator(*, output: dict, expected_output: dict, **kwargs) -> An
         y_pred_bin = mlb.transform(y_pred)
         f1 = metrics.f1_score(y_true_bin, y_pred_bin, average="samples")
 
-        return _make_evaluation("f1_score", round(f1, 3), f"Evaluated on {len(response_ids)} responses")
+        return _make_evaluation(
+            "f1_score", round(f1, 3), f"Evaluated on {len(response_ids)} responses"
+        )
     except Exception as e:
         logger.error(f"Mapping F1 evaluation failed: {e}")
         return _make_evaluation("f1_score", 0.0, f"Error: {e}")
@@ -352,11 +369,13 @@ def _calculate_title_specificity(
         is_specific = decision == "SPECIFIC"
         if is_specific:
             n_specific += 1
-        details.append({
-            "title": title,
-            "decision": decision,
-            "reasoning": evaluation.get("reasoning", ""),
-        })
+        details.append(
+            {
+                "title": title,
+                "decision": decision,
+                "reasoning": evaluation.get("reasoning", ""),
+            }
+        )
 
     n_total = len(evaluations)
     ratio = n_specific / n_total if n_total > 0 else 0.0
@@ -378,6 +397,7 @@ def create_title_specificity_evaluator(llm: Any):
     Returns:
         Evaluator function compatible with run_experiment().
     """
+
     def specificity_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
         """Evaluate how specific the generated theme titles are."""
         try:
@@ -387,7 +407,11 @@ def create_title_specificity_evaluator(llm: Any):
             )
 
             comment = f"{result['n_specific']}/{result['n_total']} titles specific"
-            vague_titles = [d["title"] for d in result.get("details", []) if d["decision"] == "VAGUE"]
+            vague_titles = [
+                d["title"]
+                for d in result.get("details", [])
+                if d["decision"] == "VAGUE"
+            ]
             if vague_titles:
                 comment += f"\nVague: {', '.join(vague_titles)}"
 
@@ -430,9 +454,13 @@ def _calculate_condensation_scores(
 
     return {
         "compression_quality": parsed.get("compression_quality", 0),
-        "compression_quality_reasoning": parsed.get("compression_quality_reasoning", ""),
+        "compression_quality_reasoning": parsed.get(
+            "compression_quality_reasoning", ""
+        ),
         "information_retention": parsed.get("information_retention", 0),
-        "information_retention_reasoning": parsed.get("information_retention_reasoning", ""),
+        "information_retention_reasoning": parsed.get(
+            "information_retention_reasoning", ""
+        ),
     }
 
 
@@ -445,7 +473,10 @@ def create_condensation_quality_evaluator(llm: Any):
     Returns:
         Evaluator function that returns a list of Evaluation objects.
     """
-    def condensation_evaluator(*, output: dict, expected_output: dict, **kwargs) -> list:
+
+    def condensation_evaluator(
+        *, output: dict, expected_output: dict, **kwargs
+    ) -> list:
         """Evaluate condensation quality on compression and information retention."""
         try:
             result = _calculate_condensation_scores(
@@ -455,12 +486,19 @@ def create_condensation_quality_evaluator(llm: Any):
             )
 
             return [
-                _make_evaluation(metric, round(float(result.get(metric, 0)), 2), result.get(f"{metric}_reasoning", ""))
+                _make_evaluation(
+                    metric,
+                    round(float(result.get(metric, 0)), 2),
+                    result.get(f"{metric}_reasoning", ""),
+                )
                 for metric in ("compression_quality", "information_retention")
             ]
         except Exception as e:
             logger.error(f"Condensation quality evaluation failed: {e}")
-            return [_make_evaluation(metric, 0.0, f"Error: {e}") for metric in ("compression_quality", "information_retention")]
+            return [
+                _make_evaluation(metric, 0.0, f"Error: {e}")
+                for metric in ("compression_quality", "information_retention")
+            ]
 
     return condensation_evaluator
 
@@ -502,10 +540,7 @@ def _calculate_refinement_scores(
 
     parsed = parse_json_markdown(response.content)
 
-    return {
-        metric: parsed.get(metric, 0)
-        for metric in REFINEMENT_METRICS
-    } | {
+    return {metric: parsed.get(metric, 0) for metric in REFINEMENT_METRICS} | {
         f"{metric}_reasoning": parsed.get(f"{metric}_reasoning", "")
         for metric in REFINEMENT_METRICS
     }
@@ -520,6 +555,7 @@ def create_refinement_quality_evaluator(llm: Any):
     Returns:
         Evaluator function that returns a list of Evaluation objects.
     """
+
     def refinement_evaluator(*, output: dict, expected_output: dict, **kwargs) -> list:
         """Evaluate refinement quality on four dimensions."""
         try:
@@ -530,12 +566,19 @@ def create_refinement_quality_evaluator(llm: Any):
             )
 
             return [
-                _make_evaluation(metric, round(float(result.get(metric, 0)), 2), result.get(f"{metric}_reasoning", ""))
+                _make_evaluation(
+                    metric,
+                    round(float(result.get(metric, 0)), 2),
+                    result.get(f"{metric}_reasoning", ""),
+                )
                 for metric in REFINEMENT_METRICS
             ]
         except Exception as e:
             logger.error(f"Refinement quality evaluation failed: {e}")
-            return [_make_evaluation(metric, 0.0, f"Error: {e}") for metric in REFINEMENT_METRICS]
+            return [
+                _make_evaluation(metric, 0.0, f"Error: {e}")
+                for metric in REFINEMENT_METRICS
+            ]
 
     return refinement_evaluator
 
@@ -544,10 +587,13 @@ def create_refinement_quality_evaluator(llm: Any):
 def _get_sentence_model():
     """Load and cache the sentence-transformers model (loaded once per process)."""
     from sentence_transformers import SentenceTransformer
+
     return SentenceTransformer("all-MiniLM-L6-v2")
 
 
-def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.85) -> dict[str, Any]:
+def calculate_redundancy_score(
+    themes: list[dict] | dict, threshold: float = 0.85
+) -> dict[str, Any]:
     """Calculate semantic redundancy between theme titles using sentence embeddings.
 
     Uses sentence-transformers (all-MiniLM-L6-v2) to compute pairwise cosine
@@ -564,7 +610,12 @@ def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.8
         _get_sentence_model()
     except ImportError:
         logger.warning("sentence-transformers not installed, skipping redundancy check")
-        return {"ratio": 0.0, "n_redundant_pairs": 0, "n_total_pairs": 0, "flagged_pairs": []}
+        return {
+            "ratio": 0.0,
+            "n_redundant_pairs": 0,
+            "n_total_pairs": 0,
+            "flagged_pairs": [],
+        }
 
     # Extract titles
     if isinstance(themes, list):
@@ -575,13 +626,19 @@ def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.8
         titles = []
 
     if len(titles) < 2:
-        return {"ratio": 0.0, "n_redundant_pairs": 0, "n_total_pairs": 0, "flagged_pairs": []}
+        return {
+            "ratio": 0.0,
+            "n_redundant_pairs": 0,
+            "n_total_pairs": 0,
+            "flagged_pairs": [],
+        }
 
     model = _get_sentence_model()
     embeddings = model.encode(titles, convert_to_tensor=True)
 
     # Compute pairwise cosine similarity
     from sentence_transformers.util import cos_sim
+
     similarity_matrix = cos_sim(embeddings, embeddings)
 
     flagged_pairs = []
@@ -592,11 +649,13 @@ def calculate_redundancy_score(themes: list[dict] | dict, threshold: float = 0.8
             n_total_pairs += 1
             sim = float(similarity_matrix[i][j])
             if sim >= threshold:
-                flagged_pairs.append({
-                    "theme_a": titles[i],
-                    "theme_b": titles[j],
-                    "similarity": round(sim, 3),
-                })
+                flagged_pairs.append(
+                    {
+                        "theme_a": titles[i],
+                        "theme_b": titles[j],
+                        "similarity": round(sim, 3),
+                    }
+                )
 
     ratio = len(flagged_pairs) / n_total_pairs if n_total_pairs > 0 else 0.0
 
@@ -614,6 +673,7 @@ def create_redundancy_evaluator():
     Returns:
         Evaluator function compatible with run_experiment().
     """
+
     def redundancy_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
         """Evaluate semantic redundancy among generated themes."""
         try:
@@ -621,7 +681,10 @@ def create_redundancy_evaluator():
 
             comment = f"{result['n_redundant_pairs']}/{result['n_total_pairs']} pairs above threshold"
             if result["flagged_pairs"]:
-                pair_strs = [f"  {p['theme_a']} ↔ {p['theme_b']} ({p['similarity']})" for p in result["flagged_pairs"]]
+                pair_strs = [
+                    f"  {p['theme_a']} ↔ {p['theme_b']} ({p['similarity']})"
+                    for p in result["flagged_pairs"]
+                ]
                 comment += "\n" + "\n".join(pair_strs)
 
             return _make_evaluation("redundancy", round(result["ratio"], 2), comment)

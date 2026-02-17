@@ -65,7 +65,9 @@ async def evaluate_condensation(
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm, callbacks)
+        result = await _run_with_langfuse(
+            langfuse_ctx, config, llm, eval_llm, callbacks
+        )
     else:
         result = await _run_local_fallback(config, llm, eval_llm)
 
@@ -75,7 +77,9 @@ async def evaluate_condensation(
     return result
 
 
-async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callbacks: list) -> dict:
+async def _run_with_langfuse(
+    ctx, config: DatasetConfig, llm, eval_llm, callbacks: list
+) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
@@ -134,9 +138,21 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
 
             # Record each evaluation as a Langfuse score
             for evaluation in quality_results:
-                score_name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
-                score_value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
-                score_comment = evaluation.get("comment", "") if isinstance(evaluation, dict) else evaluation.comment
+                score_name = (
+                    evaluation.get("name", "")
+                    if isinstance(evaluation, dict)
+                    else evaluation.name
+                )
+                score_value = (
+                    evaluation.get("value", 0.0)
+                    if isinstance(evaluation, dict)
+                    else evaluation.value
+                )
+                score_comment = (
+                    evaluation.get("comment", "")
+                    if isinstance(evaluation, dict)
+                    else evaluation.comment
+                )
 
                 if trace_id and ctx.client:
                     ctx.client.create_score(
@@ -153,7 +169,10 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
             if trace_id and ctx.client:
                 comment = f"{redundancy['n_redundant_pairs']}/{redundancy['n_total_pairs']} pairs above threshold"
                 if redundancy["flagged_pairs"]:
-                    pair_strs = [f"  {p['theme_a']} ↔ {p['theme_b']} ({p['similarity']})" for p in redundancy["flagged_pairs"]]
+                    pair_strs = [
+                        f"  {p['theme_a']} ↔ {p['theme_b']} ({p['similarity']})"
+                        for p in redundancy["flagged_pairs"]
+                    ]
                     comment += "\n" + "\n".join(pair_strs)
                 ctx.client.create_score(
                     trace_id=trace_id,
@@ -170,8 +189,16 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm, callback
 
             # Add quality scores to results (numeric — will go to CSV columns)
             for evaluation in quality_results:
-                name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
-                value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+                name = (
+                    evaluation.get("name", "")
+                    if isinstance(evaluation, dict)
+                    else evaluation.name
+                )
+                value = (
+                    evaluation.get("value", 0.0)
+                    if isinstance(evaluation, dict)
+                    else evaluation.value
+                )
                 all_results[f"{item_key}_{name}"] = value
 
     print(f"Condensation Eval Results: {ctx.session_id}")
@@ -218,8 +245,16 @@ async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
         )
 
         for evaluation in quality_results:
-            name = evaluation.get("name", "") if isinstance(evaluation, dict) else evaluation.name
-            value = evaluation.get("value", 0.0) if isinstance(evaluation, dict) else evaluation.value
+            name = (
+                evaluation.get("name", "")
+                if isinstance(evaluation, dict)
+                else evaluation.name
+            )
+            value = (
+                evaluation.get("value", 0.0)
+                if isinstance(evaluation, dict)
+                else evaluation.value
+            )
             all_results[f"{question_part}_{name}"] = value
             print(f"  {question_part}/{name}: {value}")
 
@@ -227,7 +262,7 @@ async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
         redundancy = calculate_redundancy_score(condensed_records)
         all_results[f"{question_part}_redundancy"] = round(redundancy["ratio"], 2)
 
-    print(f"Condensation Eval Results (local)")
+    print("Condensation Eval Results (local)")
     return all_results
 
 
@@ -244,4 +279,5 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    asyncio.run(evaluate_condensation(dataset=args.dataset))
     asyncio.run(evaluate_condensation(dataset=args.dataset))
