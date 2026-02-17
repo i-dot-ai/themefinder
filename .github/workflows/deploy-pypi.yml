@@ -2,7 +2,7 @@ name: Release to PyPi
 
 on:
   release:
-    types: [released, prereleased]
+    types: [released]
 
 jobs:
   deploy:
@@ -13,22 +13,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-
-<<<<<<< HEAD
-      - name: Check if release is a pre-release
-        id: prerelease-check
-        run: |
-          if [[ "${{ github.event.release.prerelease }}" == "true" ]]; then
-            echo "This is a pre-release. Exiting."
-            exit 1
-          fi
-=======
-      # Use Python from .python-version for consistency
-      - name: Read Python version
-        id: read_python_version
-        run: echo "PYTHON_VERSION=$(cat .python-version)" >> $GITHUB_ENV
->>>>>>> origin/main
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
