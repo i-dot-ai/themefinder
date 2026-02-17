@@ -20,7 +20,6 @@ from themefinder.models import (
     ThemeNode,
     ThemeRefinementResponses,
 )
-from themefinder.structured_output import with_structured_output
 from themefinder.themefinder_logging import logger
 
 CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
@@ -173,7 +172,7 @@ async def sentiment_analysis(
     sentiment, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
-        with_structured_output(llm, SentimentAnalysisResponses),
+        llm.with_structured_output(SentimentAnalysisResponses),
         batch_size=batch_size,
         question=question,
         integrity_check=True,
@@ -229,7 +228,7 @@ async def theme_generation(
     generated_themes, _ = await batch_and_run(
         responses_df,
         prompt_template,
-        with_structured_output(llm, ThemeGenerationResponses),
+        llm.with_structured_output(ThemeGenerationResponses),
         batch_size=batch_size,
         partition_key=partition_key,
         question=question,
@@ -284,20 +283,17 @@ async def theme_condensation(
     logger.info(f"Running theme condensation on {len(themes_df)} themes")
     themes_df["response_id"] = themes_df.index + 1
 
-    # Up to 3 condensation passes: the model decides organically how many
-    # themes to produce each pass. Extra passes only run if themes still
-    # exceed the batch size (i.e. cross-batch merging is needed).
-    max_passes = 3
-    for pass_num in range(1, max_passes + 1):
-        if pass_num > 1 and len(themes_df) <= batch_size:
-            break
+    target = 30
+    retry = 0
+    while len(themes_df) > target:
+        original_theme_count = len(themes_df)
         logger.info(
-            f"Condensation pass {pass_num}/{max_passes}: {len(themes_df)} themes"
+            f"{len(themes_df)} larger than {target}, using recursive theme condensation"
         )
         themes_df, _ = await batch_and_run(
             themes_df,
             prompt_template,
-            with_structured_output(llm, ThemeCondensationResponses),
+            llm.with_structured_output(ThemeCondensationResponses),
             batch_size=batch_size,
             question=question,
             system_prompt=system_prompt,
@@ -307,6 +303,26 @@ async def theme_condensation(
         )
         themes_df = themes_df.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
+
+        if len(themes_df) == original_theme_count:
+            retry += 1
+            if retry > 1:
+                logging.warning("failed to reduce the number of themes after 1 retry")
+                break
+        else:
+            retry = 0
+
+    themes_df, _ = await batch_and_run(
+        themes_df,
+        prompt_template,
+        llm.with_structured_output(ThemeCondensationResponses),
+        batch_size=batch_size,
+        question=question,
+        system_prompt=system_prompt,
+        concurrency=concurrency,
+        config=config,
+        **kwargs,
+    )
 
     logger.info(f"Final number of condensed themes: {themes_df.shape[0]}")
     return themes_df, _
@@ -368,7 +384,7 @@ def theme_clustering(
 
     # Initialise clustering agent with structured output LLM
     agent = ThemeClusteringAgent(
-        with_structured_output(llm, HierarchicalClusteringResponse),
+        llm.with_structured_output(HierarchicalClusteringResponse),
         initial_themes,
         system_prompt,
         target_themes,
@@ -449,7 +465,7 @@ async def theme_refinement(
     refined_themes, _ = await batch_and_run(
         condensed_themes_df,
         prompt_template,
-        with_structured_output(llm, ThemeRefinementResponses),
+        llm.with_structured_output(ThemeRefinementResponses),
         batch_size=batch_size,
         question=question,
         system_prompt=system_prompt,
@@ -538,7 +554,7 @@ async def theme_mapping(
     mapping, unprocessable = await batch_and_run(
         responses_df,
         prompt_template,
-        with_structured_output(llm, ThemeMappingResponses),
+        llm.with_structured_output(ThemeMappingResponses),
         batch_size=batch_size,
         question=question,
         refined_themes=transpose_refined_themes(refined_themes_df).to_dict(
@@ -596,7 +612,7 @@ async def detail_detection(
     detailed, _ = await batch_and_run(
         responses_df,
         prompt_template,
-        with_structured_output(llm, DetailDetectionResponses),
+        llm.with_structured_output(DetailDetectionResponses),
         batch_size=batch_size,
         question=question,
         integrity_check=True,

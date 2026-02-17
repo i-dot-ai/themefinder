@@ -22,7 +22,6 @@ from themefinder.models import (
     CrossCuttingThemeIdentificationResponse,
     CrossCuttingThemeMappingResponse,
 )
-from themefinder.structured_output import with_structured_output
 from themefinder.themefinder_logging import logger
 
 
@@ -137,8 +136,8 @@ class CrossCuttingThemesAgent:
         )
 
         # Use structured output to get concepts
-        structured_llm = with_structured_output(
-            self.llm, CrossCuttingThemeIdentificationResponse
+        structured_llm = self.llm.with_structured_output(
+            CrossCuttingThemeIdentificationResponse
         )
         result = structured_llm.invoke(prompt, config=self.config)
 
@@ -214,8 +213,8 @@ class CrossCuttingThemesAgent:
             )
 
             # Use structured output to get mappings
-            structured_llm = with_structured_output(
-                self.llm, CrossCuttingThemeMappingResponse
+            structured_llm = self.llm.with_structured_output(
+                CrossCuttingThemeMappingResponse
             )
             result = structured_llm.invoke(prompt, config=self.config)
 
