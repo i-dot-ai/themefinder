@@ -1,6 +1,6 @@
 [project]
 name = "themefinder"
-version = "0.7.8"
+version = "0.8.0"
 description = "A topic modelling Python package designed for analysing one-to-many question-answer data eg free-text survey responses."
 readme = "README.md"
 license = "MIT"
