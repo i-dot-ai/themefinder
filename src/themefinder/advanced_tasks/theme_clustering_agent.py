@@ -9,7 +9,7 @@ import logging
 from typing import Dict, List, Any
 
 import pandas as pd
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from tenacity import (
     before,
     before_sleep_log,
@@ -45,8 +45,9 @@ class ThemeClusteringAgent:
         themes: List[ThemeNode],
         system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
         target_themes: int = 10,
+        config: RunnableConfig | None = None,
     ) -> None:
-        """Initialize the clustering agent with an LLM and initial themes.
+        """Initialise the clustering agent with an LLM and initial themes.
 
         Args:
             llm: Language model instance configured with structured output
@@ -54,6 +55,7 @@ class ThemeClusteringAgent:
             themes: List of ThemeNode objects to be clustered
             system_prompt: System prompt to guide the LLM's behavior
             target_themes: Target number of themes to cluster down to (default 10)
+            config: Optional RunnableConfig for trace propagation
         """
         self.llm = llm
         self.themes: Dict[str, ThemeNode] = {}
@@ -63,6 +65,7 @@ class ThemeClusteringAgent:
         self.current_iteration = 0
         self.system_prompt = system_prompt
         self.target_themes = target_themes
+        self.config = config
 
     def _format_prompt(self) -> str:
         """Format the clustering prompt with current active themes.
@@ -116,7 +119,7 @@ class ThemeClusteringAgent:
             - Increments self.current_iteration
         """
         prompt = self._format_prompt()
-        response = self.llm.invoke(prompt)
+        response = self.llm.invoke(prompt, config=self.config)
         for i, parent in enumerate(response.parent_themes):
 
             def to_alpha(idx: int) -> str:

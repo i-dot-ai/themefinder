@@ -1,8 +1,6 @@
-import io
 from pathlib import Path
 from typing import Any
 
-import boto3
 from langchain_core.prompts import PromptTemplate
 
 
@@ -35,25 +33,3 @@ def read_and_render(prompt_path: str | Path, kwargs: Any = None) -> str:
     if kwargs:
         return template.format(**kwargs)
     return template.format()
-
-
-def download_file_from_bucket(
-    object_key: str,
-    bucket_name: str,
-    region_name: str = "eu-west-2",
-) -> bytes:
-    """Download a file from an S3 bucket to memory using credentials managed by AWS Vault.
-
-    Args:
-        object_key (str): Key of the object in the bucket (include prefix if required,
-            e.g. "dir1/dir2/object_name")
-        bucket_name (str): Name of the S3 bucket (not the ARN)
-        region_name (str): AWS region name (optional if using default configuration)
-
-    Returns:
-        bytes: content of the file in memory
-    """
-    s3_client = boto3.client("s3", region_name=region_name)
-    file_content = io.BytesIO()
-    s3_client.download_fileobj(bucket_name, object_key, file_content)
-    return file_content.getvalue()

@@ -5,8 +5,10 @@ import pandas as pd
 from langchain_openai import AzureChatOpenAI
 from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
-
 from utils import read_and_render
+
+# Minimum score (0-5) to consider a topic well-grounded or captured
+GROUNDEDNESS_THRESHOLD = 3
 
 
 def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
@@ -28,13 +30,16 @@ def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
 
 
 def calculate_generation_metrics(
-    generated_topics: pd.DataFrame, topic_framework: dict
+    generated_topics: pd.DataFrame,
+    topic_framework: dict,
+    callbacks: list | None = None,
 ) -> dict[str, float | int]:
     """Calculate precision and recall metrics for generated themes against a framework.
 
     Args:
         generated_topics (pd.DataFrame): DataFrame containing generated themes as columns
         topic_framework (dict): Dictionary containing reference framework themes
+        callbacks (list | None): Optional list of LangChain callbacks for tracing
 
     Returns:
         dict[str, float | int]: Dictionary with keys:
@@ -44,10 +49,12 @@ def calculate_generation_metrics(
             - Recall N not Captured: Count of framework topics not captured
             - Recall Average topic Representation: Mean representation score
     """
+    callbacks = callbacks or []
     llm = AzureChatOpenAI(
         model_name="gpt-4o",
         temperature=0,
         model_kwargs={"response_format": {"type": "json_object"}},
+        callbacks=callbacks,
     )
     precision_scores = llm.invoke(
         read_and_render(
@@ -63,12 +70,15 @@ def calculate_generation_metrics(
         )
     )
     recall_scores = list(json.loads(recall_scores.content).values())
-    threshold = 3
     return {
         "Precision N topics": len(generated_topics),
-        "Precision N not well grounded": sum([i < threshold for i in precision_scores]),
+        "Precision N not well grounded": sum(
+            score < GROUNDEDNESS_THRESHOLD for score in precision_scores
+        ),
         "Precision Average Groundedness": np.mean(precision_scores).round(2),
-        "Recall N not Captured": sum([i < threshold for i in recall_scores]),
+        "Recall N not Captured": sum(
+            score < GROUNDEDNESS_THRESHOLD for score in recall_scores
+        ),
         "Recall Average topic Representation": np.mean(recall_scores).round(2),
     }
 

@@ -259,7 +259,7 @@ class TestThemeClusteringAgent:
         # Track which themes have been merged
         call_count = [0]
 
-        def mock_response(prompt):
+        def mock_response(prompt, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 # First call - merge D and E

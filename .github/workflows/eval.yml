@@ -1,0 +1,175 @@
+name: LLM Evaluation
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # 3am UTC daily
+  pull_request:
+    paths:
+      - 'evals/**'
+      - 'src/themefinder/**'
+      - '.github/workflows/eval.yml'
+  workflow_dispatch:
+    inputs:
+      dataset:
+        description: 'Dataset identifier (e.g., gambling_XS, healthcare_M)'
+        type: string
+        default: 'gambling_XS'
+      eval_type:
+        description: 'Which eval to run'
+        type: choice
+        options:
+          - generation
+          - sentiment
+          - mapping
+          - condensation
+          - refinement
+          - all
+        default: 'generation'
+
+jobs:
+  start-runner:
+    uses: i-dot-ai/i-dot-ai-core-github-actions/.github/workflows/start-runner.yml@main
+    permissions: write-all
+    with:
+      EC2_INSTANCE_TYPE: t3.medium
+      ENVIRONMENT: prod
+    secrets:
+      AWS_GITHUBRUNNER_USER_ACCESS_KEY: ${{ secrets.AWS_GITHUBRUNNER_USER_ACCESS_KEY }}
+      AWS_GITHUBRUNNER_USER_SECRET_ID: ${{ secrets.AWS_GITHUBRUNNER_USER_SECRET_ID }}
+      AWS_GITHUBRUNNER_PAT: ${{ secrets.AWS_GITHUBRUNNER_PAT }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
+
+  eval:
+    needs: start-runner
+    runs-on: ${{ needs.start-runner.outputs.label }}
+    environment: eval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version-file: '.python-version'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip sync requirements-dev.txt
+          uv pip install -e .
+
+      - name: Get version info
+        id: version
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - name: Run eval
+        id: eval
+        env:
+          AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
+          DEPLOYMENT_NAME: ${{ secrets.DEPLOYMENT_NAME }}
+          LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
+          LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
+          LANGFUSE_BASE_URL: ${{ secrets.LANGFUSE_BASE_URL }}
+          THEMEFINDER_S3_BUCKET_NAME: ${{ secrets.THEMEFINDER_S3_BUCKET_NAME }}
+          ENVIRONMENT: production
+          DATASET: ${{ github.event.inputs.dataset || 'gambling_XS' }}
+          EVAL_TYPE: ${{ github.event.inputs.eval_type || 'generation' }}
+        run: |
+          cd evals
+
+          if [ "$EVAL_TYPE" = "all" ]; then
+            echo "Running all evals for $DATASET..."
+            uv run python benchmark.py --quick 2>&1 | tee results.txt
+          else
+            echo "Running $EVAL_TYPE eval for $DATASET..."
+            uv run python benchmark.py --quick --evals "$EVAL_TYPE" 2>&1 | tee results.txt
+          fi
+
+          # Check for successful eval output
+          if grep -q "Eval Results\|experiment\|accuracy\|f1" results.txt; then
+            echo "eval_success=true" >> $GITHUB_OUTPUT
+          else
+            echo "eval_success=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Capture benchmark ID and summary for Slack
+          BENCHMARK_ID=$(grep "BENCHMARK_ID=" results.txt | tail -1 | cut -d= -f2)
+          echo "benchmark_id=$BENCHMARK_ID" >> $GITHUB_OUTPUT
+
+          # Extract score summary lines
+          SCORES=$(grep -E "^\s+(question|f1|accuracy)" results.txt | head -6 | sed 's/^[[:space:]]*//' | tr '\n' ' · ' || echo "")
+          echo "scores=$SCORES" >> $GITHUB_OUTPUT
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results-${{ github.run_id }}
+          path: |
+            evals/benchmark_results/
+            evals/results.txt
+          retention-days: 90
+
+      - name: Notify Slack on success
+        if: steps.eval.outputs.eval_success == 'true'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "✅ ThemeFinder Eval Complete",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "✅ *ThemeFinder Eval*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n*Dataset:* ${{ github.event.inputs.dataset || 'gambling_XS' }} · *Benchmark:* `${{ steps.eval.outputs.benchmark_id }}`\n${{ steps.eval.outputs.scores }}\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run · Download Report>"
+                  }
+                }
+              ]
+            }
+
+      - name: Notify Slack on failure
+        if: failure() || steps.eval.outputs.eval_success == 'false'
+        uses: slackapi/slack-github-action@v2.0.0
+        with:
+          webhook: ${{ secrets.SLACK_WEBHOOK_URL }}
+          webhook-type: incoming-webhook
+          payload: |
+            {
+              "text": "⚠️ ThemeFinder Eval Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "⚠️ *ThemeFinder Eval Failed*\n`v${{ steps.version.outputs.version }}` · `${{ steps.version.outputs.short_sha }}`\n<${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}|View Run>"
+                  }
+                }
+              ]
+            }
+
+  stop-runner:
+    needs: [start-runner, eval]
+    uses: i-dot-ai/i-dot-ai-core-github-actions/.github/workflows/stop-runner.yml@main
+    if: needs.start-runner.outputs.use-persisted == 0 && always()
+    permissions: write-all
+    with:
+      RUNNER_LABEL: ${{ needs.start-runner.outputs.label }}
+      EC2_INSTANCE_ID: ${{ needs.start-runner.outputs.ec2-instance-id }}
+    secrets:
+      AWS_GITHUBRUNNER_USER_ACCESS_KEY: ${{ secrets.AWS_GITHUBRUNNER_USER_ACCESS_KEY }}
+      AWS_GITHUBRUNNER_USER_SECRET_ID: ${{ secrets.AWS_GITHUBRUNNER_USER_SECRET_ID }}
+      AWS_GITHUBRUNNER_PAT: ${{ secrets.AWS_GITHUBRUNNER_PAT }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}

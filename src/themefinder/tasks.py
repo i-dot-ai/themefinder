@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import RunnableWithFallbacks
+from langchain_core.runnables import RunnableConfig, RunnableWithFallbacks
 
 from themefinder.advanced_tasks.cross_cutting_themes_agent import (
     CrossCuttingThemesAgent,
@@ -32,6 +32,7 @@ async def find_themes(
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     verbose: bool = True,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
 ) -> dict[str, str | pd.DataFrame]:
     """Process survey responses through a multi-stage theme analysis pipeline.
 
@@ -71,6 +72,7 @@ async def find_themes(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     theme_df, _ = await theme_generation(
         sentiment_df,
@@ -78,6 +80,7 @@ async def find_themes(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     condensed_theme_df, _ = await theme_condensation(
         theme_df,
@@ -85,6 +88,7 @@ async def find_themes(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     refined_theme_df, _ = await theme_refinement(
         condensed_theme_df,
@@ -92,6 +96,7 @@ async def find_themes(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
 
     mapping_df, mapping_unprocessables = await theme_mapping(
@@ -101,6 +106,7 @@ async def find_themes(
         refined_themes_df=refined_theme_df,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     detailed_df, _ = await detail_detection(
         responses_df[["response_id", "response"]],
@@ -108,6 +114,7 @@ async def find_themes(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
 
     logger.info("Finished finding themes")
@@ -130,6 +137,7 @@ async def sentiment_analysis(
     prompt_template: str | Path | PromptTemplate = "sentiment_analysis",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Perform sentiment analysis on survey responses using an LLM.
 
@@ -170,6 +178,7 @@ async def sentiment_analysis(
         integrity_check=True,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
 
     return sentiment, unprocessable
@@ -184,6 +193,7 @@ async def theme_generation(
     prompt_template: str | Path | PromptTemplate = "theme_generation",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Generate themes from survey responses using an LLM.
 
@@ -224,6 +234,7 @@ async def theme_generation(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     return generated_themes, _
 
@@ -236,6 +247,7 @@ async def theme_condensation(
     prompt_template: str | Path | PromptTemplate = "theme_condensation",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
     **kwargs,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Condense and combine similar themes identified from survey responses.
@@ -243,13 +255,17 @@ async def theme_condensation(
     This function processes the initially identified themes to combine similar or
     overlapping topics into more cohesive, broader categories using an LLM.
 
+    When the theme count exceeds the batch size, a first pass condenses within
+    each batch independently, then a second pass merges across batches. The model
+    decides organically how many themes to produce — there is no artificial target.
+
     Args:
         themes_df (pd.DataFrame): DataFrame containing the initial themes identified
             from survey responses.
         llm (RunnableWithFallbacks): Language model instance to use for theme condensation.
         question (str): The survey question.
         batch_size (int, optional): Number of themes to process in each batch.
-            Defaults to 100.
+            Defaults to 75.
         prompt_template (str | Path | PromptTemplate, optional): Template for structuring
             the prompt to the LLM. Can be a string identifier, path to template file,
             or PromptTemplate instance. Defaults to "theme_condensation".
@@ -267,7 +283,7 @@ async def theme_condensation(
     logger.info(f"Running theme condensation on {len(themes_df)} themes")
     themes_df["response_id"] = themes_df.index + 1
 
-    target = 50
+    target = 30
     retry = 0
     while len(themes_df) > target:
         original_theme_count = len(themes_df)
@@ -282,6 +298,7 @@ async def theme_condensation(
             question=question,
             system_prompt=system_prompt,
             concurrency=concurrency,
+            config=config,
             **kwargs,
         )
         themes_df = themes_df.sample(frac=1).reset_index(drop=True)
@@ -289,10 +306,8 @@ async def theme_condensation(
 
         if len(themes_df) == original_theme_count:
             retry += 1
-            if retry > 3:
-                logging.warning(
-                    "failed to reduce the number of themes after 3 attempts"
-                )
+            if retry > 1:
+                logging.warning("failed to reduce the number of themes after 1 retry")
                 break
         else:
             retry = 0
@@ -305,6 +320,7 @@ async def theme_condensation(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
         **kwargs,
     )
 
@@ -320,6 +336,7 @@ def theme_clustering(
     significance_percentage: float = 10.0,
     return_all_themes: bool = False,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Perform hierarchical clustering of themes using an agentic approach.
 
@@ -365,12 +382,13 @@ def theme_clustering(
         for _, row in themes_df.iterrows()
     ]
 
-    # Initialize clustering agent with structured output LLM
+    # Initialise clustering agent with structured output LLM
     agent = ThemeClusteringAgent(
         llm.with_structured_output(HierarchicalClusteringResponse),
         initial_themes,
         system_prompt,
         target_themes,
+        config=config,
     )
 
     # Perform clustering
@@ -407,10 +425,11 @@ async def theme_refinement(
     prompt_template: str | Path | PromptTemplate = "theme_refinement",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Refine and standardize condensed themes using an LLM.
+    """Refine and standardise condensed themes using an LLM.
 
-    This function processes previously condensed themes to create clear, standardized
+    This function processes previously condensed themes to create clear, standardised
     theme descriptions. It also transforms the output format for improved readability
     by transposing the results into a single-row DataFrame where columns represent
     individual themes.
@@ -451,6 +470,7 @@ async def theme_refinement(
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
 
     def assign_sequential_topic_ids(df: pd.DataFrame) -> pd.DataFrame:
@@ -490,6 +510,7 @@ async def theme_mapping(
     prompt_template: str | Path | PromptTemplate = "theme_mapping",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Map survey responses to refined themes using an LLM.
 
@@ -542,6 +563,7 @@ async def theme_mapping(
         integrity_check=True,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     return mapping, unprocessable
 
@@ -554,6 +576,7 @@ async def detail_detection(
     prompt_template: str | Path | PromptTemplate = "detail_detection",
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Identify responses that provide high-value detailed evidence.
 
@@ -595,6 +618,7 @@ async def detail_detection(
         integrity_check=True,
         system_prompt=system_prompt,
         concurrency=concurrency,
+        config=config,
     )
     return detailed, _
 
@@ -604,6 +628,7 @@ def cross_cutting_themes(
     llm: RunnableWithFallbacks,
     n_concepts: int = 5,
     min_themes: int = 5,
+    config: RunnableConfig | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Identify cross-cutting themes using a single-pass agent approach.
 
@@ -647,7 +672,7 @@ def cross_cutting_themes(
 
     # Use the CrossCuttingThemesAgent with external prompt files
     agent = CrossCuttingThemesAgent(
-        llm=llm, questions_themes=questions_themes, n_concepts=n_concepts
+        llm=llm, questions_themes=questions_themes, n_concepts=n_concepts, config=config
     )
 
     # Run the analysis

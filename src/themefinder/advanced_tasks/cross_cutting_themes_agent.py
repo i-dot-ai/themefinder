@@ -5,10 +5,10 @@ high-level cross-cutting themes across multiple questions using a language model
 """
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from tenacity import (
     before,
     before_sleep_log,
@@ -17,11 +17,11 @@ from tenacity import (
     wait_random_exponential,
 )
 
+from themefinder.llm_batch_processor import load_prompt_from_file
 from themefinder.models import (
     CrossCuttingThemeIdentificationResponse,
     CrossCuttingThemeMappingResponse,
 )
-from themefinder.llm_batch_processor import load_prompt_from_file
 from themefinder.themefinder_logging import logger
 
 
@@ -49,14 +49,16 @@ class CrossCuttingThemesAgent:
         questions_themes: Dict[int, pd.DataFrame],
         question_strings: Optional[Dict[str, str]] = None,
         n_concepts: int = 5,
+        config: RunnableConfig | None = None,
     ) -> None:
-        """Initialize the cross-cutting themes agent.
+        """Initialise the cross-cutting themes agent.
 
         Args:
             llm: Language model instance for text generation
             questions_themes: Dictionary mapping question numbers to theme DataFrames
             question_strings: Optional dictionary mapping question IDs to question text
             n_concepts: Number of high-level cross-cutting themes to identify
+            config: Optional RunnableConfig for trace propagation
 
         Raises:
             ValueError: If questions_themes is empty
@@ -68,6 +70,7 @@ class CrossCuttingThemesAgent:
         self.concepts: List[Dict[str, str]] = []
         self.concept_assignments: Dict[str, List[Dict[str, Any]]] = {}
         self.concept_descriptions: Dict[str, str] = {}
+        self.config = config
 
         # Validate input
         if not questions_themes:
@@ -77,7 +80,7 @@ class CrossCuttingThemesAgent:
         self.total_themes = sum(len(df) for df in questions_themes.values())
 
         logger.info(
-            f"Initialized CrossCuttingThemesAgent with {len(questions_themes)} questions, "
+            f"Initialised CrossCuttingThemesAgent with {len(questions_themes)} questions, "
             f"{self.total_themes} total themes"
         )
 
@@ -136,7 +139,7 @@ class CrossCuttingThemesAgent:
         structured_llm = self.llm.with_structured_output(
             CrossCuttingThemeIdentificationResponse
         )
-        result = structured_llm.invoke(prompt)
+        result = structured_llm.invoke(prompt, config=self.config)
 
         if isinstance(result, dict):
             result = CrossCuttingThemeIdentificationResponse(**result)
@@ -213,7 +216,7 @@ class CrossCuttingThemesAgent:
             structured_llm = self.llm.with_structured_output(
                 CrossCuttingThemeMappingResponse
             )
-            result = structured_llm.invoke(prompt)
+            result = structured_llm.invoke(prompt, config=self.config)
 
             if isinstance(result, dict):
                 result = CrossCuttingThemeMappingResponse(**result)
@@ -302,7 +305,7 @@ class CrossCuttingThemesAgent:
             )
 
             # Get refined description
-            response = self.llm.invoke(prompt)
+            response = self.llm.invoke(prompt, config=self.config)
             content = (
                 response.content if hasattr(response, "content") else str(response)
             )

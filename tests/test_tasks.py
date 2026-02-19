@@ -218,7 +218,9 @@ async def test_theme_condensation_recursive(mock_llm):
 
         assert isinstance(result_df, pd.DataFrame)
         assert len(result_df) == 25
-        assert mock_call_llm.await_count == 2
+        assert (
+            mock_call_llm.await_count == 3
+        )  # while loop (100->50, 50->25) + final pass
 
 
 @pytest.mark.asyncio
@@ -254,13 +256,17 @@ async def test_theme_condensation_no_further_reduction(mock_llm):
     with patch(
         "themefinder.llm_batch_processor.call_llm", new_callable=AsyncMock
     ) as mock_call_llm:
-        mock_call_llm.side_effect = [(original_responses, []), (original_responses, [])]
+        mock_call_llm.side_effect = [
+            (original_responses, []),
+        ]
 
         result_df, _ = await theme_condensation(
             themes_df, mock_llm, question="test question", batch_size=2
         )
 
-        assert mock_call_llm.await_count == 1
+        assert (
+            mock_call_llm.await_count == 1
+        )  # 3 themes < target (30), only final pass runs
         assert len(result_df) == 3
         original_labels = set(themes_df["topic_label"])
         result_labels = set(result_df["topic_label"])
