@@ -14,7 +14,7 @@ from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import DemographicField, QuestionConfig
-from themefinder.structured_output import with_structured_output
+from structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 

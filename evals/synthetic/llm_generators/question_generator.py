@@ -10,7 +10,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_openai import AzureChatOpenAI
 from pydantic import BaseModel, Field
 
-from themefinder.structured_output import with_structured_output
+from structured_output import with_structured_output
 
 
 class GeneratedQuestion(BaseModel):
