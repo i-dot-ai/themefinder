@@ -41,20 +41,20 @@ async def find_themes(
     2. Initial theme generation
     3. Theme condensation (combining similar themes)
     4. Theme refinement
-    5. Theme target alignment (optional, if target_n_themes is specified)
-    6. Mapping responses to refined themes
+    5. Mapping responses to refined themes
+    6. Detail detection
 
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses
         llm (RunnableWithFallbacks): Language model instance for text analysis
         question (str): The survey question
-        target_n_themes (int | None, optional): Target number of themes to consolidate to.
-            If None, skip theme target alignment step. Defaults to None.
-        system_prompt (str): System prompt to guide the LLM's behavior.
+        system_prompt (str): System prompt to guide the LLM's behaviour.
             Defaults to CONSULTATION_SYSTEM_PROMPT.
         verbose (bool): Whether to show information messages during processing.
             Defaults to True.
         concurrency (int): Number of concurrent API calls to make. Defaults to 10.
+        config (RunnableConfig | None): Optional LangChain config for tracing/callbacks.
+            Defaults to None.
 
     Returns:
         dict[str, str | pd.DataFrame]: Dictionary containing results from each pipeline stage:
@@ -62,7 +62,8 @@ async def find_themes(
             - sentiment: DataFrame with sentiment analysis results
             - themes: DataFrame with the final themes output
             - mapping: DataFrame mapping responses to final themes
-            - unprocessables: Dataframe containing the inputs that could not be processed by the LLM
+            - detailed_responses: DataFrame with detail detection results
+            - unprocessables: DataFrame containing the inputs that could not be processed by the LLM
     """
     logger.setLevel(logging.INFO if verbose else logging.CRITICAL)
 
@@ -307,7 +308,7 @@ async def theme_condensation(
         if len(themes_df) == original_theme_count:
             retry += 1
             if retry > 1:
-                logging.warning("failed to reduce the number of themes after 1 retry")
+                logger.warning("failed to reduce the number of themes after 1 retry")
                 break
         else:
             retry = 0

@@ -59,12 +59,9 @@ async def batch_and_run(
         **kwargs (Any): Additional keyword arguments to pass to the prompt template.
 
     Returns:
-        pd.DataFrame: DataFrame containing the original responses merged with the
-            LLM-processed results.
-    Returns:
         tuple[pd.DataFrame, pd.DataFrame]:
             A tuple containing two DataFrames:
-                - The first DataFrame contains the rows that were successfully processes by the LLM
+                - The first DataFrame contains the rows that were successfully processed by the LLM
                 - The second DataFrame contains the rows that could not be processed by the LLM
     """
 
@@ -180,7 +177,7 @@ def split_overflowing_batch(
 
     for i, token_count in enumerate(token_counts):
         if token_count > allowed_tokens:
-            logging.warning(
+            logger.warning(
                 f"Row at index {batch.index[i]} exceeds allowed token limit ({token_count} > {allowed_tokens}). Skipping row."
             )
             continue
@@ -309,8 +306,8 @@ async def call_llm(
                     batch_prompt.prompt_string, config=config
                 )
                 all_results = (
-                    llm_response.dict()
-                    if hasattr(llm_response, "dict")
+                    llm_response.model_dump()
+                    if hasattr(llm_response, "model_dump")
                     else llm_response
                 )
                 responses = (
@@ -352,13 +349,13 @@ def get_missing_response_ids(
     """Identify which response IDs are missing from the LLM's parsed response.
 
     Args:
-        input_response_ids (set[str]): Set of response IDs that were included in the
+        input_response_ids (list[int]): List of response IDs that were included in the
             original prompt.
         parsed_response (dict): Parsed response from the LLM containing a 'responses' key
             with a list of dictionaries, each containing a 'response_id' field.
 
     Returns:
-        set[str]: Set of response IDs that are missing from the parsed response.
+        list[int]: List of response IDs that are missing from the parsed response.
     """
 
     response_ids_set = {int(response_id) for response_id in input_response_ids}

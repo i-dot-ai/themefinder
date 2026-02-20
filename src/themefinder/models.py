@@ -15,13 +15,6 @@ class Position(str, Enum):
     UNCLEAR = "UNCLEAR"
 
 
-class Stance(str, Enum):
-    """Enum for valid stance values"""
-
-    POSITIVE = "POSITIVE"
-    NEGATIVE = "NEGATIVE"
-
-
 class EvidenceRich(str, Enum):
     """Enum for valid evidence_rich values"""
 
