@@ -208,7 +208,7 @@ class ModelConfig:
         return AzureChatOpenAI(**kwargs)
 
     def _create_locai_llm(self, callbacks: list | None) -> AzureChatOpenAI:
-        """Create locia L1 LLM instance."""
+        """Create locai L1 LLM instance."""
         kwargs: dict[str, Any] = {
             "model": self.deployment,
             "base_url": os.getenv("LOCAI_ENDPOINT"),
@@ -368,8 +368,8 @@ VERTEX_MODELS = [
 # Locai models
 LOCAI_MODELS = [
     ModelConfig(
-        name="locai-l1",
-        deployment="l1",  # Adjust model name as needed
+        name="locailabs/locai-l1-large-2011",
+        deployment="locailabs/locai-l1-large-2011", 
         provider=LLMProvider.LOCAI,
     ),
 ]
