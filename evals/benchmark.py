@@ -368,7 +368,7 @@ VERTEX_MODELS = [
 LOCAI_MODELS = [
     ModelConfig(
         name="locailabs/locai-l1-large-2011",
-        deployment="locailabs/locai-l1-large-2011", 
+        deployment="locailabs/locai-l1-large-2011",
         provider=LLMProvider.LOCAI,
     ),
 ]
