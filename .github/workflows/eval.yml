@@ -74,6 +74,8 @@ jobs:
         env:
           AZURE_OPENAI_ENDPOINT: ${{ secrets.AZURE_OPENAI_ENDPOINT }}
           AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
+          LOCAI_ENDPOINT: ${{ secrets.LOCAI_ENDPOINT }}
+          LOCAI_API_KEY: ${{ secrets.LOCAI_API_KEY }}
           OPENAI_API_VERSION: ${{ secrets.AZURE_OPENAI_API_VERSION }}
           DEPLOYMENT_NAME: ${{ secrets.DEPLOYMENT_NAME }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
