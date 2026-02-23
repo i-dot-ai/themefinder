@@ -213,7 +213,6 @@ class ModelConfig:
             "model": self.deployment,
             "base_url": os.getenv("LOCAI_ENDPOINT"),
             "api_key": os.getenv("LOCAI_API_KEY"),
-            # "api_version": os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
             "timeout": self.timeout,
         }
         if self.temperature:
