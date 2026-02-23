@@ -12,6 +12,9 @@ Usage:
     # Azure OpenAI models only
     uv run python benchmark.py --provider azure --dataset housing_S
 
+    # locai models only
+    uv run python benchmark.py --provider locai --dataset housing_S
+
     # Vertex AI models only (Gemini + Claude)
     uv run python benchmark.py --provider vertex --dataset bbc_mission_public_purposes
 
@@ -40,7 +43,7 @@ import dotenv
 import nest_asyncio
 import pandas as pd
 from langchain_core.runnables import Runnable
-from langchain_openai import AzureChatOpenAI
+from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from rich.console import Console
 from rich.table import Table
 
@@ -58,6 +61,7 @@ class LLMProvider(str, Enum):
     AZURE_OPENAI = "azure_openai"
     VERTEX_GEMINI = "vertex_gemini"
     VERTEX_CLAUDE = "vertex_claude"
+    LOCAI = "locai"
 
 
 import langfuse_utils  # noqa: E402
@@ -180,6 +184,8 @@ class ModelConfig:
                 return self._create_vertex_gemini(callbacks)
             case LLMProvider.VERTEX_CLAUDE:
                 return self._create_vertex_claude(callbacks)
+            case LLMProvider.LOCAI:
+                return self._create_locai_llm(callbacks)
             case _:
                 raise ValueError(f"Unknown provider: {self.provider}")
 
@@ -200,6 +206,21 @@ class ModelConfig:
         if callbacks:
             kwargs["callbacks"] = callbacks
         return AzureChatOpenAI(**kwargs)
+
+    def _create_locai_llm(self, callbacks: list | None) -> AzureChatOpenAI:
+        """Create locia L1 LLM instance."""
+        kwargs: dict[str, Any] = {
+            "model": self.deployment,
+            "base_url": os.getenv("LOCAI_ENDPOINT"),
+            "api_key": os.getenv("LOCAI_API_KEY"),
+            # "api_version": os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
+            "timeout": self.timeout,
+        }
+        if self.temperature:
+            kwargs["temperature"] = self.temperature
+        if callbacks:
+            kwargs["callbacks"] = callbacks
+        return ChatOpenAI(**kwargs)
 
     def _create_vertex_gemini(self, callbacks: list | None) -> Runnable:
         """Create Vertex AI Gemini LLM instance."""
@@ -344,11 +365,21 @@ VERTEX_MODELS = [
     # ),
 ]
 
+# Locai models
+LOCAI_MODELS = [
+    ModelConfig(
+        name="locai-l1",
+        deployment="l1",  # Adjust model name as needed
+        provider=LLMProvider.LOCAI,
+    ),
+]
+
 # Combined model registry by provider
 MODEL_REGISTRY: dict[str, list[ModelConfig]] = {
     "azure": AZURE_MODELS,
     "vertex": VERTEX_MODELS,
-    "all": AZURE_MODELS + VERTEX_MODELS,
+    "locai": LOCAI_MODELS,
+    "all": AZURE_MODELS + VERTEX_MODELS + LOCAI_MODELS,
 }
 
 # Default models (Azure) for backwards compatibility
@@ -1040,9 +1071,9 @@ Examples:
     )
     parser.add_argument(
         "--provider",
-        choices=["azure", "vertex", "all"],
+        choices=["azure", "vertex", "locai", "all"],
         default="all",
-        help="Provider to use: azure, vertex, or all (default)",
+        help="Provider to use: azure, vertex, locai, or all (default)",
     )
     parser.add_argument(
         "--models",
