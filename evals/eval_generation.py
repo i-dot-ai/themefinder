@@ -84,9 +84,7 @@ async def evaluate_generation(
     return result
 
 
-async def _run_with_langfuse(
-    ctx, config: DatasetConfig, llm, judge_llm=None
-) -> dict:
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, judge_llm=None) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
@@ -104,7 +102,7 @@ async def _run_with_langfuse(
         print(
             f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
         )
-        return await _run_local_fallback(config, llm, callbacks)
+        return await _run_local_fallback(config, llm)
 
     # Use dedicated judge LLM if provided, otherwise fall back to task LLM
     eval_llm = judge_llm or llm
