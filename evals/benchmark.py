@@ -12,6 +12,9 @@ Usage:
     # Azure OpenAI models only
     uv run python benchmark.py --provider azure --dataset housing_S
 
+    # locai models only
+    uv run python benchmark.py --provider locai --dataset housing_S
+
     # Vertex AI models only (Gemini + Claude)
     uv run python benchmark.py --provider vertex --dataset bbc_mission_public_purposes
 
@@ -69,6 +72,7 @@ class LLMProvider(str, Enum):
     AZURE_OPENAI = "azure_openai"
     VERTEX_GEMINI = "vertex_gemini"
     VERTEX_CLAUDE = "vertex_claude"
+    LOCAI = "locai"
 
 
 import langfuse_utils  # noqa: E402
@@ -187,6 +191,8 @@ class ModelConfig:
         match self.provider:
             case LLMProvider.AZURE_OPENAI:
                 return self._create_azure_llm()
+            case LLMProvider.LOCAI:
+                return self._create_locai_llm()
             case LLMProvider.VERTEX_GEMINI | LLMProvider.VERTEX_CLAUDE:
                 raise NotImplementedError(
                     f"TODO: implement OpenAILLM adapter for {self.provider.value}"
@@ -206,6 +212,19 @@ class ModelConfig:
             request_kwargs=request_kwargs,
             base_url=os.getenv("LLM_GATEWAY_URL"),
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+            timeout=self.timeout,
+        )
+
+    def _create_locai_llm(self) -> OpenAILLM:
+        """Create LOCAI LLM instance."""
+        request_kwargs: dict[str, Any] = {}
+        if self.temperature:
+            request_kwargs["temperature"] = self.temperature
+        return OpenAILLM(
+            model=self.deployment,
+            request_kwargs=request_kwargs,
+            base_url=os.getenv("LOCAI_ENDPOINT"),
+            api_key=os.getenv("LOCAI_API_KEY"),
             timeout=self.timeout,
         )
 
@@ -278,11 +297,21 @@ VERTEX_MODELS = [
     # ),
 ]
 
+# Locai models
+LOCAI_MODELS = [
+    ModelConfig(
+        name="locailabs/locai-l1-large-2011",
+        deployment="locailabs/locai-l1-large-2011",
+        provider=LLMProvider.LOCAI,
+    ),
+]
+
 # Combined model registry by provider
 MODEL_REGISTRY: dict[str, list[ModelConfig]] = {
     "azure": AZURE_MODELS,
     "vertex": VERTEX_MODELS,
-    "all": AZURE_MODELS + VERTEX_MODELS,
+    "locai": LOCAI_MODELS,
+    "all": AZURE_MODELS + VERTEX_MODELS + LOCAI_MODELS,
 }
 
 # Default models (Azure) for backwards compatibility
@@ -982,9 +1011,9 @@ Examples:
     )
     parser.add_argument(
         "--provider",
-        choices=["azure", "vertex", "all"],
+        choices=["azure", "vertex", "locai", "all"],
         default="all",
-        help="Provider to use: azure, vertex, or all (default)",
+        help="Provider to use: azure, vertex, locai, or all (default)",
     )
     parser.add_argument(
         "--models",

@@ -74,6 +74,8 @@ jobs:
         env:
           LLM_GATEWAY_URL: ${{ secrets.LLM_GATEWAY_URL }}
           CONSULT_EVAL_LITELLM_API_KEY: ${{ secrets.CONSULT_EVAL_LITELLM_API_KEY }}
+          LOCAI_ENDPOINT: ${{ secrets.LOCAI_ENDPOINT }}
+          LOCAI_API_KEY: ${{ secrets.LOCAI_API_KEY }}
           DEPLOYMENT_NAME: ${{ secrets.DEPLOYMENT_NAME }}
           LANGFUSE_SECRET_KEY: ${{ secrets.LANGFUSE_SECRET_KEY }}
           LANGFUSE_PUBLIC_KEY: ${{ secrets.LANGFUSE_PUBLIC_KEY }}
