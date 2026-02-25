@@ -13,15 +13,15 @@ import langfuse_utils
 import pandas as pd
 from datasets import DatasetConfig, load_local_data
 from evaluators import sentiment_accuracy_evaluator
-from langchain_openai import AzureChatOpenAI
 from metrics import calculate_sentiment_metrics
+from themefinder.llm import OpenAILLM
 
 from themefinder import sentiment_analysis
 
 
 async def evaluate_sentiment(
     dataset: str = "gambling_XS",
-    llm: AzureChatOpenAI | None = None,
+    llm: OpenAILLM | None = None,
     langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
 ) -> dict:
     """Run sentiment evaluation.
@@ -51,11 +51,11 @@ async def evaluate_sentiment(
 
     # Use provided LLM or create new one
     if llm is None:
-        callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
-        llm = AzureChatOpenAI(
-            azure_deployment=os.getenv("DEPLOYMENT_NAME"),
-            temperature=0,
-            callbacks=callbacks,
+        llm = OpenAILLM(
+            model=os.getenv("DEPLOYMENT_NAME"),
+            request_kwargs={"temperature": 0},
+            base_url=os.getenv("LLM_GATEWAY_URL"),
+            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
         )
 
     # Branch: Langfuse dataset vs local fallback
