@@ -8,7 +8,6 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from langchain_core.runnables import Runnable, RunnableConfig
 from tenacity import (
     before,
     before_sleep_log,
@@ -17,6 +16,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
+from themefinder.llm import LLM
 from themefinder.llm_batch_processor import load_prompt_from_file
 from themefinder.models import (
     CrossCuttingThemeIdentificationResponse,
@@ -45,20 +45,18 @@ class CrossCuttingThemesAgent:
 
     def __init__(
         self,
-        llm: Runnable,
+        llm: LLM,
         questions_themes: Dict[int, pd.DataFrame],
         question_strings: Optional[Dict[str, str]] = None,
         n_concepts: int = 5,
-        config: RunnableConfig | None = None,
     ) -> None:
         """Initialise the cross-cutting themes agent.
 
         Args:
-            llm: Language model instance for text generation
+            llm: LLM instance for text generation
             questions_themes: Dictionary mapping question numbers to theme DataFrames
             question_strings: Optional dictionary mapping question IDs to question text
             n_concepts: Number of high-level cross-cutting themes to identify
-            config: Optional RunnableConfig for trace propagation
 
         Raises:
             ValueError: If questions_themes is empty
@@ -70,7 +68,6 @@ class CrossCuttingThemesAgent:
         self.concepts: List[Dict[str, str]] = []
         self.concept_assignments: Dict[str, List[Dict[str, Any]]] = {}
         self.concept_descriptions: Dict[str, str] = {}
-        self.config = config
 
         # Validate input
         if not questions_themes:
@@ -113,7 +110,7 @@ class CrossCuttingThemesAgent:
         before_sleep=before_sleep_log(logger, logging.ERROR),
         reraise=True,
     )
-    def identify_concepts(self) -> List[Dict[str, str]]:
+    async def identify_concepts(self) -> List[Dict[str, str]]:
         """Identify high-level cross-cutting themes across all questions.
 
         Uses a single LLM call to identify cross-cutting themes that unify individual themes
@@ -135,14 +132,10 @@ class CrossCuttingThemesAgent:
             n_concepts=self.n_concepts, questions_and_themes=questions_and_themes
         )
 
-        # Use structured output to get concepts
-        structured_llm = self.llm.with_structured_output(
-            CrossCuttingThemeIdentificationResponse
+        llm_response = await self.llm.ainvoke(
+            prompt, output_model=CrossCuttingThemeIdentificationResponse
         )
-        result = structured_llm.invoke(prompt, config=self.config)
-
-        if isinstance(result, dict):
-            result = CrossCuttingThemeIdentificationResponse(**result)
+        result = llm_response.parsed
 
         # Convert to our expected format
         concepts = []
@@ -160,7 +153,7 @@ class CrossCuttingThemesAgent:
         before_sleep=before_sleep_log(logger, logging.ERROR),
         reraise=True,
     )
-    def map_themes_to_concepts(self) -> Dict[str, List[Dict[str, Any]]]:
+    async def map_themes_to_concepts(self) -> Dict[str, List[Dict[str, Any]]]:
         """Map themes to identified cross-cutting themes using semantic similarity.
 
         This uses individual LLM calls per question to classify which themes
@@ -212,14 +205,10 @@ class CrossCuttingThemesAgent:
                 question_input=question_input, concepts_text=concepts_text
             )
 
-            # Use structured output to get mappings
-            structured_llm = self.llm.with_structured_output(
-                CrossCuttingThemeMappingResponse
+            llm_response = await self.llm.ainvoke(
+                prompt, output_model=CrossCuttingThemeMappingResponse
             )
-            result = structured_llm.invoke(prompt, config=self.config)
-
-            if isinstance(result, dict):
-                result = CrossCuttingThemeMappingResponse(**result)
+            result = llm_response.parsed
 
             # Convert to our expected format
             question_assignments = {}
@@ -253,7 +242,7 @@ class CrossCuttingThemesAgent:
         before_sleep=before_sleep_log(logger, logging.ERROR),
         reraise=True,
     )
-    def refine_concept_descriptions(self) -> Dict[str, str]:
+    async def refine_concept_descriptions(self) -> Dict[str, str]:
         """Refine cross-cutting theme descriptions based on their assigned themes.
 
         Creates enhanced descriptions that capture insights and details
@@ -304,19 +293,15 @@ class CrossCuttingThemesAgent:
                 concept_name=concept_name, theme_lines=chr(10).join(theme_lines)
             )
 
-            # Get refined description
-            response = self.llm.invoke(prompt, config=self.config)
-            content = (
-                response.content if hasattr(response, "content") else str(response)
-            )
-
-            refined_descriptions[concept_name] = content.strip()
+            # Get refined description (plain text, no output_model)
+            llm_response = await self.llm.ainvoke(prompt)
+            refined_descriptions[concept_name] = llm_response.parsed.strip()
             logger.info(f"Refined description for '{concept_name}'")
 
         self.concept_descriptions = refined_descriptions
         return refined_descriptions
 
-    def analyze(self) -> Dict[str, Any]:
+    async def analyze(self) -> Dict[str, Any]:
         """Run the cross-cutting theme identification and mapping process.
 
         This orchestrates the analysis workflow:
@@ -327,8 +312,8 @@ class CrossCuttingThemesAgent:
             Dictionary with analysis results including cross-cutting themes and assignments
         """
 
-        concepts = self.identify_concepts()
-        assignments = self.map_themes_to_concepts()
+        concepts = await self.identify_concepts()
+        assignments = await self.map_themes_to_concepts()
 
         return {"concepts": concepts, "assignments": assignments}
 

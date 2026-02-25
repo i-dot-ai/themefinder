@@ -22,8 +22,8 @@ Usage:
     uv run python benchmark.py --models gpt-4o gemini-2.5-flash claude-haiku-4.5
 
 Requires:
-    - Azure: AZURE_OPENAI_API_KEY, AZURE_OPENAI_ENDPOINT env vars
-    - Vertex: uv pip install -e ".[vertex]", GOOGLE_CLOUD_PROJECT, GOOGLE_APPLICATION_CREDENTIALS
+    - LLM_GATEWAY_URL and CONSULT_EVAL_LITELLM_API_KEY env vars
+    - Vertex: Not yet implemented (TODO)
 """
 
 import argparse
@@ -42,13 +42,24 @@ from typing import Any
 import dotenv
 import nest_asyncio
 import pandas as pd
-from langchain_core.runnables import Runnable
-from langchain_openai import AzureChatOpenAI, ChatOpenAI
 from rich.console import Console
 from rich.table import Table
+from themefinder.llm import OpenAILLM
 
 # Allow nested asyncio.run() calls (needed by eval modules)
 nest_asyncio.apply()
+
+# Monkey-patch openai with langfuse-openai for automatic LLM call tracing.
+# Must happen before any OpenAILLM instances are created.
+try:
+    from langfuse.openai import openai as _langfuse_openai
+
+    import openai
+
+    openai.OpenAI = _langfuse_openai.OpenAI
+    openai.AsyncOpenAI = _langfuse_openai.AsyncOpenAI
+except ImportError:
+    pass  # langfuse not installed, tracing disabled
 
 # Fix DNS resolution issues with gRPC 1.58.0+ (must be set before gRPC imports)
 # Switches from buggy C-ares resolver to native resolver
@@ -175,125 +186,47 @@ class ModelConfig:
     temperature: float = 0.0
     timeout: int = 600  # 10 min default
 
-    def create_llm(self, callbacks: list | None = None) -> Runnable:
+    def create_llm(self) -> OpenAILLM:
         """Factory method to create appropriate LLM instance."""
         match self.provider:
             case LLMProvider.AZURE_OPENAI:
-                return self._create_azure_llm(callbacks)
-            case LLMProvider.VERTEX_GEMINI:
-                return self._create_vertex_gemini(callbacks)
-            case LLMProvider.VERTEX_CLAUDE:
-                return self._create_vertex_claude(callbacks)
+                return self._create_azure_llm()
             case LLMProvider.LOCAI:
-                return self._create_locai_llm(callbacks)
+                return self._create_locai_llm()
+            case LLMProvider.VERTEX_GEMINI | LLMProvider.VERTEX_CLAUDE:
+                raise NotImplementedError(
+                    f"TODO: implement OpenAILLM adapter for {self.provider.value}"
+                )
             case _:
                 raise ValueError(f"Unknown provider: {self.provider}")
 
-    def _create_azure_llm(self, callbacks: list | None) -> AzureChatOpenAI:
-        """Create Azure OpenAI LLM instance."""
-        kwargs: dict[str, Any] = {
-            "azure_deployment": self.deployment,
-            "azure_endpoint": os.getenv("AZURE_OPENAI_ENDPOINT"),
-            "api_key": os.getenv("AZURE_OPENAI_API_KEY"),
-            "api_version": os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-            "timeout": self.timeout,
-        }
+    def _create_azure_llm(self) -> OpenAILLM:
+        """Create OpenAILLM instance via LLM gateway."""
+        request_kwargs: dict[str, Any] = {}
         if self.reasoning_effort:
-            # Reasoning models don't support custom temperature
-            kwargs["reasoning_effort"] = self.reasoning_effort
+            pass  # Reasoning models don't support custom temperature
         else:
-            kwargs["temperature"] = self.temperature
-        if callbacks:
-            kwargs["callbacks"] = callbacks
-        return AzureChatOpenAI(**kwargs)
+            request_kwargs["temperature"] = self.temperature
+        return OpenAILLM(
+            model=self.deployment,
+            request_kwargs=request_kwargs,
+            base_url=os.getenv("LLM_GATEWAY_URL"),
+            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+            timeout=self.timeout,
+        )
 
-    def _create_locai_llm(self, callbacks: list | None) -> AzureChatOpenAI:
-        """Create locai L1 LLM instance."""
-        kwargs: dict[str, Any] = {
-            "model": self.deployment,
-            "base_url": os.getenv("LOCAI_ENDPOINT"),
-            "api_key": os.getenv("LOCAI_API_KEY"),
-            "timeout": self.timeout,
-        }
+    def _create_locai_llm(self) -> OpenAILLM:
+        """Create LOCAI LLM instance."""
+        request_kwargs: dict[str, Any] = {}
         if self.temperature:
-            kwargs["temperature"] = self.temperature
-        if callbacks:
-            kwargs["callbacks"] = callbacks
-        return ChatOpenAI(**kwargs)
-
-    def _create_vertex_gemini(self, callbacks: list | None) -> Runnable:
-        """Create Vertex AI Gemini LLM instance."""
-        try:
-            from langchain_google_genai import ChatGoogleGenerativeAI
-        except ImportError as e:
-            raise ImportError(
-                "langchain-google-genai not installed. "
-                "Install with: uv pip install -e '.[vertex]'"
-            ) from e
-
-        project = self.project_id or os.getenv("GOOGLE_CLOUD_PROJECT")
-        if not project:
-            raise ValueError(
-                "GCP project not configured. Set GOOGLE_CLOUD_PROJECT env var "
-                "or pass project_id to ModelConfig."
-            )
-
-        kwargs: dict[str, Any] = {
-            "model": self.deployment,
-            "project": project,
-            "location": self.location,
-            "temperature": self.temperature,
-            "max_retries": 6,
-            "callbacks": callbacks or [],
-            "vertexai": True,
-        }
-
-        # Add thinking config based on model generation
-        if self.thinking_budget is not None:
-            if "gemini-3" in self.deployment:
-                # Gemini 3+ uses thinking_level string
-                kwargs["thinking_level"] = "low"  # 2048 tokens ≈ low
-            else:
-                # Gemini 2.5 uses thinking_budget integer
-                kwargs["thinking_budget"] = self.thinking_budget
-
-        return ChatGoogleGenerativeAI(**kwargs)
-
-    def _create_vertex_claude(self, callbacks: list | None) -> Runnable:
-        """Create Vertex AI Claude (Anthropic) LLM instance."""
-        try:
-            from langchain_google_vertexai.model_garden import ChatAnthropicVertex
-        except ImportError as e:
-            raise ImportError(
-                "langchain-google-vertexai not installed. "
-                "Install with: uv pip install -e '.[vertex]'"
-            ) from e
-
-        project = self.project_id or os.getenv("GOOGLE_CLOUD_PROJECT")
-        if not project:
-            raise ValueError(
-                "GCP project not configured. Set GOOGLE_CLOUD_PROJECT env var "
-                "or pass project_id to ModelConfig."
-            )
-
-        kwargs: dict[str, Any] = {
-            "model_name": self.deployment,
-            "project": project,
-            "location": self.location,
-            "max_retries": 6,
-            "callbacks": callbacks or [],
-        }
-
-        # Add extended thinking if budget specified
-        if self.thinking_budget is not None:
-            kwargs["model_kwargs"] = {
-                "thinking": {
-                    "type": "enabled",
-                    "budget_tokens": self.thinking_budget,
-                }
-            }
-
-        return ChatAnthropicVertex(**kwargs)
+            request_kwargs["temperature"] = self.temperature
+        return OpenAILLM(
+            model=self.deployment,
+            request_kwargs=request_kwargs,
+            base_url=os.getenv("LOCAI_ENDPOINT"),
+            api_key=os.getenv("LOCAI_API_KEY"),
+            timeout=self.timeout,
+        )
 
     @property
     def tag(self) -> str:
@@ -308,8 +241,8 @@ class ModelConfig:
 # All available model configurations by provider
 # Azure OpenAI models - use dated versions that support structured outputs
 AZURE_MODELS = [
-    ModelConfig(name="gpt-4o", deployment="gpt-4o-2024-08-06"),
-    ModelConfig(name="gpt-4.1", deployment="gpt-4.1"),
+    ModelConfig(name="gpt-4o", deployment="gpt-4o-2024-08-06-sweden"),
+    ModelConfig(name="gpt-4.1", deployment="gpt-4.1-sweden-2025-03"),
     ModelConfig(name="gpt-4.1-mini", deployment="gpt-4.1-mini"),
     ModelConfig(name="gpt-5-nano", deployment="gpt-5-nano", reasoning_effort="low"),
     ModelConfig(name="gpt-5-mini", deployment="gpt-5-mini", reasoning_effort="low"),
@@ -672,20 +605,17 @@ class BenchmarkRunner:
             ],
         )
 
-        callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
-        llm = model_config.create_llm(callbacks=callbacks)
+        llm = model_config.create_llm()
 
         # Create dedicated judge LLM if configured (separates judge from task model)
         judge_llm = None
         if self.config.judge_model:
-            judge_llm = AzureChatOpenAI(
-                azure_deployment=self.config.judge_model,
-                azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-                api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-                api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-                temperature=0,
+            judge_llm = OpenAILLM(
+                model=self.config.judge_model,
+                request_kwargs={"temperature": 0},
+                base_url=os.getenv("LLM_GATEWAY_URL"),
+                api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
                 timeout=600,
-                callbacks=callbacks,
             )
 
         # Run the evaluation with timing, wrapped in trace_context for v3 API
@@ -943,7 +873,18 @@ def query_langfuse_costs(benchmark_id: str) -> pd.DataFrame:
     try:
         from langfuse import Langfuse
 
-        client = Langfuse()
+        secret_key = os.getenv("LANGFUSE_SECRET_KEY")
+        public_key = os.getenv("LANGFUSE_PUBLIC_KEY")
+        base_url = os.getenv("LANGFUSE_BASE_URL")
+
+        if not all([secret_key, public_key, base_url]):
+            return pd.DataFrame()
+
+        client = Langfuse(
+            secret_key=secret_key,
+            public_key=public_key,
+            host=base_url,
+        )
 
         # Fetch traces with benchmark tag
         traces = client.api.trace.list(

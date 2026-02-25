@@ -14,16 +14,15 @@ import langfuse_utils
 import pandas as pd
 from datasets import DatasetConfig, load_local_data
 from evaluators import calculate_redundancy_score, create_condensation_quality_evaluator
-from langchain_openai import AzureChatOpenAI
-
 from themefinder import theme_condensation
+from themefinder.llm import OpenAILLM
 
 
 async def evaluate_condensation(
     dataset: str = "gambling_XS",
-    llm: AzureChatOpenAI | None = None,
+    llm: OpenAILLM | None = None,
     langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
-    judge_llm: AzureChatOpenAI | None = None,
+    judge_llm: OpenAILLM | None = None,
 ) -> dict:
     """Run condensation evaluation.
 
@@ -50,14 +49,13 @@ async def evaluate_condensation(
             tags=[dataset],
         )
 
-    callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
-
     # Use provided LLM or create new one
     if llm is None:
-        llm = AzureChatOpenAI(
-            azure_deployment=os.getenv("DEPLOYMENT_NAME"),
-            temperature=0,
-            callbacks=callbacks,
+        llm = OpenAILLM(
+            model=os.getenv("DEPLOYMENT_NAME"),
+            request_kwargs={"temperature": 0},
+            base_url=os.getenv("LLM_GATEWAY_URL"),
+            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
         )
 
     # Select judge LLM (falls back to task LLM if not provided)
@@ -65,9 +63,7 @@ async def evaluate_condensation(
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(
-            langfuse_ctx, config, llm, eval_llm, callbacks
-        )
+        result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm)
     else:
         result = await _run_local_fallback(config, llm, eval_llm)
 
@@ -77,17 +73,14 @@ async def evaluate_condensation(
     return result
 
 
-async def _run_with_langfuse(
-    ctx, config: DatasetConfig, llm, eval_llm, callbacks: list
-) -> dict:
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
         ctx: LangfuseContext
         config: DatasetConfig
-        llm: LangChain LLM instance (task model)
-        eval_llm: LangChain LLM instance (judge model, may be same as llm)
-        callbacks: LangChain callbacks list
+        llm: LLM instance (task model)
+        eval_llm: LLM instance (judge model, may be same as llm)
 
     Returns:
         Dict containing evaluation results

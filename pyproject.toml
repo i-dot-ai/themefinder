@@ -17,6 +17,7 @@ classifiers = [
 dependencies = [
     "langchain>=1.0.0",
     "langchain-openai>=1.0.0",
+    "openai>=1.0.0",
     "pandas>=2.2.2",
     "python-dotenv>=1.0.1",
     "langfuse>=3.12.1",

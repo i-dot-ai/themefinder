@@ -1,8 +1,6 @@
 from pathlib import Path
 from typing import Any
 
-from langchain_core.prompts import PromptTemplate
-
 
 def load_prompt_from_file(file_path: str | Path) -> str:
     """Load a prompt template from a file in the 'prompts' directory.
@@ -29,7 +27,6 @@ def read_and_render(prompt_path: str | Path, kwargs: Any = None) -> str:
         str: The rendered prompt
     """
     prompt_content = load_prompt_from_file(prompt_path)
-    template = PromptTemplate.from_template(template=prompt_content)
     if kwargs:
-        return template.format(**kwargs)
-    return template.format()
+        return prompt_content.format(**kwargs)
+    return prompt_content

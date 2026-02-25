@@ -22,8 +22,8 @@ from evaluators import (
     create_redundancy_evaluator,
     create_title_specificity_evaluator,
 )
-from langchain_openai import AzureChatOpenAI
 from metrics import calculate_generation_metrics
+from themefinder.llm import OpenAILLM
 
 from themefinder import theme_condensation, theme_generation, theme_refinement
 
@@ -32,9 +32,9 @@ logger = logging.getLogger("themefinder.evals.generation")
 
 async def evaluate_generation(
     dataset: str = "gambling_XS",
-    llm: AzureChatOpenAI | None = None,
+    llm: OpenAILLM | None = None,
     langfuse_ctx: langfuse_utils.LangfuseContext | None = None,
-    judge_llm: AzureChatOpenAI | None = None,
+    judge_llm: OpenAILLM | None = None,
 ) -> dict:
     """Run generation evaluation.
 
@@ -61,23 +61,22 @@ async def evaluate_generation(
             tags=[dataset],
         )
 
-    callbacks = [langfuse_ctx.handler] if langfuse_ctx.handler else []
-
     # Use provided LLM or create new one
     if llm is None:
-        llm = AzureChatOpenAI(
-            azure_deployment=os.getenv("DEPLOYMENT_NAME"),
-            temperature=0,
-            callbacks=callbacks,
+        llm = OpenAILLM(
+            model=os.getenv("DEPLOYMENT_NAME"),
+            request_kwargs={"temperature": 0},
+            base_url=os.getenv("LLM_GATEWAY_URL"),
+            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
         )
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
         result = await _run_with_langfuse(
-            langfuse_ctx, config, llm, callbacks, judge_llm=judge_llm
+            langfuse_ctx, config, llm, judge_llm=judge_llm
         )
     else:
-        result = await _run_local_fallback(config, llm, callbacks)
+        result = await _run_local_fallback(config, llm)
 
     # Only flush if we created the context
     if owns_context:
@@ -85,16 +84,13 @@ async def evaluate_generation(
     return result
 
 
-async def _run_with_langfuse(
-    ctx, config: DatasetConfig, llm, callbacks: list, judge_llm=None
-) -> dict:
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, judge_llm=None) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
         ctx: LangfuseContext
         config: DatasetConfig
-        llm: LangChain LLM instance
-        callbacks: LangChain callbacks list
+        llm: LLM instance
         judge_llm: Optional dedicated judge LLM (defaults to task llm)
 
     Returns:
@@ -106,7 +102,7 @@ async def _run_with_langfuse(
         print(
             f"Dataset {config.name} not found in Langfuse, falling back to local: {e}"
         )
-        return await _run_local_fallback(config, llm, callbacks)
+        return await _run_local_fallback(config, llm)
 
     # Use dedicated judge LLM if provided, otherwise fall back to task LLM
     eval_llm = judge_llm or llm
@@ -241,13 +237,12 @@ async def _run_with_langfuse(
     return all_scores
 
 
-async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> dict:
+async def _run_local_fallback(config: DatasetConfig, llm) -> dict:
     """Run evaluation without Langfuse (local development).
 
     Args:
         config: DatasetConfig
-        llm: LangChain LLM instance
-        callbacks: LangChain callbacks list
+        llm: LLM instance
 
     Returns:
         Dict containing evaluation scores
@@ -277,9 +272,7 @@ async def _run_local_fallback(config: DatasetConfig, llm, callbacks: list) -> di
             question=question,
         )
 
-        eval_scores = calculate_generation_metrics(
-            refined_df, theme_framework, callbacks=callbacks
-        )
+        eval_scores = calculate_generation_metrics(refined_df, theme_framework)
         print(f"Theme Generation ({question_part}): \n {eval_scores}")
 
         # Collect scores with question prefix

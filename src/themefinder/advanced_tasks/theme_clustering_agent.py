@@ -9,7 +9,6 @@ import logging
 from typing import Dict, List, Any
 
 import pandas as pd
-from langchain_core.runnables import Runnable, RunnableConfig
 from tenacity import (
     before,
     before_sleep_log,
@@ -18,7 +17,8 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from themefinder.models import ThemeNode
+from themefinder.llm import LLM
+from themefinder.models import HierarchicalClusteringResponse, ThemeNode
 from themefinder.llm_batch_processor import load_prompt_from_file
 from themefinder.themefinder_logging import logger
 
@@ -41,21 +41,18 @@ class ThemeClusteringAgent:
 
     def __init__(
         self,
-        llm: Runnable,
+        llm: LLM,
         themes: List[ThemeNode],
         system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
         target_themes: int = 10,
-        config: RunnableConfig | None = None,
     ) -> None:
         """Initialise the clustering agent with an LLM and initial themes.
 
         Args:
-            llm: Language model instance configured with structured output
-                for HierarchicalClusteringResponse
+            llm: LLM instance for clustering calls
             themes: List of ThemeNode objects to be clustered
             system_prompt: System prompt to guide the LLM's behavior
             target_themes: Target number of themes to cluster down to (default 10)
-            config: Optional RunnableConfig for trace propagation
         """
         self.llm = llm
         self.themes: Dict[str, ThemeNode] = {}
@@ -65,7 +62,6 @@ class ThemeClusteringAgent:
         self.current_iteration = 0
         self.system_prompt = system_prompt
         self.target_themes = target_themes
-        self.config = config
 
     def _format_prompt(self) -> str:
         """Format the clustering prompt with current active themes.
@@ -102,7 +98,7 @@ class ThemeClusteringAgent:
         before_sleep=before_sleep_log(logger, logging.ERROR),
         reraise=True,
     )
-    def cluster_iteration(self) -> None:
+    async def cluster_iteration(self) -> None:
         """Perform one iteration of hierarchical theme clustering.
 
         Uses the configured LLM to identify semantically similar themes
@@ -119,7 +115,10 @@ class ThemeClusteringAgent:
             - Increments self.current_iteration
         """
         prompt = self._format_prompt()
-        response = self.llm.invoke(prompt, config=self.config)
+        llm_response = await self.llm.ainvoke(
+            prompt, output_model=HierarchicalClusteringResponse
+        )
+        response = llm_response.parsed
         for i, parent in enumerate(response.parent_themes):
 
             def to_alpha(idx: int) -> str:
@@ -152,7 +151,7 @@ class ThemeClusteringAgent:
                 self.active_themes.remove(child)
         self.current_iteration += 1
 
-    def cluster_themes(
+    async def cluster_themes(
         self, max_iterations: int = 5, target_themes: int = 5
     ) -> pd.DataFrame:
         """Perform hierarchical clustering to reduce themes to target number.
@@ -175,7 +174,7 @@ class ThemeClusteringAgent:
             self.current_iteration <= max_iterations
             and len(self.active_themes) > target_themes
         ):
-            self.cluster_iteration()
+            await self.cluster_iteration()
             logger.info(
                 f"After {self.current_iteration} iterations {len(self.active_themes)} active themes remaining"
             )

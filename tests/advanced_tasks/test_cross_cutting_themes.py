@@ -1,10 +1,11 @@
 """Tests for CrossCuttingThemesAgent."""
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
 import pytest
 
+from themefinder.llm import LLMResponse
 from themefinder.models import (
     CrossCuttingThemeIdentificationResponse,
     CrossCuttingThemeDefinition,
@@ -78,7 +79,9 @@ def sample_question_strings():
 @pytest.fixture
 def mock_llm():
     """Create a mock LLM for testing."""
-    return MagicMock()
+    mock = MagicMock()
+    mock.ainvoke = AsyncMock()
+    return mock
 
 
 class TestCrossCuttingThemesAgent:
@@ -154,13 +157,14 @@ class TestCrossCuttingThemesAgent:
         assert "Question 2" in formatted
         assert "Question 3" in formatted
 
-    def test_identify_concepts(self, sample_questions_themes, mock_llm):
+    @pytest.mark.asyncio
+    async def test_identify_concepts(self, sample_questions_themes, mock_llm):
         """Test concept identification."""
         agent = CrossCuttingThemesAgent(
             llm=mock_llm, questions_themes=sample_questions_themes, n_concepts=2
         )
 
-        # Mock the structured LLM response
+        # Mock the LLM response
         mock_response = CrossCuttingThemeIdentificationResponse(
             themes=[
                 CrossCuttingThemeDefinition(
@@ -174,16 +178,17 @@ class TestCrossCuttingThemesAgent:
             ]
         )
 
-        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
+        mock_llm.ainvoke = AsyncMock(return_value=LLMResponse(parsed=mock_response))
 
-        concepts = agent.identify_concepts()
+        concepts = await agent.identify_concepts()
 
         assert len(concepts) == 2
         assert concepts[0]["name"] == "Employment and Training"
         assert concepts[1]["name"] == "Health and Wellbeing"
         assert agent.concepts == concepts
 
-    def test_map_themes_to_concepts_without_concepts_raises_error(
+    @pytest.mark.asyncio
+    async def test_map_themes_to_concepts_without_concepts_raises_error(
         self, sample_questions_themes, mock_llm
     ):
         """Test that mapping themes without identifying concepts first raises error."""
@@ -192,9 +197,10 @@ class TestCrossCuttingThemesAgent:
         )
 
         with pytest.raises(ValueError, match="Must call identify_concepts\\(\\) first"):
-            agent.map_themes_to_concepts()
+            await agent.map_themes_to_concepts()
 
-    def test_map_themes_to_concepts(self, sample_questions_themes, mock_llm):
+    @pytest.mark.asyncio
+    async def test_map_themes_to_concepts(self, sample_questions_themes, mock_llm):
         """Test mapping themes to concepts."""
         agent = CrossCuttingThemesAgent(
             llm=mock_llm, questions_themes=sample_questions_themes, n_concepts=2
@@ -208,43 +214,47 @@ class TestCrossCuttingThemesAgent:
 
         # Mock the mapping responses for each question
         mapping_responses = [
-            CrossCuttingThemeMappingResponse(
-                mappings=[
-                    CrossCuttingThemeMapping(
-                        theme_name="Employment Support", theme_ids=["A"]
-                    ),
-                    CrossCuttingThemeMapping(
-                        theme_name="Health Services", theme_ids=["C"]
-                    ),
-                ]
+            LLMResponse(
+                parsed=CrossCuttingThemeMappingResponse(
+                    mappings=[
+                        CrossCuttingThemeMapping(
+                            theme_name="Employment Support", theme_ids=["A"]
+                        ),
+                        CrossCuttingThemeMapping(
+                            theme_name="Health Services", theme_ids=["C"]
+                        ),
+                    ]
+                )
             ),
-            CrossCuttingThemeMappingResponse(
-                mappings=[
-                    CrossCuttingThemeMapping(
-                        theme_name="Employment Support", theme_ids=["B"]
-                    ),
-                    CrossCuttingThemeMapping(
-                        theme_name="Health Services", theme_ids=["C"]
-                    ),
-                ]
+            LLMResponse(
+                parsed=CrossCuttingThemeMappingResponse(
+                    mappings=[
+                        CrossCuttingThemeMapping(
+                            theme_name="Employment Support", theme_ids=["B"]
+                        ),
+                        CrossCuttingThemeMapping(
+                            theme_name="Health Services", theme_ids=["C"]
+                        ),
+                    ]
+                )
             ),
-            CrossCuttingThemeMappingResponse(
-                mappings=[
-                    CrossCuttingThemeMapping(
-                        theme_name="Employment Support", theme_ids=["A"]
-                    ),
-                    CrossCuttingThemeMapping(
-                        theme_name="Health Services", theme_ids=["B"]
-                    ),
-                ]
+            LLMResponse(
+                parsed=CrossCuttingThemeMappingResponse(
+                    mappings=[
+                        CrossCuttingThemeMapping(
+                            theme_name="Employment Support", theme_ids=["A"]
+                        ),
+                        CrossCuttingThemeMapping(
+                            theme_name="Health Services", theme_ids=["B"]
+                        ),
+                    ]
+                )
             ),
         ]
 
-        mock_llm.with_structured_output.return_value.invoke.side_effect = (
-            mapping_responses
-        )
+        mock_llm.ainvoke = AsyncMock(side_effect=mapping_responses)
 
-        assignments = agent.map_themes_to_concepts()
+        assignments = await agent.map_themes_to_concepts()
 
         # Check that assignments were created
         assert "Employment Support" in assignments
@@ -258,39 +268,46 @@ class TestCrossCuttingThemesAgent:
         health_assignments = assignments["Health Services"]
         assert len(health_assignments) == 3
 
-    def test_analyze_full_workflow(self, sample_questions_themes, mock_llm):
+    @pytest.mark.asyncio
+    async def test_analyze_full_workflow(self, sample_questions_themes, mock_llm):
         """Test the complete analyze workflow."""
         agent = CrossCuttingThemesAgent(
             llm=mock_llm, questions_themes=sample_questions_themes, n_concepts=2
         )
 
         # Mock concept identification response
-        concepts_response = CrossCuttingThemeIdentificationResponse(
-            themes=[
-                CrossCuttingThemeDefinition(
-                    name="Employment Support",
-                    description="Employment and training themes.",
-                ),
-            ]
+        concepts_response = LLMResponse(
+            parsed=CrossCuttingThemeIdentificationResponse(
+                themes=[
+                    CrossCuttingThemeDefinition(
+                        name="Employment Support",
+                        description="Employment and training themes.",
+                    ),
+                ]
+            )
         )
 
         # Mock mapping response
-        mapping_response = CrossCuttingThemeMappingResponse(
-            mappings=[
-                CrossCuttingThemeMapping(
-                    theme_name="Employment Support", theme_ids=["A", "B"]
-                ),
+        mapping_response = LLMResponse(
+            parsed=CrossCuttingThemeMappingResponse(
+                mappings=[
+                    CrossCuttingThemeMapping(
+                        theme_name="Employment Support", theme_ids=["A", "B"]
+                    ),
+                ]
+            )
+        )
+
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[
+                concepts_response,
+                mapping_response,
+                mapping_response,
+                mapping_response,
             ]
         )
 
-        mock_llm.with_structured_output.return_value.invoke.side_effect = [
-            concepts_response,
-            mapping_response,
-            mapping_response,
-            mapping_response,
-        ]
-
-        results = agent.analyze()
+        results = await agent.analyze()
 
         assert "concepts" in results
         assert "assignments" in results
@@ -362,7 +379,8 @@ class TestCrossCuttingThemesAgent:
         assert stats["n_questions"] == 3
         assert stats["concepts_with_themes"] == 2  # Both concepts have themes
 
-    def test_refine_concept_descriptions_without_mapping_raises_error(
+    @pytest.mark.asyncio
+    async def test_refine_concept_descriptions_without_mapping_raises_error(
         self, sample_questions_themes, mock_llm
     ):
         """Test that refining descriptions without mapping first raises error."""
@@ -373,9 +391,10 @@ class TestCrossCuttingThemesAgent:
         with pytest.raises(
             ValueError, match="Must call map_themes_to_concepts\\(\\) first"
         ):
-            agent.refine_concept_descriptions()
+            await agent.refine_concept_descriptions()
 
-    def test_refine_concept_descriptions(self, sample_questions_themes, mock_llm):
+    @pytest.mark.asyncio
+    async def test_refine_concept_descriptions(self, sample_questions_themes, mock_llm):
         """Test refining concept descriptions."""
         agent = CrossCuttingThemesAgent(
             llm=mock_llm, questions_themes=sample_questions_themes, n_concepts=1
@@ -400,12 +419,14 @@ class TestCrossCuttingThemesAgent:
             ]
         }
 
-        # Mock LLM response for description refinement
-        mock_response = MagicMock()
-        mock_response.content = "Refined description based on assigned themes."
-        mock_llm.invoke.return_value = mock_response
+        # Mock LLM response for description refinement (plain text)
+        mock_llm.ainvoke = AsyncMock(
+            return_value=LLMResponse(
+                parsed="Refined description based on assigned themes."
+            )
+        )
 
-        descriptions = agent.refine_concept_descriptions()
+        descriptions = await agent.refine_concept_descriptions()
 
         assert "Employment Support" in descriptions
         assert (
