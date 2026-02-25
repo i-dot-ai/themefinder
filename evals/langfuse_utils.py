@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, Generator
 if TYPE_CHECKING:
     from langfuse import Langfuse
     from langfuse._client.span import LangfuseSpan
-    from langfuse.langchain import CallbackHandler
 
 logger = logging.getLogger("themefinder.evals.langfuse")
 
@@ -33,10 +32,10 @@ def _get_version() -> str:
 
 @dataclass
 class LangfuseContext:
-    """Container for Langfuse client and callback handler."""
+    """Container for Langfuse client."""
 
     client: "Langfuse | None"
-    handler: "CallbackHandler | None"
+    handler: None = None  # Retained for API compatibility; always None
     session_id: str | None = None
     tags: list[str] | None = None
     metadata: dict | None = None
@@ -51,11 +50,7 @@ class LangfuseContext:
 def trace_context(
     context: LangfuseContext, name: str = "eval_task"
 ) -> Generator["LangfuseSpan | None", None, None]:
-    """Create a parent Langfuse span that captures all nested LangChain traces.
-
-    Uses native Langfuse span with update_trace() for trace-level attributes.
-    Also updates the CallbackHandler's trace_context to ensure LangChain traces
-    are properly nested under the parent span.
+    """Create a parent Langfuse span for trace-level attributes.
 
     Args:
         context: LangfuseContext from get_langfuse_context()
@@ -66,33 +61,21 @@ def trace_context(
 
     Example:
         with trace_context(langfuse_ctx, name="sentiment_eval") as span:
-            response = llm.invoke(prompt)  # Nested under span with tags/metadata
+            response = llm.invoke(prompt)
     """
     if not context.is_enabled or not context.client:
         yield None
         return
 
-    # Store original handler trace_context to restore later
-    original_trace_context = None
-    if context.handler:
-        original_trace_context = getattr(context.handler, "trace_context", None)
-
     try:
         with context.client.start_as_current_span(
             name=name, metadata=context.metadata
         ) as span:
-            # Set session_id, tags on the parent trace
             span.update_trace(
                 session_id=context.session_id,
                 tags=context.tags,
                 metadata=context.metadata,
             )
-
-            # Update handler's trace_context to nest LangChain traces under this span
-            if context.handler:
-                context.handler.trace_context = {"trace_id": span.trace_id}
-                logger.debug(f"Set handler trace_context to {span.trace_id}")
-
             yield span
     except ImportError:
         logger.warning("Langfuse package not available")
@@ -100,10 +83,6 @@ def trace_context(
     except Exception as e:
         logger.warning(f"Failed to create trace context: {e}")
         yield None
-    finally:
-        # Restore original handler trace_context
-        if context.handler and original_trace_context is not None:
-            context.handler.trace_context = original_trace_context
 
 
 def get_langfuse_context(
@@ -138,7 +117,6 @@ def get_langfuse_context(
 
     try:
         from langfuse import Langfuse
-        from langfuse.langchain import CallbackHandler
 
         client = Langfuse(
             secret_key=secret_key,
@@ -174,17 +152,12 @@ def get_langfuse_context(
         }
         all_metadata = {**standard_metadata, **(metadata or {})}
 
-        # SDK v3: CallbackHandler no longer accepts session_id/tags/metadata
-        # These are now passed via LangChain config or set on trace context
-        handler = CallbackHandler()
-
         logger.info(
             f"Langfuse initialised: session_id={session_id}, "
             f"eval_type={eval_type}, version={version}, env={environment}"
         )
         return LangfuseContext(
             client=client,
-            handler=handler,
             session_id=session_id,
             tags=all_tags,
             metadata=all_metadata,
@@ -192,10 +165,10 @@ def get_langfuse_context(
 
     except ImportError:
         logger.warning("Langfuse package not available")
-        return LangfuseContext(client=None, handler=None)
+        return LangfuseContext(client=None)
     except Exception as e:
         logger.warning(f"Failed to initialise Langfuse: {e}")
-        return LangfuseContext(client=None, handler=None)
+        return LangfuseContext(client=None)
 
 
 def create_scores(
@@ -216,9 +189,7 @@ def create_scores(
     if not context.is_enabled or not context.client:
         return
 
-    # Resolve trace_id fallback once
-    if trace_id is None and context.handler:
-        trace_id = getattr(context.handler, "last_trace_id", None)
+    # No handler fallback — trace_id must be provided explicitly if needed
 
     for name, value in scores.items():
         if not isinstance(value, (int, float)):
@@ -297,40 +268,21 @@ def dataset_item_trace(
         yield None, None
         return
 
-    # Store original handler trace_context to restore later
-    original_trace_context = None
-    if context.handler:
-        original_trace_context = getattr(context.handler, "trace_context", None)
-
     try:
-        # Use item.run() context manager for automatic dataset run linking
-        # This creates a trace that is properly linked to the dataset run,
-        # enabling metadata and cost aggregation at the run level
         with dataset_item.run(
             run_name=run_name,
             run_metadata=context.metadata,
         ) as root_span:
-            # Update trace-level attributes (session_id, tags, metadata)
             root_span.update_trace(
                 session_id=context.session_id,
                 tags=context.tags,
                 metadata=context.metadata,
             )
-
-            # Update handler's trace_context to nest LangChain traces under this span
-            if context.handler:
-                context.handler.trace_context = {"trace_id": root_span.trace_id}
-                logger.debug(f"Set handler trace_context to {root_span.trace_id}")
-
             yield root_span, root_span.trace_id
 
     except Exception as e:
         logger.warning(f"Failed to create dataset item trace: {e}")
         yield None, None
-    finally:
-        # Restore original handler trace_context
-        if context.handler and original_trace_context is not None:
-            context.handler.trace_context = original_trace_context
 
 
 @dataclass
