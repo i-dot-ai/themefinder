@@ -15,15 +15,14 @@ from themefinder.models import (
 )
 from themefinder.llm_batch_processor import (
     BatchPrompt,
-    PromptTemplate,
     batch_and_run,
     batch_task_input_df,
     build_prompt,
     calculate_string_token_length,
     call_llm,
-    convert_to_prompt_template,
     generate_prompts,
     get_missing_response_ids,
+    load_prompt_template,
     partition_dataframe,
     process_llm_responses,
     split_overflowing_batch,
@@ -61,7 +60,7 @@ async def test_retries(mock_llm, sample_df):
     )
     with patch("themefinder.llm_batch_processor.call_llm") as mock_call_llm:
         mock_call_llm.side_effect = [
-            ([], [1, 2]),  # First call fails, returns empty responses and failed IDs
+            ([], [1, 2]),  # First call fails
             (
                 [
                     mock_response.responses[0].model_dump(),
@@ -70,10 +69,10 @@ async def test_retries(mock_llm, sample_df):
                 [],
             ),  # Second call succeeds
         ]
-        result, _ = await sentiment_analysis(
+        result_df, unprocessable_df = await sentiment_analysis(
             sample_df, mock_llm, question="doesn't matter"
         )
-        assert isinstance(result, pd.DataFrame)
+        assert isinstance(result_df, pd.DataFrame)
         assert mock_call_llm.call_count == 2
 
 
@@ -108,46 +107,29 @@ def test_calls_encoding_for_model(monkeypatch):
     assert token_length == 3
 
 
-class DummyPromptTemplate:
-    def __init__(self, template):
-        self.template = template
-
-    def format(self, **kwargs):
-        # For testing, simply return a string that includes the number of responses and any extra info.
-        responses = kwargs.get("responses", [])
-        extra = kwargs.get("extra", "")
-        return f"Prompt with {len(responses)} responses. {extra}"
-
-
 def test_build_prompt():
     data = {"response_id": [1, 2], "text": ["response1", "response2"]}
     df = pd.DataFrame(data)
-    prompt_template = DummyPromptTemplate("dummy template")
+    template_str = "Prompt with {responses} responses. {extra}"
 
     extra_info = "Extra context"
-    result = build_prompt(prompt_template, df, extra=extra_info)
+    result = build_prompt(template_str, df, extra=extra_info)
 
-    expected_prompt = (
-        f"Prompt with {len(df.to_dict(orient='records'))} responses. {extra_info}"
-    )
-    assert result.prompt_string == expected_prompt
+    # The template will be formatted with the actual records list and extra string
+    assert "response1" in result.prompt_string
+    assert "Extra context" in result.prompt_string
     assert result.response_ids == [1, 2]
 
 
-def test_build_prompt_with_mock_template():
+def test_build_prompt_with_simple_template():
     data = {"response_id": [101, 202], "text": ["foo", "bar"]}
     df = pd.DataFrame(data)
 
-    prompt_template = MagicMock()
-    prompt_template.format.return_value = "formatted prompt"
+    template_str = "Process these: {responses}"
+    result = build_prompt(template_str, df)
 
-    result = build_prompt(prompt_template, df)
-
-    prompt_template.format.assert_called_once_with(
-        responses=df.to_dict(orient="records")
-    )
-
-    assert result.prompt_string == "formatted prompt"
+    assert "foo" in result.prompt_string
+    assert "bar" in result.prompt_string
     assert result.response_ids == [101, 202]
 
 
@@ -287,11 +269,6 @@ def test_batch_task_input_df_else_branch(monkeypatch):
     batch_size = 3  # Allows up to 3 rows in a batch
     allowed_tokens = 40  # Enough for 4 rows but will split before that
 
-    # Expected behavior:
-    # - The first batch accumulates until 3 rows.
-    # - Since allowed_tokens is not exceeded, the else block executes for rows 2 and 3.
-    # - The last row (4) starts a new batch.
-
     batches = batch_task_input_df(df, allowed_tokens, batch_size, partition_key=None)
 
     # Ensure we get two batches
@@ -367,9 +344,6 @@ def test_split_overflowing_batch_requires_splitting(monkeypatch):
     df = pd.DataFrame({"response_id": [1, 2, 3], "text": ["a", "b", "c"]})
 
     # With allowed_tokens=50, the total token count (30+30+20=80) exceeds the limit.
-    # Expected behavior:
-    #   - The first row (30 tokens) forms the first sub-batch.
-    #   - The next two rows are combined (30+20=50 tokens) in a second sub-batch.
     sub_batches = split_overflowing_batch(df, allowed_tokens=50)
 
     assert len(sub_batches) == 2
@@ -400,9 +374,6 @@ def test_split_overflowing_batch_skip_invalid(monkeypatch):
     df = pd.DataFrame({"response_id": [1, 2, 3, 4], "text": ["a", "b", "c", "d"]})
 
     # With allowed_tokens=25, rows "a" and "d" (30 tokens each) are individually invalid.
-    # For rows "b" and "c":
-    #   - Row "b" (10 tokens) becomes one sub-batch.
-    #   - Row "c" (20 tokens) cannot join "b" (10+20=30>25) and becomes its own sub-batch.
     sub_batches = split_overflowing_batch(df, allowed_tokens=25)
 
     assert len(sub_batches) == 2
@@ -468,12 +439,11 @@ def test_generate_prompts(monkeypatch, dummy_input_data):
         dummy_batch_task_input_df,
     )
 
-    # Create a dummy prompt template.
-    prompt_template = DummyPromptTemplate("dummy template")
+    # Use a plain string template
+    template_str = "Here are the responses: {responses} Extra: {extra}"
 
-    # Call generate_prompts with an extra keyword argument.
     prompts = generate_prompts(
-        prompt_template,
+        template_str,
         dummy_input_data,
         batch_size=50,
         max_prompt_length=50000,
@@ -484,22 +454,18 @@ def test_generate_prompts(monkeypatch, dummy_input_data):
     # We expect two BatchPrompt objects since dummy_batch_task_input_df returns two batches.
     assert len(prompts) == 2
 
-    # For batch1, which has 2 rows, the dummy prompt template returns:
-    # "Formatted: 2 responses. foo"
-    assert prompts[0].prompt_string == "Prompt with 2 responses. foo"
-    # And response IDs should be converted to strings.
+    # Verify response IDs
     assert prompts[0].response_ids == [1, 2]
-
-    # For batch2, which has 1 row:
-    assert prompts[1].prompt_string == "Prompt with 1 responses. foo"
     assert prompts[1].response_ids == [3]
+
+    # Verify prompts contain the extra kwarg
+    assert "foo" in prompts[0].prompt_string
+    assert "foo" in prompts[1].prompt_string
 
 
 def test_generate_prompts_with_partition(monkeypatch):
     """
     Test generate_prompts when partitioning is applied.
-    We'll simulate partitioning by defining a dummy batch_task_input_df that splits the DataFrame
-    based on a partition key.
     """
 
     def dummy_partition_batch_task_input_df(
@@ -525,8 +491,7 @@ def test_generate_prompts_with_partition(monkeypatch):
         dummy_partition_batch_task_input_df,
     )
 
-    prompt_template = DummyPromptTemplate("dummy template")
-    # Create input data that includes a partition key 'group'.
+    template_str = "Process: {responses} Extra: {extra}"
     df = pd.DataFrame(
         {
             "response_id": [1, 2, 3, 4],
@@ -536,7 +501,7 @@ def test_generate_prompts_with_partition(monkeypatch):
     )
 
     prompts = generate_prompts(
-        prompt_template,
+        template_str,
         df,
         batch_size=50,
         max_prompt_length=50000,
@@ -552,10 +517,9 @@ def test_generate_prompts_with_partition(monkeypatch):
     expected = {(1, 2), (3, 4)}
     assert response_ids == expected
 
-    # Also verify that the prompt string includes the correct number of responses.
+    # Verify that the prompt string includes the extra kwarg
     for prompt in prompts:
-        if len(prompt.response_ids) == 2:
-            assert prompt.prompt_string == "Prompt with 2 responses. bar"
+        assert "bar" in prompt.prompt_string
 
 
 @pytest.mark.asyncio
@@ -576,7 +540,9 @@ async def test_call_llm_bad_request(monkeypatch, mock_llm):
             )
 
     mock_llm.ainvoke.side_effect = DummyBadRequestError()
-    results, failed_ids = await call_llm(batch_prompts, mock_llm)
+    results, failed_ids = await call_llm(
+        batch_prompts, mock_llm, output_model=SentimentAnalysisResponses
+    )
 
     # Verify that each response id in the result contains the expected failure details.
     for response_id in batch_prompts[0].response_ids:
@@ -627,13 +593,12 @@ async def test_batch_and_run_successful(monkeypatch, mock_llm, sample_df):
         lambda *args, **kwargs: processed_df,
     )
 
-    # Create a real PromptTemplate instance
-    from langchain_core.prompts import PromptTemplate
-
-    prompt_template = PromptTemplate.from_template("Test template {responses}")
-
     result_df, unprocessable_df = await batch_and_run(
-        sample_df, prompt_template, mock_llm, batch_size=2
+        sample_df,
+        "sentiment_analysis",
+        mock_llm,
+        output_model=SentimentAnalysisResponses,
+        batch_size=2,
     )
 
     assert len(result_df) == 3
@@ -697,13 +662,12 @@ async def test_batch_and_run_with_retries(monkeypatch, mock_llm, sample_df):
         mock_process_llm_responses,
     )
 
-    # Create a real PromptTemplate instance
-    from langchain_core.prompts import PromptTemplate
-
-    prompt_template = PromptTemplate.from_template("Test template {responses}")
-
     result_df, unprocessable_df = await batch_and_run(
-        sample_df, prompt_template, mock_llm, batch_size=2
+        sample_df,
+        "sentiment_analysis",
+        mock_llm,
+        output_model=SentimentAnalysisResponses,
+        batch_size=2,
     )
 
     assert len(result_df) == 2
@@ -744,7 +708,10 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
         nonlocal call_count
         if call_count == 0:  # First call - one success, two failures
             call_count += 1
-            return [{"response_id": 1, "llm_contribution": "result1"}], [2, 3]
+            return (
+                [{"response_id": 1, "llm_contribution": "result1"}],
+                [2, 3],
+            )
         else:  # Second call - one retry success, one permanent failure
             return [{"response_id": 2, "llm_contribution": "result2"}], [3]
 
@@ -777,13 +744,12 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
         }
     )
 
-    # Create a real PromptTemplate instance
-    from langchain_core.prompts import PromptTemplate
-
-    prompt_template = PromptTemplate.from_template("Test template {responses}")
-
     result_df, unprocessable_df = await batch_and_run(
-        test_df, prompt_template, mock_llm, batch_size=3
+        test_df,
+        "sentiment_analysis",
+        mock_llm,
+        output_model=SentimentAnalysisResponses,
+        batch_size=3,
     )
 
     assert len(result_df) == 2
@@ -792,48 +758,45 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
     assert set(unprocessable_df["response_id"]) == {3}
 
 
-def test_convert_to_prompt_template_string(monkeypatch):
+def test_load_prompt_template_string(monkeypatch):
     """
-    Test convert_to_prompt_template with a string input.
-    Verifies that a string is correctly loaded from a file and converted to a PromptTemplate.
+    Test load_prompt_template with a string input.
+    Verifies that a string is correctly loaded from a file and returned as a plain string.
     """
-    # Mock load_prompt_from_file
     monkeypatch.setattr(
         "themefinder.llm_batch_processor.load_prompt_from_file",
         lambda _: "This is a test prompt with {variable}",
     )
 
-    result = convert_to_prompt_template("test_prompt")
+    result = load_prompt_template("test_prompt")
 
-    assert isinstance(result, PromptTemplate)
-    assert result.template == "This is a test prompt with {variable}"
-    assert "variable" in result.input_variables
+    assert isinstance(result, str)
+    assert result == "This is a test prompt with {variable}"
 
 
-def test_convert_to_prompt_template_path(monkeypatch):
+def test_load_prompt_template_path(monkeypatch):
     """
-    Test convert_to_prompt_template with a Path input.
-    Verifies that a Path is correctly loaded and converted to a PromptTemplate.
+    Test load_prompt_template with a Path input.
+    Verifies that a Path is correctly loaded and returned as a plain string.
     """
-    # Mock load_prompt_from_file
     monkeypatch.setattr(
         "themefinder.llm_batch_processor.load_prompt_from_file",
         lambda _: "This is a path-based prompt with {variable}",
     )
 
-    result = convert_to_prompt_template(Path("test_prompt"))
+    result = load_prompt_template(Path("test_prompt"))
 
-    assert isinstance(result, PromptTemplate)
-    assert result.template == "This is a path-based prompt with {variable}"
+    assert isinstance(result, str)
+    assert result == "This is a path-based prompt with {variable}"
 
 
-def test_convert_to_prompt_template_invalid_type():
+def test_load_prompt_template_invalid_type():
     """
-    Test convert_to_prompt_template with an invalid input type.
+    Test load_prompt_template with an invalid input type.
     Verifies that the function raises a TypeError for unsupported input types.
     """
     with pytest.raises(TypeError):
-        convert_to_prompt_template(123)  # Integer is not a valid type
+        load_prompt_template(123)  # Integer is not a valid type
 
 
 def test_load_prompt_from_file_not_found(monkeypatch):

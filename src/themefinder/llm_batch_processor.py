@@ -8,9 +8,7 @@ from typing import Any, Optional
 import openai
 import pandas as pd
 import tiktoken
-from langchain_core.prompts import PromptTemplate
-from langchain_core.runnables import Runnable, RunnableConfig
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from tenacity import (
     before,
     before_sleep_log,
@@ -19,6 +17,7 @@ from tenacity import (
     wait_random_exponential,
 )
 
+from themefinder.llm import LLM, LLMResponse
 from themefinder.themefinder_logging import logger
 
 
@@ -30,45 +29,38 @@ class BatchPrompt:
 
 async def batch_and_run(
     input_df: pd.DataFrame,
-    prompt_template: str | Path | PromptTemplate,
-    llm: Runnable,
+    prompt_template: str | Path,
+    llm: LLM,
+    output_model: type[BaseModel],
     batch_size: int = 10,
     partition_key: str | None = None,
     integrity_check: bool = False,
     concurrency: int = 10,
-    config: RunnableConfig | None = None,
     **kwargs: Any,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Process a DataFrame of responses in batches using an LLM.
 
     Args:
-        input_df (pd.DataFrame): DataFrame containing input to be processed.
-            Must include a 'response_id' column.
-        prompt_template (Union[str, Path, PromptTemplate]): Template for LLM prompts.
-            Can be a string (file path), Path object, or PromptTemplate.
-        llm (Runnable): LangChain Runnable instance that will process the prompts.
-        batch_size (int, optional): Number of input rows to process in each batch.
-            Defaults to 10.
-        partition_key (str | None, optional): Optional column name to group input rows
-            before batching. Defaults to None.
-        integrity_check (bool, optional): If True, verifies that all input
-            response IDs are present in LLM output.
-            If False, no integrity checking or retrying occurs. Defaults to False.
-        concurrency (int, optional): Maximum number of simultaneous LLM calls allowed.
-            Defaults to 10.
-        **kwargs (Any): Additional keyword arguments to pass to the prompt template.
+        input_df: DataFrame containing input to be processed. Must include a 'response_id' column.
+        prompt_template: Name of a prompt file (without .txt extension) or Path object.
+        llm: LLM instance that will process the prompts.
+        output_model: Pydantic model class for structured LLM output.
+        batch_size: Number of input rows to process in each batch. Defaults to 10.
+        partition_key: Optional column name to group input rows before batching.
+        integrity_check: If True, verifies that all input response IDs are present in LLM output.
+        concurrency: Maximum number of simultaneous LLM calls allowed. Defaults to 10.
+        **kwargs: Additional keyword arguments to pass to the prompt template.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]:
-            A tuple containing two DataFrames:
-                - The first DataFrame contains the rows that were successfully processed by the LLM
-                - The second DataFrame contains the rows that could not be processed by the LLM
+            - The first DataFrame contains rows successfully processed by the LLM
+            - The second DataFrame contains rows that could not be processed
     """
 
     logger.info(f"Running batch and run with batch size {batch_size}")
-    prompt_template = convert_to_prompt_template(prompt_template)
+    template_str = load_prompt_template(prompt_template)
     batch_prompts = generate_prompts(
-        prompt_template,
+        template_str,
         input_df,
         batch_size=batch_size,
         partition_key=partition_key,
@@ -77,23 +69,21 @@ async def batch_and_run(
     processed_rows, failed_ids = await call_llm(
         batch_prompts=batch_prompts,
         llm=llm,
+        output_model=output_model,
         integrity_check=integrity_check,
         concurrency=concurrency,
-        config=config,
     )
     processed_results = process_llm_responses(processed_rows, input_df)
 
     if failed_ids:
         retry_df = input_df[input_df["response_id"].isin(failed_ids)]
-        retry_prompts = generate_prompts(
-            prompt_template, retry_df, batch_size=1, **kwargs
-        )
+        retry_prompts = generate_prompts(template_str, retry_df, batch_size=1, **kwargs)
         retry_results, unprocessable_ids = await call_llm(
             batch_prompts=retry_prompts,
             llm=llm,
+            output_model=output_model,
             integrity_check=integrity_check,
             concurrency=concurrency,
-            config=config,
         )
         retry_processed_results = process_llm_responses(retry_results, retry_df)
         unprocessable_df = retry_df.loc[retry_df["response_id"].isin(unprocessable_ids)]
@@ -107,42 +97,32 @@ def load_prompt_from_file(file_path: str | Path) -> str:
     """Load a prompt template from a text file in the prompts directory.
 
     Args:
-        file_path (str | Path): Name of the prompt file (without .txt extension)
-            or Path object pointing to the file.
+        file_path: Name of the prompt file (without .txt extension) or Path object.
 
     Returns:
-        str: Content of the prompt template file.
+        Content of the prompt template file.
     """
     parent_dir = Path(__file__).parent
     with Path.open(parent_dir / "prompts" / f"{file_path}.txt") as file:
         return file.read()
 
 
-def convert_to_prompt_template(prompt_template: str | Path | PromptTemplate):
-    """Convert various input types to a LangChain PromptTemplate.
+def load_prompt_template(prompt_template: str | Path) -> str:
+    """Load a prompt template string from a file.
 
     Args:
-        prompt_template (str | Path | PromptTemplate): Input template that can be either:
-            - str: Name of a prompt file in the prompts directory (without .txt extension)
-            - Path: Path object pointing to a prompt file
-            - PromptTemplate: Already initialized LangChain PromptTemplate
+        prompt_template: Name of a prompt file (without .txt extension) or Path object.
 
     Returns:
-        PromptTemplate: Initialised LangChain PromptTemplate object.
+        The prompt template string.
 
     Raises:
-        TypeError: If prompt_template is not one of the expected types.
-        FileNotFoundError: If using str/Path input and the prompt file doesn't exist.
+        TypeError: If prompt_template is not a str or Path.
     """
     if isinstance(prompt_template, str | Path):
-        prompt_content = load_prompt_from_file(prompt_template)
-        template = PromptTemplate.from_template(template=prompt_content)
-    elif isinstance(prompt_template, PromptTemplate):
-        template = prompt_template
-    else:
-        msg = "Invalid prompt_template type. Expected str, Path, or PromptTemplate."
-        raise TypeError(msg)
-    return template
+        return load_prompt_from_file(prompt_template)
+    msg = "Invalid prompt_template type. Expected str or Path."
+    raise TypeError(msg)
 
 
 def partition_dataframe(
@@ -162,11 +142,11 @@ def split_overflowing_batch(
     does not exceed the allowed token limit.
 
     Args:
-        batch (pd.DataFrame): The input DataFrame to split.
-        allowed_tokens (int): The maximum allowed number of tokens per sub-batch.
+        batch: The input DataFrame to split.
+        allowed_tokens: The maximum allowed number of tokens per sub-batch.
 
     Returns:
-        list[pd.DataFrame]: A list of sub-batches, each within the token limit.
+        A list of sub-batches, each within the token limit.
     """
     sub_batches = []
     current_indices = []
@@ -207,17 +187,17 @@ def batch_task_input_df(
     partition_key: Optional[str] = None,
 ) -> list[pd.DataFrame]:
     """
-    Partitions and batches a DataFrame according to a token limit and batch size, optionally using a partition key. Batches that exceed the token limit are further split.
+    Partitions and batches a DataFrame according to a token limit and batch size,
+    optionally using a partition key.
 
     Args:
-        df (pd.DataFrame): The input DataFrame to batch.
-        allowed_tokens (int): Maximum allowed tokens per batch.
-        batch_size (int): Maximum number of rows per batch before token filtering.
-        partition_key (Optional[str], optional): Column name to partition the DataFrame by.
-            Defaults to None.
+        df: The input DataFrame to batch.
+        allowed_tokens: Maximum allowed tokens per batch.
+        batch_size: Maximum number of rows per batch before token filtering.
+        partition_key: Column name to partition the DataFrame by.
 
     Returns:
-        list[pd.DataFrame]: A list of batches, each within the specified token and size limits.
+        A list of batches, each within the specified token and size limits.
     """
     batches = []
     partitions = partition_dataframe(df, partition_key)
@@ -238,7 +218,7 @@ def batch_task_input_df(
 
 
 def generate_prompts(
-    prompt_template: PromptTemplate,
+    template_str: str,
     input_data: pd.DataFrame,
     batch_size: int = 50,
     max_prompt_length: int = 50_000,
@@ -247,49 +227,40 @@ def generate_prompts(
 ) -> list[BatchPrompt]:
     """
     Generate a list of BatchPrompt objects by splitting the input DataFrame into batches
-    and formatting each batch using a prompt template.
-
-    The function first calculates the token length of the prompt template to determine
-    the allowed tokens available for the input data. It then splits the input data into batches,
-    optionally partitioning by a specified key. Each batch is then formatted into a prompt string
-    using the provided prompt template, and a BatchPrompt is created containing the prompt string
-    and a list of response IDs from the batch.
+    and formatting each batch using a prompt template string.
 
     Args:
-        prompt_template (PromptTemplate): An object with a 'template' attribute and a 'format' method
-            used to create a prompt string from a list of response dictionaries.
-        input_data (pd.DataFrame): A DataFrame containing the input responses, with at least a
-            'response_id' column.
-        batch_size (int, optional): Maximum number of rows to include in each batch. Defaults to 50.
-        max_prompt_length (int, optional): The maximum total token length allowed for the prompt,
-            including both the prompt template and the input data. Defaults to 50,000.
-        partition_key (str | None, optional): Column name used to partition the DataFrame before batching.
-            If provided, the DataFrame will be grouped by this key so that rows with the same value
-            remain in the same batch. Defaults to None.
-        **kwargs: Additional keyword arguments to pass to the prompt template's format method.
+        template_str: The prompt template string with {variable} placeholders.
+        input_data: A DataFrame containing the input responses, with at least a 'response_id' column.
+        batch_size: Maximum number of rows to include in each batch. Defaults to 50.
+        max_prompt_length: The maximum total token length allowed for the prompt. Defaults to 50,000.
+        partition_key: Column name used to partition the DataFrame before batching.
+        **kwargs: Additional keyword arguments to pass to the template's format method.
 
     Returns:
-        list[BatchPrompt]: A list of BatchPrompt objects where each object contains:
-            - prompt_string: The formatted prompt string for a batch.
-            - response_ids: A list of response IDs corresponding to the rows in that batch.
+        A list of BatchPrompt objects.
     """
-    prompt_token_length = calculate_string_token_length(prompt_template.template)
+    prompt_token_length = calculate_string_token_length(template_str)
     allowed_tokens_for_data = max_prompt_length - prompt_token_length
     batches = batch_task_input_df(
         input_data, allowed_tokens_for_data, batch_size, partition_key
     )
-    prompts = [build_prompt(prompt_template, batch, **kwargs) for batch in batches]
+    prompts = [build_prompt(template_str, batch, **kwargs) for batch in batches]
     return prompts
 
 
 async def call_llm(
     batch_prompts: list[BatchPrompt],
-    llm: Runnable,
+    llm: LLM,
+    output_model: type[BaseModel],
     concurrency: int = 10,
     integrity_check: bool = False,
-    config: RunnableConfig | None = None,
 ) -> tuple[list[dict], list[int]]:
-    """Process multiple batches of prompts concurrently through an LLM with retry logic."""
+    """Process multiple batches of prompts concurrently through an LLM with retry logic.
+
+    Returns:
+        Tuple of (processed_rows, failed_ids).
+    """
     semaphore = asyncio.Semaphore(concurrency)
 
     @retry(
@@ -302,13 +273,13 @@ async def call_llm(
     async def async_llm_call(batch_prompt) -> tuple[list[dict], list[int]]:
         async with semaphore:
             try:
-                llm_response = await llm.ainvoke(
-                    batch_prompt.prompt_string, config=config
+                llm_response: LLMResponse = await llm.ainvoke(
+                    batch_prompt.prompt_string, output_model=output_model
                 )
                 all_results = (
-                    llm_response.model_dump()
-                    if hasattr(llm_response, "model_dump")
-                    else llm_response
+                    llm_response.parsed.model_dump()
+                    if hasattr(llm_response.parsed, "model_dump")
+                    else llm_response.parsed
                 )
                 responses = (
                     all_results["responses"]
@@ -349,13 +320,11 @@ def get_missing_response_ids(
     """Identify which response IDs are missing from the LLM's parsed response.
 
     Args:
-        input_response_ids (list[int]): List of response IDs that were included in the
-            original prompt.
-        parsed_response (dict): Parsed response from the LLM containing a 'responses' key
-            with a list of dictionaries, each containing a 'response_id' field.
+        input_response_ids: List of response IDs that were included in the original prompt.
+        parsed_response: Parsed response from the LLM containing a 'responses' key.
 
     Returns:
-        list[int]: List of response IDs that are missing from the parsed response.
+        List of response IDs that are missing from the parsed response.
     """
 
     response_ids_set = {int(response_id) for response_id in input_response_ids}
@@ -377,16 +346,11 @@ def process_llm_responses(
     """Process and merge LLM responses with the original DataFrame.
 
     Args:
-        llm_responses (list[dict[str, Any]]): List of LLM response dictionaries, where each
-            dictionary contains a 'responses' key with a list of individual response objects.
-        responses (pd.DataFrame): Original DataFrame containing the input responses, must
-            include a 'response_id' column.
+        llm_responses: List of LLM response dictionaries.
+        responses: Original DataFrame containing the input responses.
 
     Returns:
-        pd.DataFrame: A merged DataFrame containing:
-            - If response_id exists in LLM output: Original responses joined with LLM results
-              on response_id (inner join)
-            - If no response_id in LLM output: DataFrame containing only the LLM results
+        A merged DataFrame.
     """
     responses.loc[:, "response_id"] = responses["response_id"].astype(int)
     task_responses = pd.DataFrame(llm_responses)
@@ -401,12 +365,11 @@ def calculate_string_token_length(input_text: str, model: str = None) -> int:
     Calculates the number of tokens in a given string using the specified model's tokenizer.
 
     Args:
-        input_text (str): The input string to tokenize.
-        model (str, optional): The model name used for tokenization. If not provided,
-            uses the MODEL_NAME environment variable or defaults to "gpt-4o".
+        input_text: The input string to tokenize.
+        model: The model name used for tokenization. Defaults to MODEL_NAME env var or "gpt-4o".
 
     Returns:
-        int: The number of tokens in the input string.
+        The number of tokens in the input string.
     """
     # Use the MODEL_NAME env var if no model is provided; otherwise default to "gpt-4o"
     model = model or os.environ.get("MODEL_NAME", "gpt-4o")
@@ -415,30 +378,19 @@ def calculate_string_token_length(input_text: str, model: str = None) -> int:
     return number_of_tokens
 
 
-def build_prompt(
-    prompt_template: PromptTemplate, input_batch: pd.DataFrame, **kwargs
-) -> BatchPrompt:
+def build_prompt(template_str: str, input_batch: pd.DataFrame, **kwargs) -> BatchPrompt:
     """
-    Constructs a BatchPrompt by formatting a prompt template with a batch of responses.
-
-    The function converts the input DataFrame batch into a list of dictionaries (one per row) and passes
-    this list to the prompt template's format method under the key 'responses', along with any additional
-    keyword arguments. It also extracts the 'response_id' column from the batch,
-    and uses these to create the BatchPrompt.
+    Constructs a BatchPrompt by formatting a template string with a batch of responses.
 
     Args:
-        prompt_template (PromptTemplate): An object with a 'template' attribute and a 'format' method that is used
-            to generate the prompt string.
-        input_batch (pd.DataFrame): A DataFrame containing the batch of responses, which must include a 'response_id'
-            column.
-        **kwargs: Additional keyword arguments to pass to the prompt template's format method.
+        template_str: The prompt template string with {variable} placeholders.
+        input_batch: A DataFrame containing the batch of responses.
+        **kwargs: Additional keyword arguments to pass to the format method.
 
     Returns:
-        BatchPrompt: An object containing:
-            - prompt_string: The formatted prompt string for the batch.
-            - response_ids: A list of response IDs (as strings) corresponding to the responses in the batch.
+        A BatchPrompt containing the formatted prompt string and response IDs.
     """
-    prompt = prompt_template.format(
+    prompt = template_str.format(
         responses=input_batch.to_dict(orient="records"), **kwargs
     )
     response_ids = input_batch["response_id"].astype(int).to_list()
