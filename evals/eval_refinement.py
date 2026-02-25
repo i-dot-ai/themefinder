@@ -62,9 +62,7 @@ async def evaluate_refinement(
 
     # Branch: Langfuse dataset vs local fallback
     if langfuse_ctx.is_enabled:
-        result = await _run_with_langfuse(
-            langfuse_ctx, config, llm, eval_llm
-        )
+        result = await _run_with_langfuse(langfuse_ctx, config, llm, eval_llm)
     else:
         result = await _run_local_fallback(config, llm, eval_llm)
 
@@ -74,9 +72,7 @@ async def evaluate_refinement(
     return result
 
 
-async def _run_with_langfuse(
-    ctx, config: DatasetConfig, llm, eval_llm
-) -> dict:
+async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm) -> dict:
     """Run evaluation with manual dataset iteration for proper trace control.
 
     Args:
