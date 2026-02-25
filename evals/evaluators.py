@@ -4,18 +4,24 @@ Provides evaluator functions that can be used with Langfuse's run_experiment() A
 Each evaluator returns a Langfuse Evaluation object with name, value, and optional comment.
 """
 
+import json
 import logging
 import random
+import re
 from functools import lru_cache
 from typing import Any
-
-from langchain_core.output_parsers.json import parse_json_markdown
 
 import numpy as np
 from sklearn import metrics
 from sklearn.preprocessing import MultiLabelBinarizer
 
 logger = logging.getLogger("themefinder.evals.evaluators")
+
+
+def _parse_json_markdown(text: str) -> dict:
+    """Extract JSON from markdown code fences or raw text."""
+    match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+    return json.loads(match.group(1) if match else text)
 
 
 def _make_evaluation(name: str, value: float, comment: str = ""):
@@ -72,7 +78,7 @@ def _parse_evaluation_response(response_content: str) -> dict[str, Any]:
     Returns:
         Dict with scores, average, threshold counts, and per-theme details.
     """
-    parsed = parse_json_markdown(response_content)
+    parsed = _parse_json_markdown(response_content)
     evaluations = parsed.get("evaluations", parsed)
 
     scores = []
@@ -174,7 +180,7 @@ def _calculate_groundedness_scores(
         )
     )
 
-    return _parse_evaluation_response(response.content)
+    return _parse_evaluation_response(response.parsed)
 
 
 def _calculate_coverage_scores(
@@ -205,7 +211,7 @@ def _calculate_coverage_scores(
         )
     )
 
-    return _parse_evaluation_response(response.content)
+    return _parse_evaluation_response(response.parsed)
 
 
 def create_groundedness_evaluator(llm: Any):
@@ -358,7 +364,7 @@ def _calculate_title_specificity(
         )
     )
 
-    parsed = parse_json_markdown(response.content)
+    parsed = _parse_json_markdown(response.parsed)
     evaluations = parsed.get("evaluations", parsed)
 
     n_specific = 0
@@ -450,7 +456,7 @@ def _calculate_condensation_scores(
         )
     )
 
-    parsed = parse_json_markdown(response.content)
+    parsed = _parse_json_markdown(response.parsed)
 
     return {
         "compression_quality": parsed.get("compression_quality", 0),
@@ -538,7 +544,7 @@ def _calculate_refinement_scores(
         )
     )
 
-    parsed = parse_json_markdown(response.content)
+    parsed = _parse_json_markdown(response.parsed)
 
     return {metric: parsed.get(metric, 0) for metric in REFINEMENT_METRICS} | {
         f"{metric}_reasoning": parsed.get(f"{metric}_reasoning", "")

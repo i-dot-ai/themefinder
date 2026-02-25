@@ -1,10 +1,11 @@
 import json
+import os
 
 import numpy as np
 import pandas as pd
-from langchain_openai import AzureChatOpenAI
 from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
+from themefinder.llm import OpenAILLM
 from utils import read_and_render
 
 # Minimum score (0-5) to consider a topic well-grounded or captured
@@ -32,14 +33,14 @@ def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
 def calculate_generation_metrics(
     generated_topics: pd.DataFrame,
     topic_framework: dict,
-    callbacks: list | None = None,
+    llm=None,
 ) -> dict[str, float | int]:
     """Calculate precision and recall metrics for generated themes against a framework.
 
     Args:
         generated_topics (pd.DataFrame): DataFrame containing generated themes as columns
         topic_framework (dict): Dictionary containing reference framework themes
-        callbacks (list | None): Optional list of LangChain callbacks for tracing
+        llm: Optional LLM instance. If not provided, creates one from env vars.
 
     Returns:
         dict[str, float | int]: Dictionary with keys:
@@ -49,27 +50,27 @@ def calculate_generation_metrics(
             - Recall N not Captured: Count of framework topics not captured
             - Recall Average topic Representation: Mean representation score
     """
-    callbacks = callbacks or []
-    llm = AzureChatOpenAI(
-        model_name="gpt-4o",
-        temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
-        callbacks=callbacks,
-    )
-    precision_scores = llm.invoke(
+    if llm is None:
+        llm = OpenAILLM(
+            model=os.getenv("DEPLOYMENT_NAME"),
+            request_kwargs={"temperature": 0},
+            base_url=os.getenv("LLM_GATEWAY_URL"),
+            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+        )
+    precision_response = llm.invoke(
         read_and_render(
             "generation_eval.txt",
             {"topic_list_1": generated_topics, "topic_list_2": topic_framework},
         )
     )
-    precision_scores = list(json.loads(precision_scores.content).values())
-    recall_scores = llm.invoke(
+    precision_scores = list(json.loads(precision_response.parsed).values())
+    recall_response = llm.invoke(
         read_and_render(
             "generation_eval.txt",
             {"topic_list_1": topic_framework, "topic_list_2": generated_topics},
         )
     )
-    recall_scores = list(json.loads(recall_scores.content).values())
+    recall_scores = list(json.loads(recall_response.parsed).values())
     return {
         "Precision N topics": len(generated_topics),
         "Precision N not well grounded": sum(
