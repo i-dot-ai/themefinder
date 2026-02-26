@@ -7,7 +7,6 @@ from langchain_core.prompts import PromptTemplate
 from themefinder import (
     cross_cutting_themes,
     find_themes,
-    sentiment_analysis,
     theme_condensation,
     theme_generation,
     theme_mapping,
@@ -21,8 +20,6 @@ from themefinder.models import (
     CrossCuttingThemeMapping,
     CrossCuttingThemeMappingResponse,
     Position,
-    SentimentAnalysisOutput,
-    SentimentAnalysisResponses,
     Theme,
     ThemeCondensationResponses,
     ThemeGenerationResponses,
@@ -61,37 +58,7 @@ async def test_batch_and_run_missing_id(mock_llm, sample_df):
 
 
 @pytest.mark.asyncio
-async def test_sentiment_analysis(mock_llm, sample_df):
-    """Test sentiment analysis with mocked LLM responses."""
-    mock_response = SentimentAnalysisResponses(
-        responses=[
-            SentimentAnalysisOutput(response_id=1, position=Position.AGREEMENT),
-            SentimentAnalysisOutput(response_id=2, position=Position.DISAGREEMENT),
-        ]
-    )
-
-    with patch(
-        "themefinder.llm_batch_processor.call_llm", new_callable=AsyncMock
-    ) as mock_call_llm:
-        mock_call_llm.return_value = (
-            [
-                mock_response.responses[0].model_dump(),
-                mock_response.responses[1].model_dump(),
-            ],
-            [],
-        )
-
-        result, _ = await sentiment_analysis(
-            sample_df, mock_llm, question="test question", batch_size=2
-        )
-
-        assert isinstance(result, pd.DataFrame)
-        assert "position" in result.columns
-        assert mock_call_llm.await_count == 1
-
-
-@pytest.mark.asyncio
-async def test_theme_generation(mock_llm, sample_sentiment_df):
+async def test_theme_generation(mock_llm, sample_responses_df):
     """Test theme generation with mocked LLM responses."""
     mock_themes = ThemeGenerationResponses(
         responses=[
@@ -117,7 +84,7 @@ async def test_theme_generation(mock_llm, sample_sentiment_df):
         )
 
         result, _ = await theme_generation(
-            sample_sentiment_df, mock_llm, question="test question", batch_size=2
+            sample_responses_df, mock_llm, question="test question", batch_size=2
         )
 
         assert isinstance(result, pd.DataFrame)
@@ -304,7 +271,7 @@ async def test_theme_refinement(mock_llm):
 
 
 @pytest.mark.asyncio
-async def test_theme_mapping(mock_llm, sample_sentiment_df):
+async def test_theme_mapping(mock_llm, sample_responses_df):
     """Test theme mapping with mocked LLM responses."""
     refined_df = pd.DataFrame({"topic_id": ["1", "2"], "topic": ["theme1", "theme2"]})
 
@@ -333,7 +300,7 @@ async def test_theme_mapping(mock_llm, sample_sentiment_df):
         )
 
         result, _ = await theme_mapping(
-            sample_sentiment_df,
+            sample_responses_df,
             mock_llm,
             question="test question",
             refined_themes_df=refined_df,
@@ -351,15 +318,6 @@ async def test_find_themes(mock_llm, sample_df):
     """Test find_themes with mocked LLM responses."""
     input_df = sample_df.copy()
     input_df = input_df.rename(columns={"text": "response"})
-
-    sentiment_responses = [
-        SentimentAnalysisOutput(
-            response_id=1, position=Position.AGREEMENT
-        ).model_dump(),
-        SentimentAnalysisOutput(
-            response_id=2, position=Position.DISAGREEMENT
-        ).model_dump(),
-    ]
 
     theme_generation_responses = [
         Theme(
@@ -406,7 +364,6 @@ async def test_find_themes(mock_llm, sample_df):
         "themefinder.llm_batch_processor.call_llm", new_callable=AsyncMock
     ) as mock_call_llm:
         mock_call_llm.side_effect = [
-            (sentiment_responses, []),
             (theme_generation_responses, []),
             (theme_condensation_responses, []),
             (theme_refinement_responses, []),
@@ -421,11 +378,10 @@ async def test_find_themes(mock_llm, sample_df):
             verbose=False,
         )
 
-        assert mock_call_llm.await_count == 6
+        assert mock_call_llm.await_count == 5
 
         expected_keys = [
             "question",
-            "sentiment",
             "themes",
             "mapping",
             "detailed_responses",
@@ -438,7 +394,6 @@ async def test_find_themes(mock_llm, sample_df):
         mock_call_llm.reset_mock()
 
         mock_call_llm.side_effect = [
-            (sentiment_responses, []),
             (theme_generation_responses, []),
             (theme_condensation_responses, []),
             (theme_refinement_responses, []),
@@ -453,7 +408,7 @@ async def test_find_themes(mock_llm, sample_df):
             verbose=False,
         )
 
-        assert mock_call_llm.await_count == 6
+        assert mock_call_llm.await_count == 5
 
 
 def test_cross_cutting_themes():

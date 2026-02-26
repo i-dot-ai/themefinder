@@ -1,6 +1,5 @@
 from .tasks import (
     find_themes,
-    sentiment_analysis,
     theme_clustering,
     theme_condensation,
     theme_generation,
@@ -12,7 +11,6 @@ from .tasks import (
 
 __all__ = [
     "find_themes",
-    "sentiment_analysis",
     "theme_clustering",
     "theme_condensation",
     "theme_generation",
