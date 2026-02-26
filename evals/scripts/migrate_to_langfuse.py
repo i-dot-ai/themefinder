@@ -57,7 +57,7 @@ def migrate_stage(client, dataset: str, stage: str) -> None:
     Args:
         client: Langfuse client
         dataset: Dataset identifier (e.g., "gambling_XS")
-        stage: Eval stage (generation, sentiment, mapping, condensation, refinement)
+        stage: Eval stage (generation, mapping, condensation, refinement)
     """
     config = DatasetConfig(dataset=dataset, stage=stage)
     print(f"Migrating {config.name}...")
@@ -97,7 +97,7 @@ def migrate_all(dataset: str = "gambling_XS", stage: str | None = None) -> None:
     """
     client = get_langfuse_client()
 
-    stages = ["generation", "sentiment", "mapping", "condensation", "refinement"]
+    stages = ["generation", "mapping", "condensation", "refinement"]
 
     if stage:
         if stage not in stages:

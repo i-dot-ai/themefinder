@@ -264,33 +264,6 @@ def create_coverage_evaluator(llm: Any):
     return coverage_evaluator
 
 
-def sentiment_accuracy_evaluator(
-    *, output: dict, expected_output: dict, **kwargs
-) -> Any:
-    """Aggregate accuracy evaluator for sentiment analysis."""
-    try:
-        output_positions = output.get("positions", {})
-        expected_positions = expected_output.get("positions", {})
-
-        if not expected_positions:
-            return _make_evaluation("accuracy", 0.0, "No expected positions")
-
-        correct = sum(
-            1
-            for rid, pos in output_positions.items()
-            if expected_positions.get(rid) == pos
-        )
-        total = len(expected_positions)
-        accuracy = correct / total if total > 0 else 0.0
-
-        return _make_evaluation(
-            "accuracy", round(accuracy, 3), f"{correct}/{total} correct predictions"
-        )
-    except Exception as e:
-        logger.error(f"Sentiment accuracy evaluation failed: {e}")
-        return _make_evaluation("accuracy", 0.0, f"Error: {e}")
-
-
 def mapping_f1_evaluator(*, output: dict, expected_output: dict, **kwargs) -> Any:
     """Multi-label F1 evaluator for theme mapping."""
     try:

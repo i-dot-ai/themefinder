@@ -17,7 +17,7 @@ import pandas as pd
 
 logger = logging.getLogger("themefinder.evals.datasets")
 
-VALID_STAGES = ["generation", "sentiment", "mapping", "condensation", "refinement"]
+VALID_STAGES = ["generation", "mapping", "condensation", "refinement"]
 
 # Data directory for local eval datasets
 DATA_DIR = Path(__file__).parent / "data"
@@ -140,29 +140,6 @@ def _load_themes(
         return json.load(f)
 
 
-def _load_sentiment(
-    config: DatasetConfig, question_part: str = "question_part_1"
-) -> dict[str, str]:
-    """Load sentiment labels.
-
-    Args:
-        config: Dataset configuration
-        question_part: Which question part to load
-
-    Returns:
-        Dict mapping response_id to position (AGREE/DISAGREE/UNCLEAR)
-    """
-    outputs_dir = config.local_path / "outputs" / "mapping"
-    date_dirs = sorted(outputs_dir.iterdir(), reverse=True)
-    if not date_dirs:
-        raise FileNotFoundError(f"No output dates found in {outputs_dir}")
-
-    sentiment_path = date_dirs[0] / question_part / "sentiment.jsonl"
-    df = pd.read_json(sentiment_path, lines=True)
-
-    return dict(zip(df["response_id"].astype(str), df["position"]))
-
-
 def _load_mapping(
     config: DatasetConfig, question_part: str = "question_part_1"
 ) -> dict[str, list[str]]:
@@ -229,37 +206,6 @@ def load_local_generation_data(config: DatasetConfig) -> list[dict]:
                     ),
                 },
                 "expected_output": {"themes": themes},
-                "metadata": {"question_part": question_part},
-            }
-        )
-
-    return items
-
-
-def load_local_sentiment_data(config: DatasetConfig) -> list[dict]:
-    """Load sentiment eval data from local files.
-
-    Args:
-        config: Dataset configuration
-
-    Returns:
-        List of dicts (one per question) with input and expected_output
-    """
-    items = []
-    for question_part in _get_question_parts(config):
-        question = _load_question(config, question_part)
-        responses = _load_responses(config, question_part)
-        positions = _load_sentiment(config, question_part)
-
-        items.append(
-            {
-                "input": {
-                    "question": question,
-                    "responses": responses[["response_id", "response"]].to_dict(
-                        orient="records"
-                    ),
-                },
-                "expected_output": {"positions": positions},
                 "metadata": {"question_part": question_part},
             }
         )
@@ -349,7 +295,6 @@ def load_local_data(config: DatasetConfig) -> list[dict]:
     """
     loaders = {
         "generation": load_local_generation_data,
-        "sentiment": load_local_sentiment_data,
         "mapping": load_local_mapping_data,
         "condensation": load_local_condensation_data,
         "refinement": load_local_refinement_data,

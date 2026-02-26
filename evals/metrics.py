@@ -11,24 +11,6 @@ from utils import read_and_render
 GROUNDEDNESS_THRESHOLD = 3
 
 
-def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
-    """Calculate accuracy metrics for sentiment analysis predictions.
-
-    Args:
-        df (pd.DataFrame): DataFrame containing 'ai_position' and 'supervisor_position' columns
-
-    Returns:
-        dict[str, float]: Dictionary with keys:
-            - accuracy: Score comparing AI and supervisor positions
-    """
-    ai = df["ai_position"]
-    supervisor = df["supervisor_position"]
-    correct_predictions = (ai == supervisor).sum()
-    total_predictions = len(df)
-    accuracy = correct_predictions / total_predictions
-    return {"accuracy": accuracy}
-
-
 def calculate_generation_metrics(
     generated_topics: pd.DataFrame,
     topic_framework: dict,

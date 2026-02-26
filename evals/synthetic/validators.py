@@ -218,7 +218,6 @@ def _validate_outputs(
 
         # Check required output files exist
         for required_file in [
-            "sentiment.jsonl",
             "mapping.jsonl",
             "detail_detection.jsonl",
         ]:
