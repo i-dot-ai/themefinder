@@ -89,10 +89,10 @@ jobs:
 
           if [ "$EVAL_TYPE" = "all" ]; then
             echo "Running all evals for $DATASET..."
-            uv run python benchmark.py --quick 2>&1 | tee results.txt
+            uv run python benchmark.py --dataset gambling_XS --runs 1 --models gpt-4.1-mini locailabs/locai-l1-large-2011 2>&1 | tee results.txt
           else
             echo "Running $EVAL_TYPE eval for $DATASET..."
-            uv run python benchmark.py --quick --evals "$EVAL_TYPE" 2>&1 | tee results.txt
+            uv run python benchmark.py --dataset gambling_XS --runs 1 --models gpt-4.1-mini locailabs/locai-l1-large-2011 --evals "$EVAL_TYPE" 2>&1 | tee results.txt
           fi
 
           # Check for successful eval output
@@ -106,9 +106,11 @@ jobs:
           BENCHMARK_ID=$(grep "BENCHMARK_ID=" results.txt | tail -1 | cut -d= -f2)
           echo "benchmark_id=$BENCHMARK_ID" >> $GITHUB_OUTPUT
 
-          # Extract score summary lines
-          SCORES=$(grep -E "^\s+(question|f1|accuracy)" results.txt | head -6 | sed 's/^[[:space:]]*//' | tr '\n' ' · ' || echo "")
-          echo "scores=$SCORES" >> $GITHUB_OUTPUT
+          # Extract score summary lines with model prefixes
+          SCORES=$(grep -E "^\s+\[.*\].*:" results.txt | sed 's/^[[:space:]]*//' | tr '\n' '\n' || echo "")
+          echo "scores<<EOF" >> $GITHUB_OUTPUT
+          echo "$SCORES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Upload results
         if: always()
