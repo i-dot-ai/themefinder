@@ -571,7 +571,7 @@ class BenchmarkRunner:
                             # Thread-safe results collection and saving
                             async with self._results_lock:
                                 self.results.append(result)
-                                self._print_scores(result.scores)
+                                self._print_scores(result.scores, result.model_tag)
                                 self._save_incremental()
                                 self._save_outputs(result)
                             break  # Success, exit retry loop
@@ -746,8 +746,8 @@ class BenchmarkRunner:
             latency_seconds=metrics.latency_seconds,
         )
 
-    def _print_scores(self, scores: dict[str, float]) -> None:
-        """Print scores inline."""
+    def _print_scores(self, scores: dict[str, float], model_tag: str = "") -> None:
+        """Print scores inline with model name prefix."""
         if not scores:
             console.print("  [dim]No scores returned[/dim]")
             return
@@ -764,7 +764,11 @@ class BenchmarkRunner:
         score_strs = [f"{k}: {v:.3f}" for k, v in other_scores.items()]
 
         if score_strs:
-            console.print(f"  [green]{', '.join(score_strs)}[/green]", end="")
+            # Print with model tag prefix for Slack parsing
+            model_prefix = f"[{model_tag}] " if model_tag else ""
+            console.print(
+                f"  {model_prefix}[green]{', '.join(score_strs)}[/green]", end=""
+            )
 
         if validation_errors > 0:
             console.print(

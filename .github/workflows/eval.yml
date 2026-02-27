@@ -107,9 +107,11 @@ jobs:
           BENCHMARK_ID=$(grep "BENCHMARK_ID=" results.txt | tail -1 | cut -d= -f2)
           echo "benchmark_id=$BENCHMARK_ID" >> $GITHUB_OUTPUT
 
-          # Extract score summary lines
-          SCORES=$(grep -E "^\s+(question|f1|accuracy)" results.txt | head -6 | sed 's/^[[:space:]]*//' | tr '\n' ' · ' || echo "")
-          echo "scores=$SCORES" >> $GITHUB_OUTPUT
+          # Extract score summary lines with model prefixes
+          SCORES=$(grep -E "^\s+\[.*\].*:" results.txt | sed 's/^[[:space:]]*//' | tr '\n' '\n' || echo "")
+          echo "scores<<EOF" >> $GITHUB_OUTPUT
+          echo "$SCORES" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Upload results
         if: always()
