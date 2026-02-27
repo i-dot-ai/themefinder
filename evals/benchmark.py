@@ -69,12 +69,10 @@ from eval_condensation import evaluate_condensation  # noqa: E402
 from eval_generation import evaluate_generation  # noqa: E402
 from eval_mapping import evaluate_mapping  # noqa: E402
 from eval_refinement import evaluate_refinement  # noqa: E402
-from eval_sentiment import evaluate_sentiment  # noqa: E402
 
 console = Console()
 
 EVAL_FUNCS = {
-    "sentiment": evaluate_sentiment,
     "mapping": evaluate_mapping,
     "generation": evaluate_generation,
     "condensation": evaluate_condensation,
@@ -394,7 +392,6 @@ class BenchmarkConfig:
     runs_per_model: int = 5
     evals: list[str] = field(
         default_factory=lambda: [
-            "sentiment",
             "mapping",
             "generation",
             "condensation",
@@ -1047,8 +1044,8 @@ Examples:
   # Run specific models by name
   uv run python benchmark.py --models gpt-4o gemini-2.5-flash --runs 2
 
-  # Run only sentiment and mapping evals
-  uv run python benchmark.py --evals sentiment mapping
+  # Run only mapping evals
+  uv run python benchmark.py --evals mapping
         """,
     )
     parser.add_argument(
@@ -1065,7 +1062,7 @@ Examples:
     parser.add_argument(
         "--evals",
         nargs="+",
-        default=["sentiment", "mapping", "generation", "condensation", "refinement"],
+        default=["mapping", "generation", "condensation", "refinement"],
         help="Evaluations to run (default: all)",
     )
     parser.add_argument(

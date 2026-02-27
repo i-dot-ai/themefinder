@@ -13,7 +13,6 @@ from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
 from themefinder.models import (
     DetailDetectionResponses,
     HierarchicalClusteringResponse,
-    SentimentAnalysisResponses,
     ThemeCondensationResponses,
     ThemeGenerationResponses,
     ThemeMappingResponses,
@@ -37,12 +36,11 @@ async def find_themes(
     """Process survey responses through a multi-stage theme analysis pipeline.
 
     This pipeline performs sequential analysis steps:
-    1. Sentiment analysis of responses
-    2. Initial theme generation
-    3. Theme condensation (combining similar themes)
-    4. Theme refinement
-    5. Mapping responses to refined themes
-    6. Detail detection
+    1. Initial theme generation
+    2. Theme condensation (combining similar themes)
+    3. Theme refinement
+    4. Mapping responses to refined themes
+    5. Detail detection
 
     Args:
         responses_df (pd.DataFrame): DataFrame containing survey responses
@@ -59,7 +57,6 @@ async def find_themes(
     Returns:
         dict[str, str | pd.DataFrame]: Dictionary containing results from each pipeline stage:
             - question: The survey question string
-            - sentiment: DataFrame with sentiment analysis results
             - themes: DataFrame with the final themes output
             - mapping: DataFrame mapping responses to final themes
             - detailed_responses: DataFrame with detail detection results
@@ -67,16 +64,8 @@ async def find_themes(
     """
     logger.setLevel(logging.INFO if verbose else logging.CRITICAL)
 
-    sentiment_df, sentiment_unprocessables = await sentiment_analysis(
-        responses_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-        concurrency=concurrency,
-        config=config,
-    )
     theme_df, _ = await theme_generation(
-        sentiment_df,
+        responses_df,
         llm,
         question=question,
         system_prompt=system_prompt,
@@ -101,7 +90,7 @@ async def find_themes(
     )
 
     mapping_df, mapping_unprocessables = await theme_mapping(
-        sentiment_df[["response_id", "response"]],
+        responses_df[["response_id", "response"]],
         llm,
         question=question,
         refined_themes_df=refined_theme_df,
@@ -122,67 +111,11 @@ async def find_themes(
     logger.info("Provide feedback or report bugs: packages@cabinetoffice.gov.uk")
     return {
         "question": question,
-        "sentiment": sentiment_df,
         "themes": refined_theme_df,
         "mapping": mapping_df,
         "detailed_responses": detailed_df,
-        "unprocessables": pd.concat([sentiment_unprocessables, mapping_unprocessables]),
+        "unprocessables": mapping_unprocessables,
     }
-
-
-async def sentiment_analysis(
-    responses_df: pd.DataFrame,
-    llm: RunnableWithFallbacks,
-    question: str,
-    batch_size: int = 20,
-    prompt_template: str | Path | PromptTemplate = "sentiment_analysis",
-    system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
-    concurrency: int = 10,
-    config: RunnableConfig | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Perform sentiment analysis on survey responses using an LLM.
-
-    This function processes survey responses in batches to analyze their sentiment
-    using a language model. It maintains response integrity by checking response IDs.
-
-    Args:
-        responses_df (pd.DataFrame): DataFrame containing survey responses to analyze.
-            Must contain 'response_id' and 'response' columns.
-        llm (RunnableWithFallbacks): Language model instance to use for sentiment analysis.
-        question (str): The survey question.
-        batch_size (int, optional): Number of responses to process in each batch.
-            Defaults to 20.
-        prompt_template (str | Path | PromptTemplate, optional): Template for structuring
-            the prompt to the LLM. Can be a string identifier, path to template file,
-            or PromptTemplate instance. Defaults to "sentiment_analysis".
-        system_prompt (str): System prompt to guide the LLM's behavior.
-            Defaults to CONSULTATION_SYSTEM_PROMPT.
-        concurrency (int): Number of concurrent API calls to make. Defaults to 10.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]:
-            A tuple containing two DataFrames:
-                - The first DataFrame contains the rows that were successfully processed by the LLM
-                - The second DataFrame contains the rows that could not be processed by the LLM
-
-    Note:
-        The function uses integrity_check to ensure responses maintain
-        their original order and association after processing.
-    """
-    logger.info(f"Running sentiment analysis on {len(responses_df)} responses")
-    sentiment, unprocessable = await batch_and_run(
-        responses_df,
-        prompt_template,
-        llm.with_structured_output(SentimentAnalysisResponses),
-        batch_size=batch_size,
-        question=question,
-        integrity_check=True,
-        system_prompt=system_prompt,
-        concurrency=concurrency,
-        config=config,
-    )
-
-    return sentiment, unprocessable
 
 
 async def theme_generation(
@@ -208,9 +141,8 @@ async def theme_generation(
         batch_size (int, optional): Number of responses to process in each batch.
             Defaults to 50.
         partition_key (str | None, optional): Column name to use for batching related
-            responses together. Defaults to "position" for sentiment-enriched responses,
-            but can be set to None for sequential batching or another column name for
-            different grouping strategies.
+            responses together. Defaults to None for sequential batching, but can be set
+            to another column name for different grouping strategies.
         prompt_template (str | Path | PromptTemplate, optional): Template for structuring
             the prompt to the LLM. Can be a string identifier, path to template file,
             or PromptTemplate instance. Defaults to "theme_generation".

@@ -7,11 +7,11 @@ import pandas as pd
 import pytest
 import tiktoken
 
-from themefinder import sentiment_analysis
+from themefinder import detail_detection
 from themefinder.models import (
-    Position,
-    SentimentAnalysisOutput,
-    SentimentAnalysisResponses,
+    DetailDetectionOutput,
+    DetailDetectionResponses,
+    EvidenceRich,
 )
 from themefinder.llm_batch_processor import (
     BatchPrompt,
@@ -53,10 +53,10 @@ async def test_retries(mock_llm, sample_df):
     Verifies that the system properly retries after an exception
     and successfully processes the responses on subsequent attempts.
     """
-    mock_response = SentimentAnalysisResponses(
+    mock_response = DetailDetectionResponses(
         responses=[
-            SentimentAnalysisOutput(response_id=1, position=Position.AGREEMENT),
-            SentimentAnalysisOutput(response_id=2, position=Position.DISAGREEMENT),
+            DetailDetectionOutput(response_id=1, evidence_rich=EvidenceRich.YES),
+            DetailDetectionOutput(response_id=2, evidence_rich=EvidenceRich.NO),
         ]
     )
     with patch("themefinder.llm_batch_processor.call_llm") as mock_call_llm:
@@ -70,7 +70,7 @@ async def test_retries(mock_llm, sample_df):
                 [],
             ),  # Second call succeeds
         ]
-        result, _ = await sentiment_analysis(
+        result, _ = await detail_detection(
             sample_df, mock_llm, question="doesn't matter"
         )
         assert isinstance(result, pd.DataFrame)

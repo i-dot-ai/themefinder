@@ -328,9 +328,6 @@ def detect_eval_metrics(df: pd.DataFrame, eval_type: str) -> dict[str, list[str]
     # Patterns for each eval type's metrics
     # Support both old naming (f1_score) and new naming (f1)
     patterns = {
-        "sentiment": {
-            "accuracy": r"^question_part_\d+_accuracy$",
-        },
         "mapping": {
             "f1": r"^question_part_\d+_f1(_score)?$",  # Match f1 or f1_score
             "accuracy_score": r"^question_part_\d+_accuracy_score$",
@@ -538,11 +535,10 @@ def calculate_consistency_metrics(data: BenchmarkData) -> pd.DataFrame:
 
 # Stage weights for the ThemeFinder Quality Index
 STAGE_WEIGHTS = {
-    "generation": 0.30,
+    "generation": 0.40,
     "condensation": 0.10,
     "refinement": 0.10,
-    "sentiment": 0.25,
-    "mapping": 0.25,
+    "mapping": 0.40,
 }
 
 GENERATION_WEIGHTS = {"groundedness": 0.45, "coverage": 0.45, "specificity": 0.10}
@@ -614,12 +610,12 @@ def _weighted_stage_score(
 def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
     """Calculate composite ThemeFinder Quality Index (TQI) per model.
 
-    Combines generation, condensation, refinement, sentiment, and mapping
+    Combines generation, condensation, refinement, and mapping
     stage scores into a single 0-1 composite using statistically-derived weights.
 
     Returns DataFrame with columns:
         model_tag, generation_score, condensation_score, refinement_score,
-        sentiment_score, mapping_score, composite
+        mapping_score, composite
     """
     if data.results_df.empty or not data.detected_metrics:
         return pd.DataFrame()
@@ -675,17 +671,6 @@ def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
             else None
         )
 
-        # --- Sentiment stage score ---
-        sent_metrics = data.detected_metrics.get("sentiment", {})
-        sent_df = model_df[model_df["eval"] == "sentiment"]
-        accuracy_cols = sent_metrics.get("accuracy", [])
-        if sent_df.empty or not accuracy_cols:
-            scores["sentiment"] = None
-        else:
-            values = sent_df[accuracy_cols].values.flatten()
-            values = values[~np.isnan(values.astype(float))]
-            scores["sentiment"] = float(np.mean(values)) if len(values) > 0 else None
-
         # --- Mapping stage score ---
         map_metrics = data.detected_metrics.get("mapping", {})
         map_df = model_df[model_df["eval"] == "mapping"]
@@ -712,7 +697,6 @@ def calculate_composite_scores(data: BenchmarkData) -> pd.DataFrame:
                 "generation_score": scores["generation"],
                 "condensation_score": scores["condensation"],
                 "refinement_score": scores["refinement"],
-                "sentiment_score": scores["sentiment"],
                 "mapping_score": scores["mapping"],
                 "composite": composite,
             }
@@ -870,7 +854,6 @@ def print_composite_table(data: BenchmarkData) -> None:
     table.add_column("Gen", justify="right")
     table.add_column("Cond", justify="right")
     table.add_column("Ref", justify="right")
-    table.add_column("Sent", justify="right")
     table.add_column("Map", justify="right")
     table.add_column("TQI", justify="right", style="bold")
 
@@ -895,12 +878,9 @@ def print_composite_table(data: BenchmarkData) -> None:
             if pd.notna(row["refinement_score"])
             else "-"
         )
-        sent = (
-            f"{row['sentiment_score']:.3f}" if pd.notna(row["sentiment_score"]) else "-"
-        )
         mapp = f"{row['mapping_score']:.3f}" if pd.notna(row["mapping_score"]) else "-"
         tqi = f"{row['composite']:.3f}" if pd.notna(row["composite"]) else "-"
-        table.add_row(row["model_tag"], gen, cond, ref, sent, mapp, tqi)
+        table.add_row(row["model_tag"], gen, cond, ref, mapp, tqi)
 
     console.print(table)
     console.print()
@@ -923,7 +903,7 @@ def _get_langfuse_url(benchmark_id: str) -> str | None:
     if not base_url or not project_id:
         return None
 
-    # Sessions have IDs like: benchmark_20260202_134824_claude-haiku-4.5_sentiment_run1
+    # Sessions have IDs like: benchmark_20260202_134824_claude-haiku-4.5_mapping_run1
     # Use search parameter to filter sessions containing the benchmark ID
     search_term = quote(f"benchmark_{benchmark_id}")
     return f"{base_url}/project/{project_id}/sessions?search={search_term}"
@@ -1174,7 +1154,6 @@ def _html_model_summary_table(data: BenchmarkData) -> str:
         "generation": "groundedness",
         "condensation": "compression_quality",
         "refinement": "information_retention",
-        "sentiment": "accuracy",
         "mapping": "f1",
     }
 
@@ -1669,9 +1648,6 @@ def _html_composite_section(data: BenchmarkData) -> str:
     ref_contributions = (
         valid_df["refinement_score"] * STAGE_WEIGHTS["refinement"]
     ).tolist()
-    sent_contributions = (
-        valid_df["sentiment_score"] * STAGE_WEIGHTS["sentiment"]
-    ).tolist()
     map_contributions = (valid_df["mapping_score"] * STAGE_WEIGHTS["mapping"]).tolist()
     composites = valid_df["composite"].tolist()
 
@@ -1706,15 +1682,6 @@ def _html_composite_section(data: BenchmarkData) -> str:
                 "hovertemplate": "%{y}: %{x:.3f}<extra>Refinement</extra>",
             },
             {
-                "name": f"Sentiment ({int(STAGE_WEIGHTS['sentiment'] * 100)}%)",
-                "y": models,
-                "x": sent_contributions,
-                "type": "bar",
-                "orientation": "h",
-                "marker": {"color": "#38bdf8"},
-                "hovertemplate": "%{y}: %{x:.3f}<extra>Sentiment</extra>",
-            },
-            {
                 "name": f"Mapping ({int(STAGE_WEIGHTS['mapping'] * 100)}%)",
                 "y": models,
                 "x": map_contributions,
@@ -1729,7 +1696,7 @@ def _html_composite_section(data: BenchmarkData) -> str:
     # --- Heatmap data ---
     # Columns: individual normalised metrics + stage scores + composite
     heatmap_models = list(reversed(models))  # top = best
-    heatmap_cols = ["Grnd", "Cov", "Spec", "Gen", "Cond", "Ref", "Sent", "Map", "TQI"]
+    heatmap_cols = ["Grnd", "Cov", "Spec", "Gen", "Cond", "Ref", "Map", "TQI"]
     heatmap_z = []
     heatmap_text = []
 
@@ -1758,7 +1725,6 @@ def _html_composite_section(data: BenchmarkData) -> str:
             row_data["generation_score"],
             row_data["condensation_score"],
             row_data["refinement_score"],
-            row_data["sentiment_score"],
             row_data["mapping_score"],
             row_data["composite"],
         ]

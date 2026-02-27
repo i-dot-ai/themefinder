@@ -65,7 +65,7 @@ def trace_context(
         LangfuseSpan instance (or None if Langfuse is disabled)
 
     Example:
-        with trace_context(langfuse_ctx, name="sentiment_eval") as span:
+        with trace_context(langfuse_ctx, name="generation_eval") as span:
             response = llm.invoke(prompt)  # Nested under span with tags/metadata
     """
     if not context.is_enabled or not context.client:

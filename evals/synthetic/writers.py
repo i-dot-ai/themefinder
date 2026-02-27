@@ -113,31 +113,6 @@ class DatasetWriter:
         with open(path, "w") as f:
             json.dump(themes, f, indent=4)
 
-    def write_sentiment(self, question_part: str, responses: list[dict]) -> None:
-        """Write sentiment.jsonl file.
-
-        Args:
-            question_part: Question part folder name.
-            responses: List of response dicts with response_id and position.
-        """
-        path = (
-            self.output_dir
-            / "outputs"
-            / "mapping"
-            / self.date_str
-            / question_part
-            / "sentiment.jsonl"
-        )
-        with open(path, "w") as f:
-            for r in responses:
-                line = json.dumps(
-                    {
-                        "response_id": r["response_id"],
-                        "position": r["position"],
-                    }
-                )
-                f.write(line + "\n")
-
     def write_mappings(self, question_part: str, responses: list[dict]) -> None:
         """Write mapping.jsonl file.
 
@@ -211,7 +186,6 @@ class DatasetWriter:
         outputs_base = (
             self.output_dir / "outputs" / "mapping" / self.date_str / question_part
         )
-        (outputs_base / "sentiment.jsonl").write_text("")
         (outputs_base / "mapping.jsonl").write_text("")
         (outputs_base / "detail_detection.jsonl").write_text("")
 
@@ -241,19 +215,6 @@ class DatasetWriter:
         outputs_base = (
             self.output_dir / "outputs" / "mapping" / self.date_str / question_part
         )
-
-        # Append to sentiment.jsonl
-        with open(outputs_base / "sentiment.jsonl", "a") as f:
-            for r in responses:
-                f.write(
-                    json.dumps(
-                        {
-                            "response_id": r["response_id"],
-                            "position": r["position"],
-                        }
-                    )
-                    + "\n"
-                )
 
         # Append to mapping.jsonl
         with open(outputs_base / "mapping.jsonl", "a") as f:

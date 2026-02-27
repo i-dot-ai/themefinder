@@ -129,28 +129,6 @@ class ValidatedModel(BaseModel):
         return self.validate_non_empty_fields()
 
 
-class SentimentAnalysisOutput(ValidatedModel):
-    """Model for sentiment analysis output"""
-
-    response_id: int = Field(gt=0)
-    position: Position
-
-
-class SentimentAnalysisResponses(ValidatedModel):
-    """Container for all sentiment analysis responses"""
-
-    responses: List[SentimentAnalysisOutput]
-
-    @model_validator(mode="after")
-    def run_validations(self) -> "SentimentAnalysisResponses":
-        """Validate that response_ids are unique"""
-        self.validate_non_empty_fields()
-        response_ids = [resp.response_id for resp in self.responses]
-        if len(response_ids) != len(set(response_ids)):
-            raise ValueError("Response IDs must be unique")
-        return self
-
-
 def lower_case_strip_str(value: str) -> str:
     return value.lower().strip()
 
