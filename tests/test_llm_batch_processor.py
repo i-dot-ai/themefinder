@@ -53,6 +53,7 @@ async def test_retries(mock_llm, sample_df):
     Verifies that the system properly retries after an exception
     and successfully processes the responses on subsequent attempts.
     """
+    df = sample_df.rename(columns={"text": "response"})
     mock_response = DetailDetectionResponses(
         responses=[
             DetailDetectionOutput(response_id=1, evidence_rich=EvidenceRich.YES),
@@ -70,9 +71,7 @@ async def test_retries(mock_llm, sample_df):
                 [],
             ),  # Second call succeeds
         ]
-        result, _ = await detail_detection(
-            sample_df, mock_llm, question="doesn't matter"
-        )
+        result, _ = await detail_detection(df, mock_llm, question="doesn't matter")
         assert isinstance(result, pd.DataFrame)
         assert mock_call_llm.call_count == 2
 
