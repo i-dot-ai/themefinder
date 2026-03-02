@@ -419,5 +419,3 @@ class HierarchicalClusteringResponse(ValidatedModel):
             raise ValueError("Each child theme can have at most one parent")
 
         return self
-
-
