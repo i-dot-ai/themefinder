@@ -314,7 +314,6 @@ async def test_theme_mapping(mock_llm, sample_responses_df):
 async def test_find_themes(mock_llm, sample_df):
     """Test find_themes with mocked LLM responses."""
     input_df = sample_df.copy()
-    input_df = input_df.rename(columns={"text": "response"})
 
     theme_generation_responses = [
         Theme(
@@ -345,8 +344,12 @@ async def test_find_themes(mock_llm, sample_df):
     ]
 
     detail_detection_responses = [
-        DetailDetectionOutput(response_id=1, evidence_rich=EvidenceRich.YES).model_dump(),
-        DetailDetectionOutput(response_id=2, evidence_rich=EvidenceRich.NO).model_dump(),
+        DetailDetectionOutput(
+            response_id=1, evidence_rich=EvidenceRich.YES
+        ).model_dump(),
+        DetailDetectionOutput(
+            response_id=2, evidence_rich=EvidenceRich.NO
+        ).model_dump(),
     ]
 
     with patch(
