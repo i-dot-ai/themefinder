@@ -8,7 +8,6 @@ from themefinder.llm import LLM
 from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
 from themefinder.models import (
     DetailDetectionResponses,
-    HierarchicalClusteringResponse,
     ThemeCondensationResponses,
     ThemeGenerationResponses,
     ThemeMappingResponses,
@@ -438,4 +437,3 @@ async def detail_detection(
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
-    return detailed, _
