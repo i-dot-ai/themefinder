@@ -5,7 +5,6 @@ import pytest
 from langchain_core.prompts import PromptTemplate
 
 from themefinder import (
-    cross_cutting_themes,
     find_themes,
     theme_condensation,
     theme_generation,
@@ -15,10 +14,8 @@ from themefinder import (
 from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
     CondensedTheme,
-    CrossCuttingThemeDefinition,
-    CrossCuttingThemeIdentificationResponse,
-    CrossCuttingThemeMapping,
-    CrossCuttingThemeMappingResponse,
+    DetailDetectionOutput,
+    EvidenceRich,
     Position,
     Theme,
     ThemeCondensationResponses,
@@ -317,7 +314,6 @@ async def test_theme_mapping(mock_llm, sample_responses_df):
 async def test_find_themes(mock_llm, sample_df):
     """Test find_themes with mocked LLM responses."""
     input_df = sample_df.copy()
-    input_df = input_df.rename(columns={"text": "response"})
 
     theme_generation_responses = [
         Theme(
@@ -343,21 +339,17 @@ async def test_find_themes(mock_llm, sample_df):
     theme_refinement_responses = [{"topic_id": "1", "topic": "Refined Theme"}]
 
     theme_mapping_responses = [
-        ThemeMappingOutput(
-            response_id=1, reasons=["reason1"], labels=["label1"], stances=["POSITIVE"]
-        ).model_dump(),
-        ThemeMappingOutput(
-            response_id=2, reasons=["reason2"], labels=["label2"], stances=["NEGATIVE"]
-        ).model_dump(),
+        ThemeMappingOutput(response_id=1, labels=["label1"]).model_dump(),
+        ThemeMappingOutput(response_id=2, labels=["label2"]).model_dump(),
     ]
 
     detail_detection_responses = [
-        {"response_id": 1, "detailed": True, "explanation": "Detailed explanation"},
-        {
-            "response_id": 2,
-            "detailed": False,
-            "explanation": "Not detailed explanation",
-        },
+        DetailDetectionOutput(
+            response_id=1, evidence_rich=EvidenceRich.YES
+        ).model_dump(),
+        DetailDetectionOutput(
+            response_id=2, evidence_rich=EvidenceRich.NO
+        ).model_dump(),
     ]
 
     with patch(
@@ -409,137 +401,6 @@ async def test_find_themes(mock_llm, sample_df):
         )
 
         assert mock_call_llm.await_count == 5
-
-
-def test_cross_cutting_themes():
-    """Test cross_cutting_themes function with mock LLM"""
-    # Create mock themes data from multiple questions (new format with topic_id and topic columns)
-    questions_themes = {
-        1: pd.DataFrame(
-            {
-                "topic_id": ["A", "B", "C"],
-                "topic": [
-                    "Test Label 1A: Test description for theme 1A",
-                    "Test Label 1B: Test description for theme 1B",
-                    "Test Label 1C: Test description for theme 1C",
-                ],
-            }
-        ),
-        2: pd.DataFrame(
-            {
-                "topic_id": ["A", "B", "C"],
-                "topic": [
-                    "Test Label 2A: Test description for theme 2A",
-                    "Test Label 2B: Test description for theme 2B",
-                    "Test Label 2C: Test description for theme 2C",
-                ],
-            }
-        ),
-        3: pd.DataFrame(
-            {
-                "topic_id": ["A", "B"],
-                "topic": [
-                    "Test Label 3A: Test description for theme 3A",
-                    "Test Label 3B: Test description for theme 3B",
-                ],
-            }
-        ),
-    }
-
-    # Create mock LLM responses for the new agent-based approach
-    mock_identification_response = CrossCuttingThemeIdentificationResponse(
-        themes=[
-            CrossCuttingThemeDefinition(
-                name="Test Cross-Cutting Theme 1",
-                description="Test description for cross-cutting theme 1",
-            ),
-            CrossCuttingThemeDefinition(
-                name="Test Cross-Cutting Theme 2",
-                description="Test description for cross-cutting theme 2",
-            ),
-        ]
-    )
-
-    mock_mapping_response = CrossCuttingThemeMappingResponse(
-        mappings=[
-            CrossCuttingThemeMapping(
-                theme_name="Test Cross-Cutting Theme 1", theme_ids=["A", "B"]
-            ),
-            CrossCuttingThemeMapping(
-                theme_name="Test Cross-Cutting Theme 2", theme_ids=["C"]
-            ),
-        ]
-    )
-
-    mock_refinement_response = "Refined description for the cross-cutting theme"
-
-    # Create mock LLM
-    mock_llm = Mock()
-    mock_structured_llm = Mock()
-
-    # Set up the mock to return different responses for different structured output calls
-    mock_structured_llm.invoke.side_effect = [
-        mock_identification_response,  # First call for identification
-        mock_mapping_response,  # Mapping calls for each question
-        mock_mapping_response,
-        mock_mapping_response,
-    ]
-
-    # Mock the regular invoke for refinement
-    mock_refinement_llm = Mock()
-    mock_refinement_llm.invoke.return_value = Mock(content=mock_refinement_response)
-
-    # Return appropriate mock based on call
-    def mock_with_structured_output(schema):
-        if schema.__name__ in [
-            "CrossCuttingThemeIdentificationResponse",
-            "CrossCuttingThemeMappingResponse",
-        ]:
-            return mock_structured_llm
-        return mock_refinement_llm
-
-    mock_llm.with_structured_output.side_effect = mock_with_structured_output
-    mock_llm.invoke.return_value = Mock(content=mock_refinement_response)
-
-    # Call the function with min_themes=1 since we want to test basic functionality
-    result, unprocessed = cross_cutting_themes(questions_themes, mock_llm, min_themes=1)
-
-    # Verify the output format is a tuple with DataFrame and empty DataFrame
-    assert isinstance(result, pd.DataFrame)
-    assert isinstance(unprocessed, pd.DataFrame)
-    assert len(unprocessed) == 0  # Should be empty
-
-    # Check DataFrame columns
-    expected_columns = ["name", "description", "themes", "n_themes", "n_questions"]
-    assert all(col in result.columns for col in expected_columns)
-
-    # Verify LLM was called correctly
-    mock_llm.with_structured_output.assert_called()
-
-
-def test_cross_cutting_themes_empty_input():
-    """Test cross_cutting_themes with empty input"""
-    mock_llm = Mock()
-
-    with pytest.raises(ValueError, match="questions_themes cannot be empty"):
-        cross_cutting_themes({}, mock_llm)
-
-
-def test_cross_cutting_themes_missing_columns():
-    """Test cross_cutting_themes with missing required columns"""
-    questions_themes = {
-        1: pd.DataFrame(
-            {
-                # Missing both topic_id and topic columns
-                "some_other_column": ["A"],
-            }
-        )
-    }
-    mock_llm = Mock()
-
-    # Should raise KeyError when trying to access 'topic_id' column
-    with pytest.raises(KeyError):
-        cross_cutting_themes(questions_themes, mock_llm)
 
 
 def test_theme_clustering():

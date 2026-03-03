@@ -6,7 +6,6 @@ from .tasks import (
     theme_mapping,
     theme_refinement,
     detail_detection,
-    cross_cutting_themes,
 )
 
 __all__ = [
@@ -17,6 +16,5 @@ __all__ = [
     "theme_mapping",
     "theme_refinement",
     "detail_detection",
-    "cross_cutting_themes",
 ]
 __version__ = "0.8.0"
