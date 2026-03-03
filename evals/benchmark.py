@@ -185,46 +185,19 @@ class ModelConfig:
     timeout: int = 600  # 10 min default
 
     def create_llm(self) -> OpenAILLM:
-        """Factory method to create appropriate LLM instance."""
-        match self.provider:
-            case LLMProvider.AZURE_OPENAI:
-                return self._create_azure_llm()
-            case LLMProvider.LOCAI:
-                return self._create_locai_llm()
-            case LLMProvider.VERTEX_GEMINI | LLMProvider.VERTEX_CLAUDE:
-                raise NotImplementedError(
-                    f"TODO: implement OpenAILLM adapter for {self.provider.value}"
-                )
-            case _:
-                raise ValueError(f"Unknown provider: {self.provider}")
-
-    def _create_azure_llm(self) -> OpenAILLM:
-        """Create OpenAILLM instance via LLM gateway."""
+        """Create an OpenAILLM instance via the LLM gateway."""
+        if self.provider in (LLMProvider.VERTEX_GEMINI, LLMProvider.VERTEX_CLAUDE):
+            raise NotImplementedError(
+                f"TODO: implement OpenAILLM adapter for {self.provider.value}"
+            )
         request_kwargs: dict[str, Any] = {}
-        if self.reasoning_effort:
-            pass  # Reasoning models don't support custom temperature
-        else:
+        if not self.reasoning_effort:
             request_kwargs["temperature"] = self.temperature
         return OpenAILLM(
             model=self.deployment,
             request_kwargs=request_kwargs,
             base_url=os.getenv("LLM_GATEWAY_URL"),
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
-            timeout=self.timeout,
-        )
-
-    def _create_locai_llm(self) -> OpenAILLM:
-        """Create LOCAI LLM instance."""
-        request_kwargs: dict[str, Any] = {}
-        if self.reasoning_effort:
-            pass  # Reasoning models don't support custom temperature
-        else:
-            request_kwargs["temperature"] = self.temperature
-        return OpenAILLM(
-            model=self.deployment,
-            request_kwargs=request_kwargs,
-            base_url=os.getenv("LOCAI_ENDPOINT"),
-            api_key=os.getenv("LOCAI_API_KEY"),
             timeout=self.timeout,
         )
 
