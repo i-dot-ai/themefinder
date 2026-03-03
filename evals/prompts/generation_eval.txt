@@ -1,26 +1,44 @@
-You are an expert in natural language processing and topic modelling. Your task is to evaluate the quality of generated topics from a topic modelling algorithm. You will be provided with two lists of topics. Your goal is to decide how well the topics in the first list are captured by the second. For each generated topic, you will:
+You are an expert in natural language processing and topic modelling. Your task is to evaluate how well topics in LIST 1 are captured by topics in LIST 2.
 
-Review the topic and its associated keywords/terms.
-Compare it to the list of ground truth topics.
-Assess how well the generated topic aligns with the ground truth topics.
-Assign a score from 0 to 5 based on the following criteria:
+For each topic in LIST 1, find the best matching topic in LIST 2 and assign one of three decisions:
 
-5: Perfect match - The generated topic perfectly aligns with a ground truth topic in both theme and specificity.
-4: Strong match - The generated topic closely aligns with a ground truth topic, with minor differences in focus or breadth.
-3: Moderate match - The generated topic partially aligns with a ground truth topic, capturing some key aspects but missing others.
-2: Weak match - The generated topic loosely relates to a ground truth topic, but lacks precision or includes irrelevant elements.
-1: Very weak match - The generated topic has only a tangential relationship to any ground truth topic.
-0: No match - The generated topic appears to be completely fabricated or unrelated to any ground truth topic.
+- **STRONG**: The topics represent the same core concept, even if worded differently.
+- **PARTIAL**: The topics are related but differ in scope, specificity, or emphasis.
+- **NO**: No meaningful match exists in LIST 2.
 
+For each topic, provide:
+1. The label of the best matching topic in LIST 2 (or "none" if NO match)
+2. Your decision (STRONG, PARTIAL, or NO)
+3. A brief reasoning (1-2 sentences) explaining your decision
 
-You should return an output in strict json following this format:
+## Calibration Examples
+
+These examples illustrate the expected standard for each decision:
+
+**STRONG** — "Humiliating current system" ↔ "Inhumane current assessments"
+Reasoning: Both topics describe the degrading nature of the existing assessment process. Different wording, same core concept.
+
+**PARTIAL** — "Speeding up the process" ↔ "Dignified assessments"
+Reasoning: Both relate to improving the assessment experience, but one focuses on speed while the other focuses on dignity. Related but different emphasis.
+
+**NO** — "Better job matching" ↔ "Reduction in administrative burden"
+Reasoning: Job matching and administrative burden are entirely different concerns with no conceptual overlap.
+
+## Output Format
+
+Return strict JSON in this format:
 {{
-    'topic_label_a': score_a,
-    'topic_label_b': score_b
+    "evaluations": {{
+        "topic_label_from_list_1": {{
+            "matched_to": "topic_label_from_list_2 or none",
+            "decision": "STRONG or PARTIAL or NO",
+            "reasoning": "Brief explanation"
+        }}
+    }}
 }}
 
-TOPIC LIST 1:
+LIST 1:
 {topic_list_1}
 
-TOPIC LIST 2:
+LIST 2:
 {topic_list_2}

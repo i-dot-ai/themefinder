@@ -1,0 +1,80 @@
+[
+    {
+        "topic_id": "A",
+        "topic_label": "Complete Ban Support",
+        "topic_description": "Strong support for completely banning gambling advertisements during sports broadcasts to protect vulnerable individuals and families.",
+        "topic": "Complete Ban Support: Strong support for completely banning gambling advertisements during sports broadcasts to protect vulnerable individuals and families."
+    },
+    {
+        "topic_id": "B",
+        "topic_label": "Economic Impact Concerns",
+        "topic_description": "Concerns about negative economic impacts on sports funding, broadcasting, employment, and grassroots sports if gambling advertising is banned.",
+        "topic": "Economic Impact Concerns: Concerns about negative economic impacts on sports funding, broadcasting, employment, and grassroots sports if gambling advertising is banned."
+    },
+    {
+        "topic_id": "C",
+        "topic_label": "Personal Freedom Arguments",
+        "topic_description": "Arguments emphasizing personal responsibility and freedom of choice, opposing government intervention in legal advertising.",
+        "topic": "Personal Freedom Arguments: Arguments emphasizing personal responsibility and freedom of choice, opposing government intervention in legal advertising."
+    },
+    {
+        "topic_id": "D",
+        "topic_label": "Addiction and Harm Testimonies",
+        "topic_description": "Personal stories and testimonies about gambling addiction, financial ruin, and family destruction caused by gambling.",
+        "topic": "Addiction and Harm Testimonies: Personal stories and testimonies about gambling addiction, financial ruin, and family destruction caused by gambling."
+    },
+    {
+        "topic_id": "E",
+        "topic_label": "Child Protection Focus",
+        "topic_description": "Emphasis on protecting children and young people from gambling exposure and normalization through sports viewing.",
+        "topic": "Child Protection Focus: Emphasis on protecting children and young people from gambling exposure and normalization through sports viewing."
+    },
+    {
+        "topic_id": "F",
+        "topic_label": "Partial Restriction Proposals",
+        "topic_description": "Suggestions for compromise solutions like watershed restrictions, frequency limits, or content restrictions rather than complete bans.",
+        "topic": "Partial Restriction Proposals: Suggestions for compromise solutions like watershed restrictions, frequency limits, or content restrictions rather than complete bans."
+    },
+    {
+        "topic_id": "G",
+        "topic_label": "Industry Regulation Criticism",
+        "topic_description": "Criticism of current self-regulation, calling for stronger government oversight and enforcement of gambling advertising.",
+        "topic": "Industry Regulation Criticism: Criticism of current self-regulation, calling for stronger government oversight and enforcement of gambling advertising."
+    },
+    {
+        "topic_id": "H",
+        "topic_label": "Cultural Normalization Concerns",
+        "topic_description": "Worries about how gambling has become normalized and integrated into sports culture and commentary.",
+        "topic": "Cultural Normalization Concerns: Worries about how gambling has become normalized and integrated into sports culture and commentary."
+    },
+    {
+        "topic_id": "I",
+        "topic_label": "Alternative Funding Models",
+        "topic_description": "Discussion of how sports could find alternative funding sources to replace gambling sponsorship revenue.",
+        "topic": "Alternative Funding Models: Discussion of how sports could find alternative funding sources to replace gambling sponsorship revenue."
+    },
+    {
+        "topic_id": "J",
+        "topic_label": "Comparison to Other Restrictions",
+        "topic_description": "Comparisons to tobacco advertising bans or arguments about consistency with other harmful product advertising.",
+        "topic": "Comparison to Other Restrictions: Comparisons to tobacco advertising bans or arguments about consistency with other harmful product advertising."
+    },
+    {
+        "topic_id": "K",
+        "topic_label": "Gender and Demographic Targeting",
+        "topic_description": "Concerns about gambling companies specifically targeting vulnerable demographics, particularly young men.",
+        "topic": "Gender and Demographic Targeting: Concerns about gambling companies specifically targeting vulnerable demographics, particularly young men."
+    },
+    {
+        "topic_id": "X",
+        "topic_label": "None of the Above",
+        "topic_description": "The response discusses a topic not covered by the listed themes (only use this if no other theme applies).",
+        "topic": "None of the Above: The response discusses a topic not covered by the listed themes (only use this if no other theme applies)."
+    },
+    {
+        "topic_id": "Y",
+        "topic_label": "No Reason Given",
+        "topic_description": "The response does not provide a substantive answer to the question.",
+        "topic": "No Reason Given: The response does not provide a substantive answer to the question."
+    }
+]

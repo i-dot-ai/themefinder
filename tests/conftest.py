@@ -18,7 +18,7 @@ def mock_sync_llm():
 
 @pytest.fixture()
 def sample_df():
-    return pd.DataFrame({"response_id": [1, 2], "text": ["response1", "response2"]})
+    return pd.DataFrame({"response_id": [1, 2], "response": ["response1", "response2"]})
 
 
 @pytest.fixture
@@ -42,11 +42,10 @@ def sample_themes_df():
 
 
 @pytest.fixture()
-def sample_sentiment_df():
+def sample_responses_df():
     return pd.DataFrame(
         {
             "response_id": [1, 2],
-            "text": ["response1", "response2"],
-            "position": ["positive", "negative"],
+            "response": ["response1", "response2"],
         }
     )

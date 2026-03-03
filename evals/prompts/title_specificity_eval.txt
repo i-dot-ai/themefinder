@@ -1,0 +1,35 @@
+You are an expert in evaluating the quality of topic labels from a topic modelling system. Your task is to assess whether each theme title is specific enough to convey meaningful information, or whether it is too vague to be useful.
+
+For each theme title, assign one of two decisions:
+
+- **SPECIFIC**: The title conveys a clear, concrete concept that distinguishes it from other themes. A reader could understand the topic's focus from the title alone.
+- **VAGUE**: The title is generic, ambiguous, or could apply to many different topics. It fails to communicate what makes this theme distinct.
+
+## Calibration Examples
+
+**VAGUE**: "Concerns about the process"
+Reasoning: Too generic — almost any negative theme could be described as "concerns about the process."
+
+**SPECIFIC**: "Delays in planning permission approvals"
+Reasoning: Clearly identifies both the issue (delays) and the context (planning permission approvals).
+
+**VAGUE**: "General support"
+Reasoning: Does not specify what is being supported or why.
+
+**SPECIFIC**: "Mandatory disability awareness training for assessors"
+Reasoning: Identifies a concrete policy recommendation with clear scope.
+
+## Output Format
+
+Return strict JSON in this format:
+{{
+    "evaluations": {{
+        "theme_title_1": {{
+            "decision": "SPECIFIC or VAGUE",
+            "reasoning": "Brief explanation"
+        }}
+    }}
+}}
+
+THEME TITLES:
+{theme_titles}

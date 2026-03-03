@@ -1,40 +1,28 @@
 import json
+import os
 
 import numpy as np
 import pandas as pd
-from langchain_openai import AzureChatOpenAI
 from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
-
+from themefinder.llm import OpenAILLM
 from utils import read_and_render
 
-
-def calculate_sentiment_metrics(df: pd.DataFrame) -> dict[str, float]:
-    """Calculate accuracy metrics for sentiment analysis predictions.
-
-    Args:
-        df (pd.DataFrame): DataFrame containing 'ai_position' and 'supervisor_position' columns
-
-    Returns:
-        dict[str, float]: Dictionary with keys:
-            - accuracy: Score comparing AI and supervisor positions
-    """
-    ai = df["ai_position"]
-    supervisor = df["supervisor_position"]
-    correct_predictions = (ai == supervisor).sum()
-    total_predictions = len(df)
-    accuracy = correct_predictions / total_predictions
-    return {"accuracy": accuracy}
+# Minimum score (0-5) to consider a topic well-grounded or captured
+GROUNDEDNESS_THRESHOLD = 3
 
 
 def calculate_generation_metrics(
-    generated_topics: pd.DataFrame, topic_framework: dict
+    generated_topics: pd.DataFrame,
+    topic_framework: dict,
+    llm=None,
 ) -> dict[str, float | int]:
     """Calculate precision and recall metrics for generated themes against a framework.
 
     Args:
         generated_topics (pd.DataFrame): DataFrame containing generated themes as columns
         topic_framework (dict): Dictionary containing reference framework themes
+        llm: Optional LLM instance. If not provided, creates one from env vars.
 
     Returns:
         dict[str, float | int]: Dictionary with keys:
@@ -44,31 +32,36 @@ def calculate_generation_metrics(
             - Recall N not Captured: Count of framework topics not captured
             - Recall Average topic Representation: Mean representation score
     """
-    llm = AzureChatOpenAI(
-        model_name="gpt-4o",
-        temperature=0,
-        model_kwargs={"response_format": {"type": "json_object"}},
-    )
-    precision_scores = llm.invoke(
+    if llm is None:
+        llm = OpenAILLM(
+            model=os.getenv("DEPLOYMENT_NAME"),
+            request_kwargs={"temperature": 0},
+            base_url=os.getenv("LLM_GATEWAY_URL"),
+            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+        )
+    precision_response = llm.invoke(
         read_and_render(
             "generation_eval.txt",
             {"topic_list_1": generated_topics, "topic_list_2": topic_framework},
         )
     )
-    precision_scores = list(json.loads(precision_scores.content).values())
-    recall_scores = llm.invoke(
+    precision_scores = list(json.loads(precision_response.parsed).values())
+    recall_response = llm.invoke(
         read_and_render(
             "generation_eval.txt",
             {"topic_list_1": topic_framework, "topic_list_2": generated_topics},
         )
     )
-    recall_scores = list(json.loads(recall_scores.content).values())
-    threshold = 3
+    recall_scores = list(json.loads(recall_response.parsed).values())
     return {
         "Precision N topics": len(generated_topics),
-        "Precision N not well grounded": sum([i < threshold for i in precision_scores]),
+        "Precision N not well grounded": sum(
+            score < GROUNDEDNESS_THRESHOLD for score in precision_scores
+        ),
         "Precision Average Groundedness": np.mean(precision_scores).round(2),
-        "Recall N not Captured": sum([i < threshold for i in recall_scores]),
+        "Recall N not Captured": sum(
+            score < GROUNDEDNESS_THRESHOLD for score in recall_scores
+        ),
         "Recall Average topic Representation": np.mean(recall_scores).round(2),
     }
 

@@ -1,4 +1,5 @@
 import logging
+from collections import defaultdict
 from typing import List, Optional, Annotated
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator, AfterValidator
@@ -12,13 +13,6 @@ class Position(str, Enum):
     AGREEMENT = "AGREEMENT"
     DISAGREEMENT = "DISAGREEMENT"
     UNCLEAR = "UNCLEAR"
-
-
-class Stance(str, Enum):
-    """Enum for valid stance values"""
-
-    POSITIVE = "POSITIVE"
-    NEGATIVE = "NEGATIVE"
 
 
 class EvidenceRich(str, Enum):
@@ -80,22 +74,18 @@ class ThemeGenerationResponses(BaseModel):
 
     @model_validator(mode="after")
     def run_validations(self) -> "ThemeGenerationResponses":
-        """Ensure there are no duplicate themes"""
+        """Ensure there are no duplicate themes. Uses O(n) grouping."""
         self.responses = list(set(self.responses))
 
-        labels = {theme.topic_label for theme in self.responses}
+        # Group themes by label - O(n)
+        themes_by_label: dict[str, list[Theme]] = defaultdict(list)
+        for theme in self.responses:
+            themes_by_label[theme.topic_label].append(theme)
 
-        def _reduce(topic_label: str):
-            themes = list(
-                filter(
-                    lambda x: x.topic_label == topic_label,
-                    self.responses,
-                )
-            )
+        def _reduce(themes: list[Theme]) -> Theme:
             if len(themes) == 1:
                 return themes[0]
-
-            topic_description = ", ".join(t.topic_description for t in themes)
+            topic_description = " ".join(t.topic_description for t in themes)
             logger.warning("compressing themes:" + topic_description)
             return Theme(
                 topic_label=themes[0].topic_label,
@@ -103,7 +93,7 @@ class ThemeGenerationResponses(BaseModel):
                 position=themes[0].position,
             )
 
-        self.responses = [_reduce(label) for label in labels]
+        self.responses = [_reduce(themes) for themes in themes_by_label.values()]
 
         return self
 
@@ -150,7 +140,7 @@ class ThemeCondensationResponses(BaseModel):
             if len(themes) == 1:
                 return themes[0]
 
-            topic_description = "\n".join(t.topic_description for t in themes)
+            topic_description = " ".join(t.topic_description for t in themes)
             logger.warning("compressing themes: " + topic_description)
             return CondensedTheme(
                 topic_label=themes[0].topic_label,
@@ -166,6 +156,8 @@ class ThemeCondensationResponses(BaseModel):
 class RefinedTheme(BaseModel):
     """Model for a single refined theme"""
 
+    # TODO: Split into separate topic_label + topic_description fields to match
+    # Theme/CondensedTheme models. Currently evals must parse the combined string.
     topic: str = Field(
         ...,
         description="Topic label and description combined with a colon separator",
@@ -331,47 +323,3 @@ class HierarchicalClusteringResponse(BaseModel):
             raise ValueError("Each child theme can have at most one parent")
 
         return self
-
-
-# Cross-Cutting Theme Identification Models
-
-
-class CrossCuttingThemeDefinition(BaseModel):
-    """Model for a high-level cross-cutting theme."""
-
-    name: str = Field(
-        ...,
-        description="Short, descriptive name for the cross-cutting theme (3-7 words)",
-    )
-    description: str = Field(
-        ...,
-        description="2-sentence description of what this cross-cutting theme represents",
-    )
-
-
-class CrossCuttingThemeIdentificationResponse(BaseModel):
-    """Response model for identifying cross-cutting themes."""
-
-    themes: List[CrossCuttingThemeDefinition] = Field(
-        default=[], description="List of identified cross-cutting themes"
-    )
-
-
-class CrossCuttingThemeMapping(BaseModel):
-    """Model for mapping individual themes to a cross-cutting theme."""
-
-    theme_name: str = Field(
-        ..., description="Name of the cross-cutting theme this theme belongs to"
-    )
-    theme_ids: List[str] = Field(
-        ...,
-        description="List of theme IDs that belong to this cross-cutting theme (e.g., ['A', 'B', 'C'])",
-    )
-
-
-class CrossCuttingThemeMappingResponse(BaseModel):
-    """Response model for mapping question themes to cross-cutting themes."""
-
-    mappings: List[CrossCuttingThemeMapping] = Field(
-        default=[], description="List of cross-cutting theme mappings for this question"
-    )

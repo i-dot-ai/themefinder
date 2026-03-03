@@ -1,0 +1,80 @@
+[
+    {
+        "topic_id": "A",
+        "topic_label": "Education and Awareness Programs",
+        "topic_description": "Proposals for educational initiatives in schools, communities, and public health campaigns about gambling risks and probability.",
+        "topic": "Education and Awareness Programs: Proposals for educational initiatives in schools, communities, and public health campaigns about gambling risks and probability."
+    },
+    {
+        "topic_id": "B",
+        "topic_label": "Technology-Based Solutions",
+        "topic_description": "Suggestions for using technology like AI monitoring, app restrictions, smart delays, and digital interventions to prevent problem gambling.",
+        "topic": "Technology-Based Solutions: Suggestions for using technology like AI monitoring, app restrictions, smart delays, and digital interventions to prevent problem gambling."
+    },
+    {
+        "topic_id": "C",
+        "topic_label": "Financial Controls and Limits",
+        "topic_description": "Proposals for deposit limits, loss limits, income verification, credit restrictions, and other financial safeguards.",
+        "topic": "Financial Controls and Limits: Proposals for deposit limits, loss limits, income verification, credit restrictions, and other financial safeguards."
+    },
+    {
+        "topic_id": "D",
+        "topic_label": "Treatment and Support Services",
+        "topic_description": "Emphasis on improving access to counseling, support groups, helplines, and addiction treatment services.",
+        "topic": "Treatment and Support Services: Emphasis on improving access to counseling, support groups, helplines, and addiction treatment services."
+    },
+    {
+        "topic_id": "E",
+        "topic_label": "Industry Accountability Measures",
+        "topic_description": "Requirements for gambling companies to fund treatment, report on harm, train staff, and take responsibility for addiction.",
+        "topic": "Industry Accountability Measures: Requirements for gambling companies to fund treatment, report on harm, train staff, and take responsibility for addiction."
+    },
+    {
+        "topic_id": "F",
+        "topic_label": "Regulatory and Legal Changes",
+        "topic_description": "Proposals for new laws, licensing requirements, enforcement mechanisms, and regulatory frameworks.",
+        "topic": "Regulatory and Legal Changes: Proposals for new laws, licensing requirements, enforcement mechanisms, and regulatory frameworks."
+    },
+    {
+        "topic_id": "G",
+        "topic_label": "Warning and Information Requirements",
+        "topic_description": "Suggestions for mandatory warnings, transparent odds display, reality checks, and clear information about risks.",
+        "topic": "Warning and Information Requirements: Suggestions for mandatory warnings, transparent odds display, reality checks, and clear information about risks."
+    },
+    {
+        "topic_id": "H",
+        "topic_label": "Community and Social Interventions",
+        "topic_description": "Focus on peer support, workplace programs, community activities, and social alternatives to gambling.",
+        "topic": "Community and Social Interventions: Focus on peer support, workplace programs, community activities, and social alternatives to gambling."
+    },
+    {
+        "topic_id": "I",
+        "topic_label": "Self-Exclusion and Control Tools",
+        "topic_description": "Improvements to self-exclusion systems, personal limit setting, and tools for individuals to control their gambling.",
+        "topic": "Self-Exclusion and Control Tools: Improvements to self-exclusion systems, personal limit setting, and tools for individuals to control their gambling."
+    },
+    {
+        "topic_id": "J",
+        "topic_label": "Marketing and Sponsorship Alternatives",
+        "topic_description": "Ideas for replacing gambling sponsorship with ethical alternatives and changing how gambling is marketed.",
+        "topic": "Marketing and Sponsorship Alternatives: Ideas for replacing gambling sponsorship with ethical alternatives and changing how gambling is marketed."
+    },
+    {
+        "topic_id": "K",
+        "topic_label": "Early Intervention Strategies",
+        "topic_description": "Approaches to identify and help at-risk individuals before addiction develops, including screening and assessment.",
+        "topic": "Early Intervention Strategies: Approaches to identify and help at-risk individuals before addiction develops, including screening and assessment."
+    },
+    {
+        "topic_id": "X",
+        "topic_label": "None of the Above",
+        "topic_description": "The response discusses a topic not covered by the listed themes (only use this if no other theme applies).",
+        "topic": "None of the Above: The response discusses a topic not covered by the listed themes (only use this if no other theme applies)."
+    },
+    {
+        "topic_id": "Y",
+        "topic_label": "No Reason Given",
+        "topic_description": "The response does not provide a substantive answer to the question.",
+        "topic": "No Reason Given: The response does not provide a substantive answer to the question."
+    }
+]
