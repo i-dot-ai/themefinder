@@ -2,7 +2,6 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pandas as pd
 import pytest
-from langchain_core.prompts import PromptTemplate
 
 from themefinder import (
     find_themes,
@@ -11,10 +10,12 @@ from themefinder import (
     theme_mapping,
     theme_refinement,
 )
+from themefinder.llm import LLMResponse
 from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
     CondensedTheme,
     DetailDetectionOutput,
+    DetailDetectionResponses,
     EvidenceRich,
     Position,
     Theme,
@@ -26,32 +27,48 @@ from themefinder.models import (
 
 
 @pytest.mark.asyncio
-async def test_batch_and_run_missing_id(mock_llm, sample_df):
+async def test_batch_and_run_missing_id(monkeypatch, mock_llm, sample_df):
     """Test batch_and_run where the mocked return does not contain an expected id."""
+    from themefinder.llm_batch_processor import BatchPrompt
+
     first_response = [{"response_id": 1, "position": "positive"}]
     retry_response = [{"response_id": 2, "position": "negative"}]
+
+    # Mock generate_prompts to avoid loading the actual template file
+    def mock_generate_prompts(*args, **kwargs):
+        batch_size = kwargs.get("batch_size", 10)
+        if batch_size == 1:
+            return [BatchPrompt(prompt_string="Retry prompt", response_ids=[2])]
+        return [BatchPrompt(prompt_string="Test prompt", response_ids=[1, 2])]
+
+    monkeypatch.setattr(
+        "themefinder.llm_batch_processor.generate_prompts",
+        mock_generate_prompts,
+    )
 
     with patch(
         "themefinder.llm_batch_processor.call_llm", new_callable=AsyncMock
     ) as mock_call_llm:
-        mock_call_llm.side_effect = [(first_response, [2]), (retry_response, [])]
+        mock_call_llm.side_effect = [
+            (first_response, [2]),
+            (retry_response, []),
+        ]
 
-        result, failed_df = await batch_and_run(
+        result_df, unprocessable_df = await batch_and_run(
             input_df=sample_df,
-            prompt_template=PromptTemplate.from_template(
-                template="this is a fake template"
-            ),
+            prompt_template="detail_detection",
             llm=mock_llm,
+            output_model=DetailDetectionResponses,
             batch_size=2,
             integrity_check=True,
         )
 
-        assert isinstance(result, pd.DataFrame)
-        assert len(result) == 2
-        assert 1 in result["response_id"].to_list()
-        assert 2 in result["response_id"].to_list()
+        assert isinstance(result_df, pd.DataFrame)
+        assert len(result_df) == 2
+        assert 1 in result_df["response_id"].to_list()
+        assert 2 in result_df["response_id"].to_list()
         assert mock_call_llm.await_count == 2
-        assert failed_df.empty
+        assert unprocessable_df.empty
 
 
 @pytest.mark.asyncio
@@ -80,14 +97,14 @@ async def test_theme_generation(mock_llm, sample_responses_df):
             [],
         )
 
-        result, _ = await theme_generation(
+        result_df, _ = await theme_generation(
             sample_responses_df, mock_llm, question="test question", batch_size=2
         )
 
-        assert isinstance(result, pd.DataFrame)
-        assert "topic_label" in result.columns
-        assert "topic_description" in result.columns
-        assert "position" in result.columns
+        assert isinstance(result_df, pd.DataFrame)
+        assert "topic_label" in result_df.columns
+        assert "topic_description" in result_df.columns
+        assert "position" in result_df.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -117,7 +134,7 @@ async def test_theme_condensation_basic(mock_llm, sample_themes_df):
             [],
         )
 
-        result_df, errors_df = await theme_condensation(
+        result_df, unprocessable_df = await theme_condensation(
             sample_themes_df,
             mock_llm,
             question="What are your thoughts on this product?",
@@ -173,7 +190,7 @@ async def test_theme_condensation_recursive(mock_llm):
             (final_batch_responses, []),
         ]
 
-        result_df, errors_df = await theme_condensation(
+        result_df, unprocessable_df = await theme_condensation(
             large_themes_df,
             mock_llm,
             question="What are your thoughts on this product?",
@@ -224,7 +241,7 @@ async def test_theme_condensation_no_further_reduction(mock_llm):
             (original_responses, []),
         ]
 
-        result_df, _ = await theme_condensation(
+        result_df, unprocessable_df = await theme_condensation(
             themes_df, mock_llm, question="test question", batch_size=2
         )
 
@@ -257,13 +274,13 @@ async def test_theme_refinement(mock_llm):
             [],
         )
 
-        result, _ = await theme_refinement(
+        result_df, unprocessable_df = await theme_refinement(
             condensed_df, mock_llm, question="test question", batch_size=2
         )
 
-        assert isinstance(result, pd.DataFrame)
-        assert "topic_id" in result.columns
-        assert "topic" in result.columns
+        assert isinstance(result_df, pd.DataFrame)
+        assert "topic_id" in result_df.columns
+        assert "topic" in result_df.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -296,7 +313,7 @@ async def test_theme_mapping(mock_llm, sample_responses_df):
             [],
         )
 
-        result, _ = await theme_mapping(
+        result_df, _ = await theme_mapping(
             sample_responses_df,
             mock_llm,
             question="test question",
@@ -304,9 +321,9 @@ async def test_theme_mapping(mock_llm, sample_responses_df):
             batch_size=2,
         )
 
-        assert isinstance(result, pd.DataFrame)
-        assert "response_id" in result.columns
-        assert "labels" in result.columns
+        assert isinstance(result_df, pd.DataFrame)
+        assert "response_id" in result_df.columns
+        assert "labels" in result_df.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -403,7 +420,8 @@ async def test_find_themes(mock_llm, sample_df):
         assert mock_call_llm.await_count == 5
 
 
-def test_theme_clustering():
+@pytest.mark.asyncio
+async def test_theme_clustering():
     """Test theme_clustering function"""
     from themefinder import theme_clustering
     from themefinder.models import HierarchicalClusteringResponse, ThemeNode
@@ -417,10 +435,6 @@ def test_theme_clustering():
             "source_topic_count": [10, 20, 30],
         }
     )
-
-    # Create mock LLM that returns a clustering response
-    mock_llm = Mock()
-    mock_structured_llm = Mock()
 
     # Create a mock response for the clustering
     mock_response = HierarchicalClusteringResponse(
@@ -436,12 +450,12 @@ def test_theme_clustering():
         should_terminate=True,
     )
 
-    # Return the response object (not dict)
-    mock_structured_llm.invoke.return_value = mock_response
-    mock_llm.with_structured_output.return_value = mock_structured_llm
+    # Create mock LLM with ainvoke returning LLMResponse
+    mock_llm = Mock()
+    mock_llm.ainvoke = AsyncMock(return_value=LLMResponse(parsed=mock_response))
 
     # Call theme_clustering
-    result, _ = theme_clustering(
+    result, _ = await theme_clustering(
         themes_df,
         mock_llm,
         max_iterations=1,
@@ -455,7 +469,7 @@ def test_theme_clustering():
     assert len(result) >= 0  # Can be 0 if nothing meets significance threshold
 
     # Test with return_all_themes=True
-    result_all, _ = theme_clustering(
+    result_all, _ = await theme_clustering(
         themes_df,
         mock_llm,
         max_iterations=1,

@@ -1,11 +1,12 @@
 """Tests for theme_clustering_agent module."""
 
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 import pytest
 
+from themefinder.llm import LLMResponse
 from themefinder.models import HierarchicalClusteringResponse, ThemeNode
 from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
 
@@ -75,7 +76,7 @@ def mock_llm_response():
 def mock_llm(mock_llm_response):
     """Create a mock LLM that returns structured responses."""
     mock = MagicMock()
-    mock.invoke.return_value = mock_llm_response
+    mock.ainvoke = AsyncMock(return_value=LLMResponse(parsed=mock_llm_response))
     return mock
 
 
@@ -123,14 +124,15 @@ class TestThemeClusteringAgent:
             assert '"topic_id": "A"' in result
             assert '"topic_label": "Environmental Issues"' in result
 
-    def test_cluster_iteration_success(self, clustering_agent, mock_llm_response):
+    @pytest.mark.asyncio
+    async def test_cluster_iteration_success(self, clustering_agent, mock_llm_response):
         """Test successful clustering iteration."""
         with patch(
             "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
         ) as mock_load:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
-            clustering_agent.cluster_iteration()
+            await clustering_agent.cluster_iteration()
 
             # Check that iteration counter incremented
             assert clustering_agent.current_iteration == 1
@@ -157,25 +159,30 @@ class TestThemeClusteringAgent:
             assert "A_0" in clustering_agent.active_themes
             assert "B_0" in clustering_agent.active_themes
 
-    def test_cluster_iteration_with_retry(self, mock_llm, sample_theme_nodes):
+    @pytest.mark.asyncio
+    async def test_cluster_iteration_with_retry(self, mock_llm, sample_theme_nodes):
         """Test that retry mechanism works correctly."""
         # Create a mock that fails twice then succeeds
-        mock_llm.invoke.side_effect = [
-            Exception("API Error"),
-            Exception("Another Error"),
-            HierarchicalClusteringResponse(
-                parent_themes=[
-                    ThemeNode(
-                        topic_id="X",
-                        topic_label="Test Theme",
-                        topic_description="Test description",
-                        source_topic_count=18,  # Sum of A(10) + B(8)
-                        children=["A", "B"],  # 2 children - valid
+        mock_llm.ainvoke = AsyncMock(
+            side_effect=[
+                Exception("API Error"),
+                Exception("Another Error"),
+                LLMResponse(
+                    parsed=HierarchicalClusteringResponse(
+                        parent_themes=[
+                            ThemeNode(
+                                topic_id="X",
+                                topic_label="Test Theme",
+                                topic_description="Test description",
+                                source_topic_count=18,  # Sum of A(10) + B(8)
+                                children=["A", "B"],  # 2 children - valid
+                            )
+                        ],
+                        should_terminate=False,
                     )
-                ],
-                should_terminate=False,
-            ),
-        ]
+                ),
+            ]
+        )
 
         agent = ThemeClusteringAgent(mock_llm, sample_theme_nodes)
 
@@ -185,20 +192,21 @@ class TestThemeClusteringAgent:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
             # Should succeed after retries
-            agent.cluster_iteration()
+            await agent.cluster_iteration()
 
             # Verify it was called 3 times (2 failures + 1 success)
-            assert mock_llm.invoke.call_count == 3
+            assert mock_llm.ainvoke.call_count == 3
             assert "A_0" in agent.themes  # First parent gets A_0
 
-    def test_cluster_themes_basic(self, clustering_agent):
+    @pytest.mark.asyncio
+    async def test_cluster_themes_basic(self, clustering_agent):
         """Test basic theme clustering functionality."""
         with patch(
             "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
         ) as mock_load:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
-            result_df = clustering_agent.cluster_themes(
+            result_df = await clustering_agent.cluster_themes(
                 max_iterations=1, target_themes=3
             )
 
@@ -219,27 +227,32 @@ class TestThemeClusteringAgent:
             # Root node should not be in DataFrame
             assert "0" not in result_df["topic_id"].values
 
-    def test_cluster_themes_stops_at_target(self, clustering_agent):
+    @pytest.mark.asyncio
+    async def test_cluster_themes_stops_at_target(self, clustering_agent):
         """Test that clustering stops when target theme count is reached."""
         # Mock response that reduces themes but not too much
-        clustering_agent.llm.invoke.return_value = HierarchicalClusteringResponse(
-            parent_themes=[
-                ThemeNode(
-                    topic_id="MEGA1",
-                    topic_label="Combined Issues 1",
-                    topic_description="Some combined issues",
-                    source_topic_count=22,  # A(10) + C(12)
-                    children=["A", "C"],  # 2 children - valid
-                ),
-                ThemeNode(
-                    topic_id="MEGA2",
-                    topic_label="Combined Issues 2",
-                    topic_description="Other combined issues",
-                    source_topic_count=14,  # B(8) + D(6)
-                    children=["B", "D"],  # 2 children - valid
-                ),
-            ],
-            should_terminate=False,
+        clustering_agent.llm.ainvoke = AsyncMock(
+            return_value=LLMResponse(
+                parsed=HierarchicalClusteringResponse(
+                    parent_themes=[
+                        ThemeNode(
+                            topic_id="MEGA1",
+                            topic_label="Combined Issues 1",
+                            topic_description="Some combined issues",
+                            source_topic_count=22,  # A(10) + C(12)
+                            children=["A", "C"],  # 2 children - valid
+                        ),
+                        ThemeNode(
+                            topic_id="MEGA2",
+                            topic_label="Combined Issues 2",
+                            topic_description="Other combined issues",
+                            source_topic_count=14,  # B(8) + D(6)
+                            children=["B", "D"],  # 2 children - valid
+                        ),
+                    ],
+                    should_terminate=False,
+                )
+            )
         )
 
         with patch(
@@ -247,71 +260,78 @@ class TestThemeClusteringAgent:
         ) as mock_load:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
-            clustering_agent.cluster_themes(max_iterations=5, target_themes=3)
+            await clustering_agent.cluster_themes(max_iterations=5, target_themes=3)
 
             # Should stop after one iteration since we went from 5 to 3 active themes (2 new + 1 unchanged)
             assert clustering_agent.current_iteration == 1
             assert len(clustering_agent.active_themes) == 3  # A_0, B_0, E
 
-    def test_cluster_themes_stops_at_max_iterations(self, clustering_agent):
+    @pytest.mark.asyncio
+    async def test_cluster_themes_stops_at_max_iterations(self, clustering_agent):
         """Test that clustering stops at maximum iterations."""
 
         # Track which themes have been merged
         call_count = [0]
 
-        def mock_response(prompt, **kwargs):
+        async def mock_ainvoke(prompt, **kwargs):
             call_count[0] += 1
             if call_count[0] == 1:
                 # First call - merge D and E
-                return HierarchicalClusteringResponse(
-                    parent_themes=[
-                        ThemeNode(
-                            topic_id="MERGE1",
-                            topic_label="First Merge",
-                            topic_description="Merge D and E",
-                            source_topic_count=10,  # D(6) + E(4)
-                            children=["D", "E"],
-                        )
-                    ],
-                    should_terminate=False,
+                return LLMResponse(
+                    parsed=HierarchicalClusteringResponse(
+                        parent_themes=[
+                            ThemeNode(
+                                topic_id="MERGE1",
+                                topic_label="First Merge",
+                                topic_description="Merge D and E",
+                                source_topic_count=10,  # D(6) + E(4)
+                                children=["D", "E"],
+                            )
+                        ],
+                        should_terminate=False,
+                    )
                 )
             elif call_count[0] == 2:
                 # Second call - merge A and B
-                return HierarchicalClusteringResponse(
-                    parent_themes=[
-                        ThemeNode(
-                            topic_id="MERGE2",
-                            topic_label="Second Merge",
-                            topic_description="Merge A and B",
-                            source_topic_count=18,  # A(10) + B(8)
-                            children=["A", "B"],
-                        )
-                    ],
-                    should_terminate=False,
+                return LLMResponse(
+                    parsed=HierarchicalClusteringResponse(
+                        parent_themes=[
+                            ThemeNode(
+                                topic_id="MERGE2",
+                                topic_label="Second Merge",
+                                topic_description="Merge A and B",
+                                source_topic_count=18,  # A(10) + B(8)
+                                children=["A", "B"],
+                            )
+                        ],
+                        should_terminate=False,
+                    )
                 )
             else:
                 # Third call - merge C with A_0
-                return HierarchicalClusteringResponse(
-                    parent_themes=[
-                        ThemeNode(
-                            topic_id="MERGE3",
-                            topic_label="Third Merge",
-                            topic_description="Merge C with first parent",
-                            source_topic_count=22,  # C(12) + A_0(10)
-                            children=["C", "A_0"],
-                        )
-                    ],
-                    should_terminate=False,
+                return LLMResponse(
+                    parsed=HierarchicalClusteringResponse(
+                        parent_themes=[
+                            ThemeNode(
+                                topic_id="MERGE3",
+                                topic_label="Third Merge",
+                                topic_description="Merge C with first parent",
+                                source_topic_count=22,  # C(12) + A_0(10)
+                                children=["C", "A_0"],
+                            )
+                        ],
+                        should_terminate=False,
+                    )
                 )
 
-        clustering_agent.llm.invoke.side_effect = mock_response
+        clustering_agent.llm.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
         with patch(
             "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
         ) as mock_load:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
-            clustering_agent.cluster_themes(max_iterations=2, target_themes=1)
+            await clustering_agent.cluster_themes(max_iterations=2, target_themes=1)
 
             # Should stop at max iterations even though target not reached
             # The condition is <=, so max_iterations=2 runs 3 iterations (0, 1, 2)
@@ -319,7 +339,8 @@ class TestThemeClusteringAgent:
             # After 3 iterations with merges, we should have 2 active themes
             assert len(clustering_agent.active_themes) == 2
 
-    def test_convert_themes_to_tree_json(self, clustering_agent):
+    @pytest.mark.asyncio
+    async def test_convert_themes_to_tree_json(self, clustering_agent):
         """Test JSON tree conversion."""
         # First run clustering to create hierarchy with minimal clustering
         with patch(
@@ -328,20 +349,24 @@ class TestThemeClusteringAgent:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
             # Mock to merge just two themes on first call
-            clustering_agent.llm.invoke.return_value = HierarchicalClusteringResponse(
-                parent_themes=[
-                    ThemeNode(
-                        topic_id="MERGED",
-                        topic_label="Merged Theme",
-                        topic_description="A minimal merge for testing",
-                        source_topic_count=18,  # A(10) + B(8)
-                        children=["A", "B"],
+            clustering_agent.llm.ainvoke = AsyncMock(
+                return_value=LLMResponse(
+                    parsed=HierarchicalClusteringResponse(
+                        parent_themes=[
+                            ThemeNode(
+                                topic_id="MERGED",
+                                topic_label="Merged Theme",
+                                topic_description="A minimal merge for testing",
+                                source_topic_count=18,  # A(10) + B(8)
+                                children=["A", "B"],
+                            )
+                        ],
+                        should_terminate=True,
                     )
-                ],
-                should_terminate=True,
+                )
             )
 
-            clustering_agent.cluster_themes(max_iterations=0, target_themes=3)
+            await clustering_agent.cluster_themes(max_iterations=0, target_themes=3)
 
             json_result = clustering_agent.convert_themes_to_tree_json()
 
@@ -499,20 +524,25 @@ class TestThemeClusteringAgent:
         theme_ids = set(result_df["topic_id"].values)
         assert theme_ids == {"A", "B", "C", "D", "E"}
 
-    def test_integration_full_workflow(self, mock_llm, sample_theme_nodes):
+    @pytest.mark.asyncio
+    async def test_integration_full_workflow(self, mock_llm, sample_theme_nodes):
         """Test complete workflow integration."""
         # Mock a realistic clustering response
-        mock_llm.invoke.return_value = HierarchicalClusteringResponse(
-            parent_themes=[
-                ThemeNode(
-                    topic_id="SOCIAL",
-                    topic_label="Social Issues",
-                    topic_description="Healthcare and education combined",
-                    source_topic_count=18,  # Sum of C(12) + D(6)
-                    children=["C", "D"],  # 2 children - valid
-                ),
-            ],
-            should_terminate=False,
+        mock_llm.ainvoke = AsyncMock(
+            return_value=LLMResponse(
+                parsed=HierarchicalClusteringResponse(
+                    parent_themes=[
+                        ThemeNode(
+                            topic_id="SOCIAL",
+                            topic_label="Social Issues",
+                            topic_description="Healthcare and education combined",
+                            source_topic_count=18,  # Sum of C(12) + D(6)
+                            children=["C", "D"],  # 2 children - valid
+                        ),
+                    ],
+                    should_terminate=False,
+                )
+            )
         )
 
         agent = ThemeClusteringAgent(mock_llm, sample_theme_nodes)
@@ -523,7 +553,9 @@ class TestThemeClusteringAgent:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
             # Run full clustering with safer target
-            all_themes_df = agent.cluster_themes(max_iterations=1, target_themes=4)
+            all_themes_df = await agent.cluster_themes(
+                max_iterations=1, target_themes=4
+            )
 
             # Select significant themes
             selected_df = agent.select_themes(significance_percentage=15.0)
@@ -551,7 +583,8 @@ class TestThemeClusteringAgentEdgeCases:
         assert len(agent.themes) == 0
         assert len(agent.active_themes) == 0
 
-    def test_single_theme(self, mock_llm):
+    @pytest.mark.asyncio
+    async def test_single_theme(self, mock_llm):
         """Test agent with single theme."""
         # Use two themes to satisfy the root node validation (needs at least 2 children)
         themes = [
@@ -576,26 +609,31 @@ class TestThemeClusteringAgentEdgeCases:
             "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
         ) as mock_load:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-            result_df = agent.cluster_themes(max_iterations=1, target_themes=2)
+            result_df = await agent.cluster_themes(max_iterations=1, target_themes=2)
 
             # Should stop immediately since target is reached
             assert agent.current_iteration == 0
             assert len(result_df) == 2
 
-    def test_cluster_iteration_no_merges(self, clustering_agent):
+    @pytest.mark.asyncio
+    async def test_cluster_iteration_no_merges(self, clustering_agent):
         """Test cluster iteration when merging occurs and should terminate."""
         # Mock response with a single merge to indicate termination
-        clustering_agent.llm.invoke.return_value = HierarchicalClusteringResponse(
-            parent_themes=[
-                ThemeNode(
-                    topic_id="LAST",
-                    topic_label="Final Theme",
-                    topic_description="Final merge when no more clustering makes sense",
-                    source_topic_count=18,  # A(10) + B(8)
-                    children=["A", "B"],
+        clustering_agent.llm.ainvoke = AsyncMock(
+            return_value=LLMResponse(
+                parsed=HierarchicalClusteringResponse(
+                    parent_themes=[
+                        ThemeNode(
+                            topic_id="LAST",
+                            topic_label="Final Theme",
+                            topic_description="Final merge when no more clustering makes sense",
+                            source_topic_count=18,  # A(10) + B(8)
+                            children=["A", "B"],
+                        )
+                    ],
+                    should_terminate=True,
                 )
-            ],
-            should_terminate=True,
+            )
         )
 
         with patch(
@@ -604,27 +642,36 @@ class TestThemeClusteringAgentEdgeCases:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
             initial_themes = len(clustering_agent.active_themes)
-            clustering_agent.cluster_iteration()
+            await clustering_agent.cluster_iteration()
 
             # Should increment iteration and merge A+B into A_0
             assert clustering_agent.current_iteration == 1
             # Active themes should be reduced by 1 (A and B removed, A_0 added)
             assert len(clustering_agent.active_themes) == initial_themes - 1
 
-    def test_invalid_children_in_response(self, clustering_agent):
+    @pytest.mark.asyncio
+    async def test_invalid_children_in_response(self, clustering_agent):
         """Test handling of invalid children in LLM response."""
         # Mock response with non-existent children
-        clustering_agent.llm.invoke.return_value = HierarchicalClusteringResponse(
-            parent_themes=[
-                ThemeNode(
-                    topic_id="INVALID",
-                    topic_label="Invalid Theme",
-                    topic_description="Theme with backup children",
-                    source_topic_count=18,  # Sum of A(10) + B(8)
-                    children=["NONEXISTENT", "A", "B"],  # Two valid, one invalid
+        clustering_agent.llm.ainvoke = AsyncMock(
+            return_value=LLMResponse(
+                parsed=HierarchicalClusteringResponse(
+                    parent_themes=[
+                        ThemeNode(
+                            topic_id="INVALID",
+                            topic_label="Invalid Theme",
+                            topic_description="Theme with backup children",
+                            source_topic_count=18,  # Sum of A(10) + B(8)
+                            children=[
+                                "NONEXISTENT",
+                                "A",
+                                "B",
+                            ],  # Two valid, one invalid
+                        )
+                    ],
+                    should_terminate=False,
                 )
-            ],
-            should_terminate=False,
+            )
         )
 
         with patch(
@@ -632,7 +679,7 @@ class TestThemeClusteringAgentEdgeCases:
         ) as mock_load:
             mock_load.return_value = "Mock prompt {themes_json} {iteration}"
 
-            clustering_agent.cluster_iteration()
+            await clustering_agent.cluster_iteration()
 
             # Should only process valid children (first parent gets A_0)
             new_theme = clustering_agent.themes["A_0"]
