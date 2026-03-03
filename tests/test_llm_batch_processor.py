@@ -541,7 +541,7 @@ async def test_call_llm_bad_request(monkeypatch, mock_llm):
 
     mock_llm.ainvoke.side_effect = DummyBadRequestError()
     results, failed_ids = await call_llm(
-        batch_prompts, mock_llm, output_model=SentimentAnalysisResponses
+        batch_prompts, mock_llm, output_model=DetailDetectionResponses
     )
 
     # Verify that each response id in the result contains the expected failure details.
@@ -595,9 +595,9 @@ async def test_batch_and_run_successful(monkeypatch, mock_llm, sample_df):
 
     result_df, unprocessable_df = await batch_and_run(
         sample_df,
-        "sentiment_analysis",
+        "detail_detection",
         mock_llm,
-        output_model=SentimentAnalysisResponses,
+        output_model=DetailDetectionResponses,
         batch_size=2,
     )
 
@@ -664,9 +664,9 @@ async def test_batch_and_run_with_retries(monkeypatch, mock_llm, sample_df):
 
     result_df, unprocessable_df = await batch_and_run(
         sample_df,
-        "sentiment_analysis",
+        "detail_detection",
         mock_llm,
-        output_model=SentimentAnalysisResponses,
+        output_model=DetailDetectionResponses,
         batch_size=2,
     )
 
@@ -746,9 +746,9 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
 
     result_df, unprocessable_df = await batch_and_run(
         test_df,
-        "sentiment_analysis",
+        "detail_detection",
         mock_llm,
-        output_model=SentimentAnalysisResponses,
+        output_model=DetailDetectionResponses,
         batch_size=3,
     )
 

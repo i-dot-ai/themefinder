@@ -1,4 +1,4 @@
-.PHONY: test test-all lint run_evals run_benchmark
+.PHONY: test test-all lint run_evals run_benchmark pipeline
 
 test:
 	uv run pytest tests/test_tasks.py tests/test_models.py tests/test_llm_batch_processor.py -v -s
@@ -16,3 +16,7 @@ run_evals:
 run_benchmark:
 	@echo "Running full benchmark..."
 	cd evals && uv run python benchmark.py --dataset housing_S --runs 5 --provider all --judge-model gpt-4.1
+
+# Need to replicate Consult Pipeline containers for this to work
+pipeline:
+	./run_pipeline.sh synthetic_gambling_XS gpt-4.1-sweden-2025-03

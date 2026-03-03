@@ -15,6 +15,7 @@ from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
     CondensedTheme,
     DetailDetectionOutput,
+    DetailDetectionResponses,
     EvidenceRich,
     Position,
     Theme,
@@ -55,9 +56,9 @@ async def test_batch_and_run_missing_id(monkeypatch, mock_llm, sample_df):
 
         result_df, unprocessable_df = await batch_and_run(
             input_df=sample_df,
-            prompt_template="sentiment_analysis",
+            prompt_template="detail_detection",
             llm=mock_llm,
-            output_model=SentimentAnalysisResponses,
+            output_model=DetailDetectionResponses,
             batch_size=2,
             integrity_check=True,
         )
