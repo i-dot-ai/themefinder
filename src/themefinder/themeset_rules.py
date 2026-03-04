@@ -115,7 +115,6 @@ def rule_1_total_theme_number_less_than_70_slack(
 def rule_2_themes_must_have_a_non_negligible_number_of_responses_slack(
     mapping: list[dict],
 ) -> tuple[list[dict], bool]:
-
     if failures := rule_2_themes_must_have_a_non_negligible_number_of_responses(
         mapping
     ):
