@@ -4,18 +4,29 @@ import openai
 import pytest
 
 from themefinder import (
+    rule_1_total_theme_number_less_than_70_slack,
+    rule_2_themes_must_have_a_non_negligible_number_of_responses_slack,
+    rule_3_semantic_similarity_must_be_less_than_90pc_slack,
+    rule_4_themes_should_not_overlap_slack,
+)
+from themefinder.models import ThemeNode
+from themefinder.themeset_rules import (
     rule_1_total_theme_number_less_than_70,
     rule_2_themes_must_have_a_non_negligible_number_of_responses,
     rule_3_semantic_similarity_must_be_less_than_90pc,
     rule_4_themes_should_not_overlap,
 )
-from themefinder.models import ThemeNode
 
 
 @pytest.mark.parametrize("n, expected", [(69, 69), (70, 70), (71, None)])
 def test_rule_1_total_theme_number_less_than_70(n, expected):
     result = rule_1_total_theme_number_less_than_70([{} for _ in range(n)])
     assert result is expected
+
+    _, slack_error = rule_1_total_theme_number_less_than_70_slack(
+        [{} for _ in range(n)]
+    )
+    assert slack_error is bool(expected)
 
 
 def test_rule_2_themes_must_have_a_non_negligible_number_of_responses_large():
@@ -30,6 +41,11 @@ def test_rule_2_themes_must_have_a_non_negligible_number_of_responses_large():
     )
     result = rule_2_themes_must_have_a_non_negligible_number_of_responses(mapping)
     assert result == [("b", 1, 10_012)]
+
+    _, slack_error = rule_2_themes_must_have_a_non_negligible_number_of_responses_slack(
+        mapping
+    )
+    assert slack_error is True
 
 
 def test_rule_2_themes_must_have_a_non_negligible_number_of_responses_small():
@@ -48,6 +64,11 @@ def test_rule_2_themes_must_have_a_non_negligible_number_of_responses_small():
     ]
     result = rule_2_themes_must_have_a_non_negligible_number_of_responses(mapping)
     assert result == [("b", 3, 6)]
+
+    _, slack_error = rule_2_themes_must_have_a_non_negligible_number_of_responses_slack(
+        mapping
+    )
+    assert slack_error is True
 
 
 @patch("openai.resources.embeddings.Embeddings.create")
@@ -92,6 +113,11 @@ def test_rule_3_semantic_similarity_must_be_less_than_90pc(mock_create):
     result = rule_3_semantic_similarity_must_be_less_than_90pc(clustered_themes, client)
     assert result == [("A", "B", 1.0)]
 
+    _, slack_error = rule_3_semantic_similarity_must_be_less_than_90pc_slack(
+        clustered_themes, client
+    )
+    assert slack_error is True
+
 
 def test_rule_4_themes_should_not_overlap():
     """this rule should detect that themes a & b have more than 70% in common
@@ -107,3 +133,6 @@ def test_rule_4_themes_should_not_overlap():
     ]
     result = rule_4_themes_should_not_overlap(mapping)
     assert result == [("a", "b", 0.8)]
+
+    _, slack_error = rule_4_themes_should_not_overlap_slack(mapping)
+    assert slack_error is True

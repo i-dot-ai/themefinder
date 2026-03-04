@@ -89,3 +89,150 @@ def rule_4_themes_should_not_overlap(
             if intersection / union > 0.7:
                 results.append((theme_key_a, theme_key_b, intersection / union))
     return results
+
+
+def rule_1_total_theme_number_less_than_70_slack(
+    clustered_themes: list,
+) -> tuple[list[dict], bool]:
+    if failures := rule_1_total_theme_number_less_than_70(clustered_themes):
+        messages = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"Rule 1 failed\n*expected:* no more than 70 themes\n*actual:* got {failures} themes",
+                },
+            }
+        ]
+        return messages, True
+
+    messages = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Rule 1 passed"}}
+    ]
+    return messages, False
+
+
+def rule_2_themes_must_have_a_non_negligible_number_of_responses_slack(
+    mapping: list[dict],
+) -> tuple[list[dict], bool]:
+
+    if failures := rule_2_themes_must_have_a_non_negligible_number_of_responses(
+        mapping
+    ):
+        messages = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Rule 2 failed\n*expected:* all responses to be mapped to at least 0.1% of responses\n*actual:* the following themes are too sparse",
+                },
+            },
+            {
+                "type": "rich_text",
+                "elements": [
+                    {  # type: ignore
+                        "type": "rich_text_list",
+                        "style": "bullet",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [
+                                    {
+                                        "type": "text",
+                                        "text": f"`{theme}` is mapped to {coverage} responses",
+                                    }
+                                ],
+                            }
+                            for theme, coverage, _ in failures
+                        ],
+                    }
+                ],
+            },
+        ]
+        return messages, True
+
+    messages = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Rule 2 passed"}}
+    ]
+
+    return messages, False
+
+
+def rule_3_semantic_similarity_must_be_less_than_90pc_slack(
+    clustered_themes: list[ThemeNode], client: OpenAI
+) -> tuple[list[dict], bool]:
+    if failures := rule_3_semantic_similarity_must_be_less_than_90pc(
+        clustered_themes, client
+    ):
+        messages = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Rule 3 failed\n*expected:* all themes to have a semantic distance of at least 90%\n*actual:* the following themes are too similar:",
+                },
+            },
+            {
+                "type": "rich_text",
+                "elements": [
+                    {  # type: ignore
+                        "type": "rich_text_list",
+                        "style": "bullet",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [
+                                    {"type": "text", "text": f"`{x}` & `{y}`"}
+                                ],
+                            }
+                            for x, y, _ in failures
+                        ],
+                    }
+                ],
+            },
+        ]
+        return messages, True
+
+    messages = [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Rule 3 passed"}}
+    ]
+    return messages, False
+
+
+def rule_4_themes_should_not_overlap_slack(mapping: list[dict]):
+    if failures := rule_4_themes_should_not_overlap(mapping):
+        messages = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "Rule 4 failed\n*expected:* no themes should have mapped responses that overlap by more than 70%%\n*actual:* the following themes overlap",
+                },
+            },
+            {
+                "type": "rich_text",
+                "elements": [
+                    {  # type: ignore
+                        "type": "rich_text_list",
+                        "style": "bullet",
+                        "elements": [
+                            {
+                                "type": "rich_text_section",
+                                "elements": [
+                                    {
+                                        "type": "text",
+                                        "text": f"`{theme_a}` & `{theme_b}` overlap by {overlap}",
+                                    }
+                                ],
+                            }
+                            for theme_a, theme_b, overlap in failures
+                        ],
+                    }
+                ],
+            },
+        ]
+        return messages, True
+
+    return [
+        {"type": "section", "text": {"type": "mrkdwn", "text": "Rule 4 passed"}}
+    ], False
