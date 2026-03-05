@@ -15,6 +15,13 @@ import numpy as np
 from sklearn import metrics
 from sklearn.preprocessing import MultiLabelBinarizer
 
+from prompts import (
+    CONDENSATION_EVAL,
+    GENERATION_EVAL,
+    REFINEMENT_EVAL,
+    TITLE_SPECIFICITY_EVAL,
+)
+
 logger = logging.getLogger("themefinder.evals.evaluators")
 
 
@@ -175,7 +182,7 @@ def _calculate_groundedness_scores(
 
     response = llm.invoke(
         read_and_render(
-            "generation_eval.txt",
+            GENERATION_EVAL,
             {"topic_list_1": shuffled_generated, "topic_list_2": shuffled_expected},
         )
     )
@@ -206,7 +213,7 @@ def _calculate_coverage_scores(
     # Reverse direction: expected -> generated
     response = llm.invoke(
         read_and_render(
-            "generation_eval.txt",
+            GENERATION_EVAL,
             {"topic_list_1": shuffled_expected, "topic_list_2": shuffled_generated},
         )
     )
@@ -332,7 +339,7 @@ def _calculate_title_specificity(
 
     response = llm.invoke(
         read_and_render(
-            "title_specificity_eval.txt",
+            TITLE_SPECIFICITY_EVAL,
             {"theme_titles": titles},
         )
     )
@@ -421,7 +428,7 @@ def _calculate_condensation_scores(
 
     response = llm.invoke(
         read_and_render(
-            "condensation_eval.txt",
+            CONDENSATION_EVAL,
             {
                 "original_topics": original_themes,
                 "condensed_topics": condensed_themes,
@@ -509,7 +516,7 @@ def _calculate_refinement_scores(
 
     response = llm.invoke(
         read_and_render(
-            "refinement_eval.txt",
+            REFINEMENT_EVAL,
             {
                 "original_topics": original_themes,
                 "new_topics": refined_themes,

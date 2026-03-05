@@ -6,6 +6,8 @@ import pandas as pd
 from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
 from themefinder.llm import OpenAILLM
+
+from prompts import GENERATION_EVAL
 from utils import read_and_render
 
 # Minimum score (0-5) to consider a topic well-grounded or captured
@@ -41,14 +43,14 @@ def calculate_generation_metrics(
         )
     precision_response = llm.invoke(
         read_and_render(
-            "generation_eval.txt",
+            GENERATION_EVAL,
             {"topic_list_1": generated_topics, "topic_list_2": topic_framework},
         )
     )
     precision_scores = list(json.loads(precision_response.parsed).values())
     recall_response = llm.invoke(
         read_and_render(
-            "generation_eval.txt",
+            GENERATION_EVAL,
             {"topic_list_1": topic_framework, "topic_list_2": generated_topics},
         )
     )
