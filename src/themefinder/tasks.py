@@ -1,11 +1,10 @@
 import logging
-from pathlib import Path
 
 import pandas as pd
 
 from themefinder.advanced_tasks.theme_clustering_agent import ThemeClusteringAgent
 from themefinder.llm import LLM
-from themefinder.llm_batch_processor import batch_and_run, load_prompt_from_file
+from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
     DetailDetectionResponses,
     ThemeCondensationResponses,
@@ -14,9 +13,15 @@ from themefinder.models import (
     ThemeNode,
     ThemeRefinementResponses,
 )
+from themefinder.prompts import (
+    CONSULTATION_SYSTEM_PROMPT,
+    DETAIL_DETECTION,
+    THEME_CONDENSATION,
+    THEME_GENERATION,
+    THEME_MAPPING,
+    THEME_REFINEMENT,
+)
 from themefinder.themefinder_logging import logger
-
-CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
 
 
 async def find_themes(
@@ -109,7 +114,7 @@ async def theme_generation(
     question: str,
     batch_size: int = 50,
     partition_key: str | None = None,
-    prompt_template: str | Path = "theme_generation",
+    prompt_template: str = THEME_GENERATION,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -121,7 +126,7 @@ async def theme_generation(
         question: The survey question.
         batch_size: Number of responses to process in each batch.
         partition_key: Column name to use for batching related responses together.
-        prompt_template: Name of a prompt file or Path object.
+        prompt_template: Prompt template string.
         system_prompt: System prompt to guide the LLM's behavior.
         concurrency: Number of concurrent API calls to make.
 
@@ -147,7 +152,7 @@ async def theme_condensation(
     llm: LLM,
     question: str,
     batch_size: int = 75,
-    prompt_template: str | Path = "theme_condensation",
+    prompt_template: str = THEME_CONDENSATION,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
     **kwargs,
@@ -162,7 +167,7 @@ async def theme_condensation(
         llm: LLM instance to use for theme condensation.
         question: The survey question.
         batch_size: Number of themes to process in each batch.
-        prompt_template: Name of a prompt file or Path object.
+        prompt_template: Prompt template string.
         system_prompt: System prompt to guide the LLM's behavior.
         concurrency: Number of concurrent API calls to make.
 
@@ -292,7 +297,7 @@ async def theme_refinement(
     llm: LLM,
     question: str,
     batch_size: int = 10000,
-    prompt_template: str | Path = "theme_refinement",
+    prompt_template: str = THEME_REFINEMENT,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -303,7 +308,7 @@ async def theme_refinement(
         llm: LLM instance to use for theme refinement.
         question: The survey question.
         batch_size: Number of themes to process in each batch.
-        prompt_template: Name of a prompt file or Path object.
+        prompt_template: Prompt template string.
         system_prompt: System prompt to guide the LLM's behavior.
         concurrency: Number of concurrent API calls to make.
 
@@ -356,7 +361,7 @@ async def theme_mapping(
     question: str,
     refined_themes_df: pd.DataFrame,
     batch_size: int = 20,
-    prompt_template: str | Path = "theme_mapping",
+    prompt_template: str = THEME_MAPPING,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -368,7 +373,7 @@ async def theme_mapping(
         question: The survey question.
         refined_themes_df: DataFrame of refined themes.
         batch_size: Number of responses to process in each batch.
-        prompt_template: Name of a prompt file or Path object.
+        prompt_template: Prompt template string.
         system_prompt: System prompt to guide the LLM's behavior.
         concurrency: Number of concurrent API calls to make.
 
@@ -407,7 +412,7 @@ async def detail_detection(
     llm: LLM,
     question: str,
     batch_size: int = 20,
-    prompt_template: str | Path = "detail_detection",
+    prompt_template: str = DETAIL_DETECTION,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -418,7 +423,7 @@ async def detail_detection(
         llm: LLM instance to use for detail detection.
         question: The survey question.
         batch_size: Number of responses to process in each batch.
-        prompt_template: Name of a prompt file or Path object.
+        prompt_template: Prompt template string.
         system_prompt: System prompt to guide the LLM's behavior.
         concurrency: Number of concurrent API calls to make.
 
