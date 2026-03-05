@@ -105,16 +105,10 @@ class TestThemeClusteringAgent:
     def test_format_prompt(self, clustering_agent):
         """Test prompt formatting."""
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = (
-                "Test prompt with {themes_json} and iteration {iteration}"
-            )
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Test prompt with {themes_json} and iteration {iteration}",
+        ):
             result = clustering_agent._format_prompt()
-
-            # Verify the prompt template was loaded
-            mock_load.assert_called_once_with("agentic_theme_clustering")
 
             # Check that JSON is properly formatted and iteration is included
             assert "Test prompt with" in result
@@ -128,10 +122,9 @@ class TestThemeClusteringAgent:
     async def test_cluster_iteration_success(self, clustering_agent, mock_llm_response):
         """Test successful clustering iteration."""
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             await clustering_agent.cluster_iteration()
 
             # Check that iteration counter incremented
@@ -187,10 +180,9 @@ class TestThemeClusteringAgent:
         agent = ThemeClusteringAgent(mock_llm, sample_theme_nodes)
 
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             # Should succeed after retries
             await agent.cluster_iteration()
 
@@ -202,10 +194,9 @@ class TestThemeClusteringAgent:
     async def test_cluster_themes_basic(self, clustering_agent):
         """Test basic theme clustering functionality."""
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             result_df = await clustering_agent.cluster_themes(
                 max_iterations=1, target_themes=3
             )
@@ -256,10 +247,9 @@ class TestThemeClusteringAgent:
         )
 
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             await clustering_agent.cluster_themes(max_iterations=5, target_themes=3)
 
             # Should stop after one iteration since we went from 5 to 3 active themes (2 new + 1 unchanged)
@@ -327,10 +317,9 @@ class TestThemeClusteringAgent:
         clustering_agent.llm.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             await clustering_agent.cluster_themes(max_iterations=2, target_themes=1)
 
             # Should stop at max iterations even though target not reached
@@ -344,10 +333,9 @@ class TestThemeClusteringAgent:
         """Test JSON tree conversion."""
         # First run clustering to create hierarchy with minimal clustering
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             # Mock to merge just two themes on first call
             clustering_agent.llm.ainvoke = AsyncMock(
                 return_value=LLMResponse(
@@ -548,10 +536,9 @@ class TestThemeClusteringAgent:
         agent = ThemeClusteringAgent(mock_llm, sample_theme_nodes)
 
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             # Run full clustering with safer target
             all_themes_df = await agent.cluster_themes(
                 max_iterations=1, target_themes=4
@@ -606,9 +593,9 @@ class TestThemeClusteringAgentEdgeCases:
 
         # Should not attempt clustering if target is already met
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             result_df = await agent.cluster_themes(max_iterations=1, target_themes=2)
 
             # Should stop immediately since target is reached
@@ -637,10 +624,9 @@ class TestThemeClusteringAgentEdgeCases:
         )
 
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             initial_themes = len(clustering_agent.active_themes)
             await clustering_agent.cluster_iteration()
 
@@ -675,10 +661,9 @@ class TestThemeClusteringAgentEdgeCases:
         )
 
         with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
+            "themefinder.advanced_tasks.theme_clustering_agent.AGENTIC_THEME_CLUSTERING",
+            "Mock prompt {themes_json} {iteration}",
+        ):
             await clustering_agent.cluster_iteration()
 
             # Should only process valid children (first parent gets A_0)
