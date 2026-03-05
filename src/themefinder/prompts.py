@@ -1,5 +1,7 @@
 """Prompt templates for themefinder tasks."""
 
+from typing import Any, TypedDict
+
 CONSULTATION_SYSTEM_PROMPT = "You are an AI evaluation tool analyzing responses to a UK Government public consultation."
 
 AGENTIC_THEME_CLUSTERING = """{system_prompt}
@@ -235,3 +237,179 @@ You will produce a list of CLEAR STANCE TOPICS based on the input. Each topic sh
 
 TOPICS:
 {responses}"""
+
+
+# TypedDict definitions for batch operation kwargs
+
+
+class ThemeGenerationKwargs(TypedDict):
+    """Required kwargs for theme generation batch operations."""
+
+    question: str
+    system_prompt: str
+
+
+class ThemeCondensationKwargs(TypedDict):
+    """Required kwargs for theme condensation batch operations."""
+
+    question: str
+    system_prompt: str
+
+
+class ThemeRefinementKwargs(TypedDict):
+    """Required kwargs for theme refinement batch operations."""
+
+    system_prompt: str
+
+
+class ThemeMappingKwargs(TypedDict):
+    """Required kwargs for theme mapping batch operations."""
+
+    question: str
+    refined_themes: Any
+    system_prompt: str
+
+
+class DetailDetectionKwargs(TypedDict):
+    """Required kwargs for detail detection batch operations."""
+
+    question: str
+    system_prompt: str
+
+
+# Typed prompt functions
+
+
+def agentic_theme_clustering_prompt(
+    system_prompt: str,
+    themes_json: str,
+    iteration: int,
+    target_themes: int,
+) -> str:
+    """Generate prompt for agentic theme clustering.
+
+    Args:
+        system_prompt: System prompt for LLM behavior
+        themes_json: JSON string of themes to cluster
+        iteration: Current iteration number
+        target_themes: Target number of themes to cluster down to
+
+    Returns:
+        Formatted prompt string
+    """
+    return AGENTIC_THEME_CLUSTERING.format(
+        system_prompt=system_prompt,
+        themes_json=themes_json,
+        iteration=iteration,
+        target_themes=target_themes,
+    )
+
+
+def detail_detection_prompt(
+    system_prompt: str,
+    question: str,
+    responses: Any,
+) -> str:
+    """Generate prompt for detail detection.
+
+    Args:
+        system_prompt: System prompt for LLM behavior
+        question: The question being analyzed
+        responses: List of responses to analyze
+
+    Returns:
+        Formatted prompt string
+    """
+    return DETAIL_DETECTION.format(
+        system_prompt=system_prompt,
+        question=question,
+        responses=responses,
+    )
+
+
+def theme_condensation_prompt(
+    system_prompt: str,
+    question: str,
+    responses: Any,
+) -> str:
+    """Generate prompt for theme condensation.
+
+    Args:
+        system_prompt: System prompt for LLM behavior
+        question: The question being analyzed
+        responses: Topics to condense
+
+    Returns:
+        Formatted prompt string
+    """
+    return THEME_CONDENSATION.format(
+        system_prompt=system_prompt,
+        question=question,
+        responses=responses,
+    )
+
+
+def theme_generation_prompt(
+    system_prompt: str,
+    question: str,
+    responses: Any,
+) -> str:
+    """Generate prompt for theme generation.
+
+    Args:
+        system_prompt: System prompt for LLM behavior
+        question: The question being analyzed
+        responses: List of responses to extract themes from
+
+    Returns:
+        Formatted prompt string
+    """
+    return THEME_GENERATION.format(
+        system_prompt=system_prompt,
+        question=question,
+        responses=responses,
+    )
+
+
+def theme_mapping_prompt(
+    system_prompt: str,
+    question: str,
+    refined_themes: Any,
+    responses: Any,
+) -> str:
+    """Generate prompt for theme mapping.
+
+    Args:
+        system_prompt: System prompt for LLM behavior
+        question: The question being analyzed
+        refined_themes: Refined themes to map to
+        responses: Responses to map
+
+    Returns:
+        Formatted prompt string
+    """
+    return THEME_MAPPING.format(
+        system_prompt=system_prompt,
+        question=question,
+        refined_themes=refined_themes,
+        responses=responses,
+    )
+
+
+def theme_refinement_prompt(
+    system_prompt: str,
+    responses: Any,
+) -> str:
+    """Generate prompt for theme refinement.
+
+    Args:
+        system_prompt: System prompt for LLM behavior
+        responses: Topics to refine
+
+    Returns:
+        Formatted prompt string
+    """
+    return THEME_REFINEMENT.format(
+        system_prompt=system_prompt,
+        responses=responses,
+    )

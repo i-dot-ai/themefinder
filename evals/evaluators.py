@@ -16,10 +16,10 @@ from sklearn import metrics
 from sklearn.preprocessing import MultiLabelBinarizer
 
 from prompts import (
-    CONDENSATION_EVAL,
-    GENERATION_EVAL,
-    REFINEMENT_EVAL,
-    TITLE_SPECIFICITY_EVAL,
+    condensation_eval_prompt,
+    generation_eval_prompt,
+    refinement_eval_prompt,
+    title_specificity_eval_prompt,
 )
 
 logger = logging.getLogger("themefinder.evals.evaluators")
@@ -175,15 +175,13 @@ def _calculate_groundedness_scores(
     Returns:
         Dict with scores list, average, count below threshold, and details
     """
-    from utils import read_and_render
-
     shuffled_generated = _shuffle_themes(generated_themes)
     shuffled_expected = _shuffle_themes(expected_themes)
 
     response = llm.invoke(
-        read_and_render(
-            GENERATION_EVAL,
-            {"topic_list_1": shuffled_generated, "topic_list_2": shuffled_expected},
+        generation_eval_prompt(
+            topic_list_1=shuffled_generated,
+            topic_list_2=shuffled_expected,
         )
     )
 
@@ -205,16 +203,14 @@ def _calculate_coverage_scores(
     Returns:
         Dict with scores list, average, count below threshold, and details
     """
-    from utils import read_and_render
-
     shuffled_generated = _shuffle_themes(generated_themes)
     shuffled_expected = _shuffle_themes(expected_themes)
 
     # Reverse direction: expected -> generated
     response = llm.invoke(
-        read_and_render(
-            GENERATION_EVAL,
-            {"topic_list_1": shuffled_expected, "topic_list_2": shuffled_generated},
+        generation_eval_prompt(
+            topic_list_1=shuffled_expected,
+            topic_list_2=shuffled_generated,
         )
     )
 
@@ -324,8 +320,6 @@ def _calculate_title_specificity(
     Returns:
         Dict with ratio of specific titles and per-theme details.
     """
-    from utils import read_and_render
-
     # Extract just the titles for evaluation
     if isinstance(themes, list):
         titles = [t.get("topic_label", t.get("topic", "")) for t in themes]
@@ -338,9 +332,8 @@ def _calculate_title_specificity(
         return {"ratio": 0.0, "n_specific": 0, "n_total": 0, "details": []}
 
     response = llm.invoke(
-        read_and_render(
-            TITLE_SPECIFICITY_EVAL,
-            {"theme_titles": titles},
+        title_specificity_eval_prompt(
+            theme_titles=titles,
         )
     )
 
@@ -424,15 +417,10 @@ def _calculate_condensation_scores(
     Returns:
         Dict with compression_quality, information_retention, and reasoning.
     """
-    from utils import read_and_render
-
     response = llm.invoke(
-        read_and_render(
-            CONDENSATION_EVAL,
-            {
-                "original_topics": original_themes,
-                "condensed_topics": condensed_themes,
-            },
+        condensation_eval_prompt(
+            original_topics=original_themes,
+            condensed_topics=condensed_themes,
         )
     )
 
@@ -512,15 +500,10 @@ def _calculate_refinement_scores(
     Returns:
         Dict with four metric scores and reasoning.
     """
-    from utils import read_and_render
-
     response = llm.invoke(
-        read_and_render(
-            REFINEMENT_EVAL,
-            {
-                "original_topics": original_themes,
-                "new_topics": refined_themes,
-            },
+        refinement_eval_prompt(
+            original_topics=original_themes,
+            new_topics=refined_themes,
         )
     )
 

@@ -7,8 +7,7 @@ from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
 from themefinder.llm import OpenAILLM
 
-from prompts import GENERATION_EVAL
-from utils import read_and_render
+from prompts import generation_eval_prompt
 
 # Minimum score (0-5) to consider a topic well-grounded or captured
 GROUNDEDNESS_THRESHOLD = 3
@@ -42,16 +41,16 @@ def calculate_generation_metrics(
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
         )
     precision_response = llm.invoke(
-        read_and_render(
-            GENERATION_EVAL,
-            {"topic_list_1": generated_topics, "topic_list_2": topic_framework},
+        generation_eval_prompt(
+            topic_list_1=generated_topics,
+            topic_list_2=topic_framework,
         )
     )
     precision_scores = list(json.loads(precision_response.parsed).values())
     recall_response = llm.invoke(
-        read_and_render(
-            GENERATION_EVAL,
-            {"topic_list_1": topic_framework, "topic_list_2": generated_topics},
+        generation_eval_prompt(
+            topic_list_1=topic_framework,
+            topic_list_2=generated_topics,
         )
     )
     recall_scores = list(json.loads(recall_response.parsed).values())

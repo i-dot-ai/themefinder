@@ -1,5 +1,7 @@
 """Prompt templates for themefinder evaluations."""
 
+from typing import Any
+
 CONDENSATION_EVAL = """You are an expert in natural language processing and topic modelling. Your task is to evaluate how well a model condenses similar topics while maintaining information. You will be shown:
 
 1. The ORIGINAL list of topics (before condensation)
@@ -222,3 +224,79 @@ Return strict JSON in this format:
 
 THEME TITLES:
 {theme_titles}"""
+
+
+# Typed prompt functions
+
+
+def condensation_eval_prompt(
+    original_topics: Any,
+    condensed_topics: Any,
+) -> str:
+    """Generate prompt for condensation evaluation.
+
+    Args:
+        original_topics: Original topics before condensation
+        condensed_topics: Topics after condensation
+
+    Returns:
+        Formatted prompt string
+    """
+    return CONDENSATION_EVAL.format(
+        original_topics=original_topics,
+        condensed_topics=condensed_topics,
+    )
+
+
+def generation_eval_prompt(
+    topic_list_1: Any,
+    topic_list_2: Any,
+) -> str:
+    """Generate prompt for generation evaluation (comparing two topic lists).
+
+    Args:
+        topic_list_1: First list of topics
+        topic_list_2: Second list of topics
+
+    Returns:
+        Formatted prompt string
+    """
+    return GENERATION_EVAL.format(
+        topic_list_1=topic_list_1,
+        topic_list_2=topic_list_2,
+    )
+
+
+def refinement_eval_prompt(
+    original_topics: Any,
+    new_topics: Any,
+) -> str:
+    """Generate prompt for refinement evaluation.
+
+    Args:
+        original_topics: Original topics before refinement
+        new_topics: Topics after refinement
+
+    Returns:
+        Formatted prompt string
+    """
+    return REFINEMENT_EVAL.format(
+        original_topics=original_topics,
+        new_topics=new_topics,
+    )
+
+
+def title_specificity_eval_prompt(
+    theme_titles: Any,
+) -> str:
+    """Generate prompt for title specificity evaluation.
+
+    Args:
+        theme_titles: List of theme titles to evaluate
+
+    Returns:
+        Formatted prompt string
+    """
+    return TITLE_SPECIFICITY_EVAL.format(
+        theme_titles=theme_titles,
+    )
