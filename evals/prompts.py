@@ -1,7 +1,5 @@
 """Prompt templates for themefinder evaluations."""
 
-from typing import Any
-
 CONDENSATION_EVAL = """You are an expert in natural language processing and topic modelling. Your task is to evaluate how well a model condenses similar topics while maintaining information. You will be shown:
 
 1. The ORIGINAL list of topics (before condensation)
@@ -230,14 +228,14 @@ THEME TITLES:
 
 
 def condensation_eval_prompt(
-    original_topics: Any,
-    condensed_topics: Any,
+    original_topics: list[dict] | dict,
+    condensed_topics: list[dict] | dict,
 ) -> str:
     """Generate prompt for condensation evaluation.
 
     Args:
-        original_topics: Original topics before condensation
-        condensed_topics: Topics after condensation
+        original_topics: Original topics before condensation (list of dicts or dict)
+        condensed_topics: Topics after condensation (list of dicts or dict)
 
     Returns:
         Formatted prompt string
@@ -249,14 +247,14 @@ def condensation_eval_prompt(
 
 
 def generation_eval_prompt(
-    topic_list_1: Any,
-    topic_list_2: Any,
+    topic_list_1: list[dict] | dict,
+    topic_list_2: list[dict] | dict,
 ) -> str:
     """Generate prompt for generation evaluation (comparing two topic lists).
 
     Args:
-        topic_list_1: First list of topics
-        topic_list_2: Second list of topics
+        topic_list_1: First list of topics (list of dicts or dict)
+        topic_list_2: Second list of topics (list of dicts or dict)
 
     Returns:
         Formatted prompt string
@@ -268,14 +266,14 @@ def generation_eval_prompt(
 
 
 def refinement_eval_prompt(
-    original_topics: Any,
-    new_topics: Any,
+    original_topics: list[dict] | dict,
+    new_topics: list[dict] | dict,
 ) -> str:
     """Generate prompt for refinement evaluation.
 
     Args:
-        original_topics: Original topics before refinement
-        new_topics: Topics after refinement
+        original_topics: Original topics before refinement (list of dicts or dict)
+        new_topics: Topics after refinement (list of dicts or dict)
 
     Returns:
         Formatted prompt string
@@ -287,12 +285,12 @@ def refinement_eval_prompt(
 
 
 def title_specificity_eval_prompt(
-    theme_titles: Any,
+    theme_titles: list[str],
 ) -> str:
     """Generate prompt for title specificity evaluation.
 
     Args:
-        theme_titles: List of theme titles to evaluate
+        theme_titles: List of theme title strings to evaluate
 
     Returns:
         Formatted prompt string

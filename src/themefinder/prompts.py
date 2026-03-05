@@ -308,14 +308,14 @@ def agentic_theme_clustering_prompt(
 def detail_detection_prompt(
     system_prompt: str,
     question: str,
-    responses: Any,
+    responses: list[dict[str, Any]],
 ) -> str:
     """Generate prompt for detail detection.
 
     Args:
         system_prompt: System prompt for LLM behavior
         question: The question being analyzed
-        responses: List of responses to analyze
+        responses: List of response dictionaries to analyze
 
     Returns:
         Formatted prompt string
@@ -330,14 +330,14 @@ def detail_detection_prompt(
 def theme_condensation_prompt(
     system_prompt: str,
     question: str,
-    responses: Any,
+    responses: list[dict[str, Any]],
 ) -> str:
     """Generate prompt for theme condensation.
 
     Args:
         system_prompt: System prompt for LLM behavior
         question: The question being analyzed
-        responses: Topics to condense
+        responses: List of topic dictionaries to condense
 
     Returns:
         Formatted prompt string
@@ -352,14 +352,14 @@ def theme_condensation_prompt(
 def theme_generation_prompt(
     system_prompt: str,
     question: str,
-    responses: Any,
+    responses: list[dict[str, Any]],
 ) -> str:
     """Generate prompt for theme generation.
 
     Args:
         system_prompt: System prompt for LLM behavior
         question: The question being analyzed
-        responses: List of responses to extract themes from
+        responses: List of response dictionaries to extract themes from
 
     Returns:
         Formatted prompt string
@@ -374,16 +374,16 @@ def theme_generation_prompt(
 def theme_mapping_prompt(
     system_prompt: str,
     question: str,
-    refined_themes: Any,
-    responses: Any,
+    refined_themes: list[dict[str, Any]],
+    responses: list[dict[str, Any]],
 ) -> str:
     """Generate prompt for theme mapping.
 
     Args:
         system_prompt: System prompt for LLM behavior
         question: The question being analyzed
-        refined_themes: Refined themes to map to
-        responses: Responses to map
+        refined_themes: List of refined theme dictionaries to map to
+        responses: List of response dictionaries to map
 
     Returns:
         Formatted prompt string
@@ -398,13 +398,13 @@ def theme_mapping_prompt(
 
 def theme_refinement_prompt(
     system_prompt: str,
-    responses: Any,
+    responses: list[dict[str, Any]],
 ) -> str:
     """Generate prompt for theme refinement.
 
     Args:
         system_prompt: System prompt for LLM behavior
-        responses: Topics to refine
+        responses: List of topic dictionaries to refine
 
     Returns:
         Formatted prompt string
