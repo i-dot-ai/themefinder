@@ -19,10 +19,11 @@ from tenacity import (
 
 from themefinder.llm import LLM
 from themefinder.models import HierarchicalClusteringResponse, ThemeNode
-from themefinder.llm_batch_processor import load_prompt_from_file
+from themefinder.prompts import (
+    CONSULTATION_SYSTEM_PROMPT,
+    agentic_theme_clustering_prompt,
+)
 from themefinder.themefinder_logging import logger
-
-CONSULTATION_SYSTEM_PROMPT = load_prompt_from_file("consultation_system_prompt")
 
 
 class ThemeClusteringAgent:
@@ -82,12 +83,10 @@ class ThemeClusteringAgent:
             themes_for_prompt.append(theme_dict)
         themes_json = json.dumps(themes_for_prompt, indent=2)
 
-        # Load the clustering prompt template
-        prompt_template = load_prompt_from_file("agentic_theme_clustering")
-        return prompt_template.format(
+        return agentic_theme_clustering_prompt(
+            system_prompt=self.system_prompt,
             themes_json=themes_json,
             iteration=self.current_iteration,
-            system_prompt=self.system_prompt,
             target_themes=self.target_themes,
         )
 

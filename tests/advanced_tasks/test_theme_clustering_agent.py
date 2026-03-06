@@ -1,7 +1,7 @@
 """Tests for theme_clustering_agent module."""
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
 import pytest
@@ -104,60 +104,49 @@ class TestThemeClusteringAgent:
 
     def test_format_prompt(self, clustering_agent):
         """Test prompt formatting."""
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = (
-                "Test prompt with {themes_json} and iteration {iteration}"
-            )
+        result = clustering_agent._format_prompt()
 
-            result = clustering_agent._format_prompt()
-
-            # Verify the prompt template was loaded
-            mock_load.assert_called_once_with("agentic_theme_clustering")
-
-            # Check that JSON is properly formatted and iteration is included
-            assert "Test prompt with" in result
-            assert "iteration 0" in result
-
-            # Verify JSON structure contains expected theme data
-            assert '"topic_id": "A"' in result
-            assert '"topic_label": "Environmental Issues"' in result
+        # Check that JSON is properly formatted and prompt contains expected elements
+        assert '"topic_id": "A"' in result
+        assert '"topic_label": "Environmental Issues"' in result
+        assert (
+            '"topic_description": "Concerns about climate change and pollution"'
+            in result
+        )
+        assert clustering_agent.system_prompt in result
+        assert str(clustering_agent.target_themes) in result
+        assert "TOPICS:" in result
+        assert "should_terminate" in result
 
     @pytest.mark.asyncio
     async def test_cluster_iteration_success(self, clustering_agent, mock_llm_response):
         """Test successful clustering iteration."""
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        await clustering_agent.cluster_iteration()
 
-            await clustering_agent.cluster_iteration()
+        # Check that iteration counter incremented
+        assert clustering_agent.current_iteration == 1
 
-            # Check that iteration counter incremented
-            assert clustering_agent.current_iteration == 1
+        # Check that new parent themes were created (A_0, B_0 based on enumeration)
+        assert "A_0" in clustering_agent.themes
+        assert "B_0" in clustering_agent.themes
 
-            # Check that new parent themes were created (A_0, B_0 based on enumeration)
-            assert "A_0" in clustering_agent.themes
-            assert "B_0" in clustering_agent.themes
+        # Check parent theme properties (first parent gets A_0)
+        parent_a = clustering_agent.themes["A_0"]
+        assert parent_a.topic_label == "Social Services"
+        assert parent_a.source_topic_count == 18
+        assert set(parent_a.children) == {"C", "D"}
 
-            # Check parent theme properties (first parent gets A_0)
-            parent_a = clustering_agent.themes["A_0"]
-            assert parent_a.topic_label == "Social Services"
-            assert parent_a.source_topic_count == 18
-            assert set(parent_a.children) == {"C", "D"}
+        # Check that child themes have parent_id set
+        assert clustering_agent.themes["C"].parent_id == "A_0"
+        assert clustering_agent.themes["D"].parent_id == "A_0"
 
-            # Check that child themes have parent_id set
-            assert clustering_agent.themes["C"].parent_id == "A_0"
-            assert clustering_agent.themes["D"].parent_id == "A_0"
+        # Check that children are removed from active themes
+        assert "C" not in clustering_agent.active_themes
+        assert "D" not in clustering_agent.active_themes
 
-            # Check that children are removed from active themes
-            assert "C" not in clustering_agent.active_themes
-            assert "D" not in clustering_agent.active_themes
-
-            # Check that new parents are added to active themes
-            assert "A_0" in clustering_agent.active_themes
-            assert "B_0" in clustering_agent.active_themes
+        # Check that new parents are added to active themes
+        assert "A_0" in clustering_agent.active_themes
+        assert "B_0" in clustering_agent.active_themes
 
     @pytest.mark.asyncio
     async def test_cluster_iteration_with_retry(self, mock_llm, sample_theme_nodes):
@@ -186,46 +175,36 @@ class TestThemeClusteringAgent:
 
         agent = ThemeClusteringAgent(mock_llm, sample_theme_nodes)
 
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        # Should succeed after retries
+        await agent.cluster_iteration()
 
-            # Should succeed after retries
-            await agent.cluster_iteration()
-
-            # Verify it was called 3 times (2 failures + 1 success)
-            assert mock_llm.ainvoke.call_count == 3
-            assert "A_0" in agent.themes  # First parent gets A_0
+        # Verify it was called 3 times (2 failures + 1 success)
+        assert mock_llm.ainvoke.call_count == 3
+        assert "A_0" in agent.themes  # First parent gets A_0
 
     @pytest.mark.asyncio
     async def test_cluster_themes_basic(self, clustering_agent):
         """Test basic theme clustering functionality."""
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        result_df = await clustering_agent.cluster_themes(
+            max_iterations=1, target_themes=3
+        )
 
-            result_df = await clustering_agent.cluster_themes(
-                max_iterations=1, target_themes=3
-            )
+        # Check return type
+        assert isinstance(result_df, pd.DataFrame)
 
-            # Check return type
-            assert isinstance(result_df, pd.DataFrame)
+        # Check that root node was created
+        assert "0" in clustering_agent.themes
+        root = clustering_agent.themes["0"]
+        assert root.topic_label == "All Topics"
+        assert root.source_topic_count == 40  # Sum of all original counts
 
-            # Check that root node was created
-            assert "0" in clustering_agent.themes
-            root = clustering_agent.themes["0"]
-            assert root.topic_label == "All Topics"
-            assert root.source_topic_count == 40  # Sum of all original counts
+        # Check DataFrame structure
+        assert "topic_id" in result_df.columns
+        assert "topic_label" in result_df.columns
+        assert "source_topic_count" in result_df.columns
 
-            # Check DataFrame structure
-            assert "topic_id" in result_df.columns
-            assert "topic_label" in result_df.columns
-            assert "source_topic_count" in result_df.columns
-
-            # Root node should not be in DataFrame
-            assert "0" not in result_df["topic_id"].values
+        # Root node should not be in DataFrame
+        assert "0" not in result_df["topic_id"].values
 
     @pytest.mark.asyncio
     async def test_cluster_themes_stops_at_target(self, clustering_agent):
@@ -255,16 +234,11 @@ class TestThemeClusteringAgent:
             )
         )
 
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        await clustering_agent.cluster_themes(max_iterations=5, target_themes=3)
 
-            await clustering_agent.cluster_themes(max_iterations=5, target_themes=3)
-
-            # Should stop after one iteration since we went from 5 to 3 active themes (2 new + 1 unchanged)
-            assert clustering_agent.current_iteration == 1
-            assert len(clustering_agent.active_themes) == 3  # A_0, B_0, E
+        # Should stop after one iteration since we went from 5 to 3 active themes (2 new + 1 unchanged)
+        assert clustering_agent.current_iteration == 1
+        assert len(clustering_agent.active_themes) == 3  # A_0, B_0, E
 
     @pytest.mark.asyncio
     async def test_cluster_themes_stops_at_max_iterations(self, clustering_agent):
@@ -326,62 +300,52 @@ class TestThemeClusteringAgent:
 
         clustering_agent.llm.ainvoke = AsyncMock(side_effect=mock_ainvoke)
 
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        await clustering_agent.cluster_themes(max_iterations=2, target_themes=1)
 
-            await clustering_agent.cluster_themes(max_iterations=2, target_themes=1)
-
-            # Should stop at max iterations even though target not reached
-            # The condition is <=, so max_iterations=2 runs 3 iterations (0, 1, 2)
-            assert clustering_agent.current_iteration == 3
-            # After 3 iterations with merges, we should have 2 active themes
-            assert len(clustering_agent.active_themes) == 2
+        # Should stop at max iterations even though target not reached
+        # The condition is <=, so max_iterations=2 runs 3 iterations (0, 1, 2)
+        assert clustering_agent.current_iteration == 3
+        # After 3 iterations with merges, we should have 2 active themes
+        assert len(clustering_agent.active_themes) == 2
 
     @pytest.mark.asyncio
     async def test_convert_themes_to_tree_json(self, clustering_agent):
         """Test JSON tree conversion."""
         # First run clustering to create hierarchy with minimal clustering
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-
-            # Mock to merge just two themes on first call
-            clustering_agent.llm.ainvoke = AsyncMock(
-                return_value=LLMResponse(
-                    parsed=HierarchicalClusteringResponse(
-                        parent_themes=[
-                            ThemeNode(
-                                topic_id="MERGED",
-                                topic_label="Merged Theme",
-                                topic_description="A minimal merge for testing",
-                                source_topic_count=18,  # A(10) + B(8)
-                                children=["A", "B"],
-                            )
-                        ],
-                        should_terminate=True,
-                    )
+        # Mock to merge just two themes on first call
+        clustering_agent.llm.ainvoke = AsyncMock(
+            return_value=LLMResponse(
+                parsed=HierarchicalClusteringResponse(
+                    parent_themes=[
+                        ThemeNode(
+                            topic_id="MERGED",
+                            topic_label="Merged Theme",
+                            topic_description="A minimal merge for testing",
+                            source_topic_count=18,  # A(10) + B(8)
+                            children=["A", "B"],
+                        )
+                    ],
+                    should_terminate=True,
                 )
             )
+        )
 
-            await clustering_agent.cluster_themes(max_iterations=0, target_themes=3)
+        await clustering_agent.cluster_themes(max_iterations=0, target_themes=3)
 
-            json_result = clustering_agent.convert_themes_to_tree_json()
+        json_result = clustering_agent.convert_themes_to_tree_json()
 
-            # Parse and validate JSON structure
-            tree_data = json.loads(json_result)
+        # Parse and validate JSON structure
+        tree_data = json.loads(json_result)
 
-            assert "id" in tree_data
-            assert "name" in tree_data
-            assert "value" in tree_data
-            assert "children" in tree_data
+        assert "id" in tree_data
+        assert "name" in tree_data
+        assert "value" in tree_data
+        assert "children" in tree_data
 
-            # Root should have ID "0"
-            assert tree_data["id"] == "0"
-            assert tree_data["name"] == "All Topics"
-            assert isinstance(tree_data["children"], list)
+        # Root should have ID "0"
+        assert tree_data["id"] == "0"
+        assert tree_data["name"] == "All Topics"
+        assert isinstance(tree_data["children"], list)
 
     def test_select_significant_themes(self, clustering_agent):
         """Test significant theme selection."""
@@ -547,30 +511,23 @@ class TestThemeClusteringAgent:
 
         agent = ThemeClusteringAgent(mock_llm, sample_theme_nodes)
 
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        # Run full clustering with safer target
+        all_themes_df = await agent.cluster_themes(max_iterations=1, target_themes=4)
 
-            # Run full clustering with safer target
-            all_themes_df = await agent.cluster_themes(
-                max_iterations=1, target_themes=4
-            )
+        # Select significant themes
+        selected_df = agent.select_themes(significance_percentage=15.0)
 
-            # Select significant themes
-            selected_df = agent.select_themes(significance_percentage=15.0)
+        # Verify results
+        assert isinstance(all_themes_df, pd.DataFrame)
+        assert isinstance(selected_df, pd.DataFrame)
 
-            # Verify results
-            assert isinstance(all_themes_df, pd.DataFrame)
-            assert isinstance(selected_df, pd.DataFrame)
+        # Should have created hierarchy (first parent gets A_0)
+        assert "A_0" in agent.themes
 
-            # Should have created hierarchy (first parent gets A_0)
-            assert "A_0" in agent.themes
-
-            # Verify tree structure can be generated
-            json_tree = agent.convert_themes_to_tree_json()
-            tree_data = json.loads(json_tree)
-            assert tree_data["id"] == "0"
+        # Verify tree structure can be generated
+        json_tree = agent.convert_themes_to_tree_json()
+        tree_data = json.loads(json_tree)
+        assert tree_data["id"] == "0"
 
 
 class TestThemeClusteringAgentEdgeCases:
@@ -605,15 +562,11 @@ class TestThemeClusteringAgentEdgeCases:
         agent = ThemeClusteringAgent(mock_llm, themes)
 
         # Should not attempt clustering if target is already met
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
-            result_df = await agent.cluster_themes(max_iterations=1, target_themes=2)
+        result_df = await agent.cluster_themes(max_iterations=1, target_themes=2)
 
-            # Should stop immediately since target is reached
-            assert agent.current_iteration == 0
-            assert len(result_df) == 2
+        # Should stop immediately since target is reached
+        assert agent.current_iteration == 0
+        assert len(result_df) == 2
 
     @pytest.mark.asyncio
     async def test_cluster_iteration_no_merges(self, clustering_agent):
@@ -636,18 +589,13 @@ class TestThemeClusteringAgentEdgeCases:
             )
         )
 
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        initial_themes = len(clustering_agent.active_themes)
+        await clustering_agent.cluster_iteration()
 
-            initial_themes = len(clustering_agent.active_themes)
-            await clustering_agent.cluster_iteration()
-
-            # Should increment iteration and merge A+B into A_0
-            assert clustering_agent.current_iteration == 1
-            # Active themes should be reduced by 1 (A and B removed, A_0 added)
-            assert len(clustering_agent.active_themes) == initial_themes - 1
+        # Should increment iteration and merge A+B into A_0
+        assert clustering_agent.current_iteration == 1
+        # Active themes should be reduced by 1 (A and B removed, A_0 added)
+        assert len(clustering_agent.active_themes) == initial_themes - 1
 
     @pytest.mark.asyncio
     async def test_invalid_children_in_response(self, clustering_agent):
@@ -674,16 +622,11 @@ class TestThemeClusteringAgentEdgeCases:
             )
         )
 
-        with patch(
-            "themefinder.advanced_tasks.theme_clustering_agent.load_prompt_from_file"
-        ) as mock_load:
-            mock_load.return_value = "Mock prompt {themes_json} {iteration}"
+        await clustering_agent.cluster_iteration()
 
-            await clustering_agent.cluster_iteration()
-
-            # Should only process valid children (first parent gets A_0)
-            new_theme = clustering_agent.themes["A_0"]
-            assert set(new_theme.children) == {"A", "B"}  # Only valid children
-            assert "A" not in clustering_agent.active_themes
-            assert "B" not in clustering_agent.active_themes
-            assert "NONEXISTENT" not in clustering_agent.themes
+        # Should only process valid children (first parent gets A_0)
+        new_theme = clustering_agent.themes["A_0"]
+        assert set(new_theme.children) == {"A", "B"}  # Only valid children
+        assert "A" not in clustering_agent.active_themes
+        assert "B" not in clustering_agent.active_themes
+        assert "NONEXISTENT" not in clustering_agent.themes

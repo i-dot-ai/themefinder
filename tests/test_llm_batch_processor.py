@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -22,7 +21,6 @@ from themefinder.llm_batch_processor import (
     call_llm,
     generate_prompts,
     get_missing_response_ids,
-    load_prompt_template,
     partition_dataframe,
     process_llm_responses,
     split_overflowing_batch,
@@ -595,7 +593,7 @@ async def test_batch_and_run_successful(monkeypatch, mock_llm, sample_df):
 
     result_df, unprocessable_df = await batch_and_run(
         sample_df,
-        "detail_detection",
+        "Test prompt: {responses}",
         mock_llm,
         output_model=DetailDetectionResponses,
         batch_size=2,
@@ -664,7 +662,7 @@ async def test_batch_and_run_with_retries(monkeypatch, mock_llm, sample_df):
 
     result_df, unprocessable_df = await batch_and_run(
         sample_df,
-        "detail_detection",
+        "Test prompt: {responses}",
         mock_llm,
         output_model=DetailDetectionResponses,
         batch_size=2,
@@ -746,7 +744,7 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
 
     result_df, unprocessable_df = await batch_and_run(
         test_df,
-        "detail_detection",
+        "Test prompt: {responses}",
         mock_llm,
         output_model=DetailDetectionResponses,
         batch_size=3,
@@ -756,64 +754,6 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
     assert len(unprocessable_df) == 1
     assert set(result_df["response_id"]) == {1, 2}
     assert set(unprocessable_df["response_id"]) == {3}
-
-
-def test_load_prompt_template_string(monkeypatch):
-    """
-    Test load_prompt_template with a string input.
-    Verifies that a string is correctly loaded from a file and returned as a plain string.
-    """
-    monkeypatch.setattr(
-        "themefinder.llm_batch_processor.load_prompt_from_file",
-        lambda _: "This is a test prompt with {variable}",
-    )
-
-    result = load_prompt_template("test_prompt")
-
-    assert isinstance(result, str)
-    assert result == "This is a test prompt with {variable}"
-
-
-def test_load_prompt_template_path(monkeypatch):
-    """
-    Test load_prompt_template with a Path input.
-    Verifies that a Path is correctly loaded and returned as a plain string.
-    """
-    monkeypatch.setattr(
-        "themefinder.llm_batch_processor.load_prompt_from_file",
-        lambda _: "This is a path-based prompt with {variable}",
-    )
-
-    result = load_prompt_template(Path("test_prompt"))
-
-    assert isinstance(result, str)
-    assert result == "This is a path-based prompt with {variable}"
-
-
-def test_load_prompt_template_invalid_type():
-    """
-    Test load_prompt_template with an invalid input type.
-    Verifies that the function raises a TypeError for unsupported input types.
-    """
-    with pytest.raises(TypeError):
-        load_prompt_template(123)  # Integer is not a valid type
-
-
-def test_load_prompt_from_file_not_found(monkeypatch):
-    """
-    Test load_prompt_from_file when the file is not found.
-    Verifies that the function raises FileNotFoundError when the prompt file doesn't exist.
-    """
-
-    def mock_open(*args, **kwargs):
-        raise FileNotFoundError("File not found")
-
-    monkeypatch.setattr(Path, "open", mock_open)
-
-    with pytest.raises(FileNotFoundError):
-        from themefinder.llm_batch_processor import load_prompt_from_file
-
-        load_prompt_from_file("nonexistent_prompt")
 
 
 def test_get_missing_response_ids():

@@ -2,7 +2,6 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Optional
 
 import openai
@@ -29,7 +28,7 @@ class BatchPrompt:
 
 async def batch_and_run(
     input_df: pd.DataFrame,
-    prompt_template: str | Path,
+    prompt_template: str,
     llm: LLM,
     output_model: type[BaseModel],
     batch_size: int = 10,
@@ -42,7 +41,7 @@ async def batch_and_run(
 
     Args:
         input_df: DataFrame containing input to be processed. Must include a 'response_id' column.
-        prompt_template: Name of a prompt file (without .txt extension) or Path object.
+        prompt_template: Prompt template string.
         llm: LLM instance that will process the prompts.
         output_model: Pydantic model class for structured LLM output.
         batch_size: Number of input rows to process in each batch. Defaults to 10.
@@ -58,7 +57,7 @@ async def batch_and_run(
     """
 
     logger.info(f"Running batch and run with batch size {batch_size}")
-    template_str = load_prompt_template(prompt_template)
+    template_str = prompt_template
     batch_prompts = generate_prompts(
         template_str,
         input_df,
@@ -77,7 +76,9 @@ async def batch_and_run(
 
     if failed_ids:
         retry_df = input_df[input_df["response_id"].isin(failed_ids)]
-        retry_prompts = generate_prompts(template_str, retry_df, batch_size=1, **kwargs)
+        retry_prompts = generate_prompts(
+            prompt_template, retry_df, batch_size=1, **kwargs
+        )
         retry_results, unprocessable_ids = await call_llm(
             batch_prompts=retry_prompts,
             llm=llm,
@@ -91,38 +92,6 @@ async def batch_and_run(
     else:
         unprocessable_df = pd.DataFrame()
     return processed_results, unprocessable_df
-
-
-def load_prompt_from_file(file_path: str | Path) -> str:
-    """Load a prompt template from a text file in the prompts directory.
-
-    Args:
-        file_path: Name of the prompt file (without .txt extension) or Path object.
-
-    Returns:
-        Content of the prompt template file.
-    """
-    parent_dir = Path(__file__).parent
-    with Path.open(parent_dir / "prompts" / f"{file_path}.txt") as file:
-        return file.read()
-
-
-def load_prompt_template(prompt_template: str | Path) -> str:
-    """Load a prompt template string from a file.
-
-    Args:
-        prompt_template: Name of a prompt file (without .txt extension) or Path object.
-
-    Returns:
-        The prompt template string.
-
-    Raises:
-        TypeError: If prompt_template is not a str or Path.
-    """
-    if isinstance(prompt_template, str | Path):
-        return load_prompt_from_file(prompt_template)
-    msg = "Invalid prompt_template type. Expected str or Path."
-    raise TypeError(msg)
 
 
 def partition_dataframe(
