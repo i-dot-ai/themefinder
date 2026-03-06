@@ -18,7 +18,7 @@ from themefinder.themeset_rules import (
 )
 
 
-@pytest.mark.parametrize("n, expected", [(69, 69), (70, 70), (71, None)])
+@pytest.mark.parametrize("n, expected", [(69, None), (70, None), (71, 71)])
 def test_rule_1_total_theme_number_less_than_70(n, expected):
     result = rule_1_total_theme_number_less_than_70([{} for _ in range(n)])
     assert result is expected

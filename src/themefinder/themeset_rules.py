@@ -12,7 +12,7 @@ def rule_1_total_theme_number_less_than_70(clustered_themes: list) -> int | None
     The number of child themes should be no more than 70
     Rationale: Users typically want less themes than this, so we do not want Consultation owners to have to much work to do to reduce the theme-set to meet their expectations.
     """
-    if len(clustered_themes) <= 70:
+    if len(clustered_themes) > 70:
         return len(clustered_themes)
     return None
 
