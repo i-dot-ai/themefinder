@@ -1,10 +1,21 @@
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import List, Optional, Annotated
+
+import pandas as pd
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator, AfterValidator
 
 logger = logging.getLogger(__file__)
+
+
+@dataclass
+class TaskResult:
+    """Return type for themefinder task functions."""
+
+    output: pd.DataFrame
+    failures: pd.DataFrame
 
 
 class Position(str, Enum):

@@ -1,4 +1,5 @@
 from .llm import LLM, LLMResponse, OpenAILLM
+from .models import TaskResult
 from .tasks import (
     detail_detection,
     find_themes,
@@ -19,6 +20,7 @@ __all__ = [
     "LLM",
     "LLMResponse",
     "OpenAILLM",
+    "TaskResult",
     "find_themes",
     "theme_clustering",
     "theme_condensation",

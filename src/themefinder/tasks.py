@@ -7,6 +7,7 @@ from themefinder.llm import LLM
 from themefinder.llm_batch_processor import batch_and_run
 from themefinder.models import (
     DetailDetectionResponses,
+    TaskResult,
     ThemeCondensationResponses,
     ThemeGenerationResponses,
     ThemeMappingResponses,
@@ -59,37 +60,37 @@ async def find_themes(
     """
     logger.setLevel(logging.INFO if verbose else logging.CRITICAL)
 
-    theme_df, _ = await theme_generation(
+    theme_result = await theme_generation(
         responses_df,
         llm,
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
-    condensed_theme_df, _ = await theme_condensation(
-        theme_df,
+    condensed_result = await theme_condensation(
+        theme_result.output,
         llm,
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
-    refined_theme_df, _ = await theme_refinement(
-        condensed_theme_df,
+    refined_result = await theme_refinement(
+        condensed_result.output,
         llm,
         question=question,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
 
-    mapping_df, mapping_unprocessables = await theme_mapping(
+    mapping_result = await theme_mapping(
         responses_df[["response_id", "response"]],
         llm,
         question=question,
-        refined_themes_df=refined_theme_df,
+        refined_themes_df=refined_result.output,
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
-    detailed_df, _ = await detail_detection(
+    detail_result = await detail_detection(
         responses_df[["response_id", "response"]],
         llm,
         question=question,
@@ -101,10 +102,10 @@ async def find_themes(
     logger.info("Provide feedback or report bugs: packages@cabinetoffice.gov.uk")
     return {
         "question": question,
-        "themes": refined_theme_df,
-        "mapping": mapping_df,
-        "detailed_responses": detailed_df,
-        "unprocessables": mapping_unprocessables,
+        "themes": refined_result.output,
+        "mapping": mapping_result.output,
+        "detailed_responses": detail_result.output,
+        "unprocessables": mapping_result.failures,
     }
 
 
@@ -117,7 +118,7 @@ async def theme_generation(
     prompt_template: str = THEME_GENERATION,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Generate themes from survey responses using an LLM.
 
     Args:
@@ -131,7 +132,7 @@ async def theme_generation(
         concurrency: Number of concurrent API calls to make.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows)
+        TaskResult with output and failures DataFrames.
     """
     logger.info(f"Running theme generation on {len(responses_df)} responses")
     return await batch_and_run(
@@ -156,7 +157,7 @@ async def theme_condensation(
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
     **kwargs,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Condense and combine similar themes identified from survey responses.
 
     When the theme count exceeds the batch size, a first pass condenses within
@@ -172,7 +173,7 @@ async def theme_condensation(
         concurrency: Number of concurrent API calls to make.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows)
+        TaskResult with output and failures DataFrames.
     """
     logger.info(f"Running theme condensation on {len(themes_df)} themes")
     themes_df["response_id"] = themes_df.index + 1
@@ -184,7 +185,7 @@ async def theme_condensation(
         logger.info(
             f"{len(themes_df)} larger than {target}, using recursive theme condensation"
         )
-        themes_df, _ = await batch_and_run(
+        condense_result = await batch_and_run(
             themes_df,
             prompt_template,
             llm,
@@ -195,7 +196,7 @@ async def theme_condensation(
             concurrency=concurrency,
             **kwargs,
         )
-        themes_df = themes_df.sample(frac=1).reset_index(drop=True)
+        themes_df = condense_result.output.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
 
         if len(themes_df) == original_theme_count:
@@ -206,7 +207,7 @@ async def theme_condensation(
         else:
             retry = 0
 
-    themes_df, _ = await batch_and_run(
+    final_result = await batch_and_run(
         themes_df,
         prompt_template,
         llm,
@@ -218,8 +219,8 @@ async def theme_condensation(
         **kwargs,
     )
 
-    logger.info(f"Final number of condensed themes: {themes_df.shape[0]}")
-    return themes_df, _
+    logger.info(f"Final number of condensed themes: {final_result.output.shape[0]}")
+    return final_result
 
 
 async def theme_clustering(
@@ -230,7 +231,7 @@ async def theme_clustering(
     significance_percentage: float = 10.0,
     return_all_themes: bool = False,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Perform hierarchical clustering of themes using an agentic approach.
 
     Args:
@@ -243,7 +244,7 @@ async def theme_clustering(
         system_prompt: System prompt to guide the LLM's behavior.
 
     Returns:
-        Tuple of (clustered themes DataFrame, empty DataFrame).
+        TaskResult with output and failures DataFrames.
     """
     logger.info(f"Starting hierarchical clustering of {len(themes_df)} themes")
 
@@ -279,7 +280,7 @@ async def theme_clustering(
         logger.info(
             f"Clustering complete: returning all {len(all_themes_df)} clustered themes"
         )
-        return all_themes_df, pd.DataFrame()
+        return TaskResult(output=all_themes_df, failures=pd.DataFrame())
     else:
         # Select significant themes
         logger.info(
@@ -289,7 +290,7 @@ async def theme_clustering(
         logger.info(
             f"Clustering complete: returning {len(selected_themes_df)} significant themes"
         )
-        return selected_themes_df, pd.DataFrame()
+        return TaskResult(output=selected_themes_df, failures=pd.DataFrame())
 
 
 async def theme_refinement(
@@ -300,7 +301,7 @@ async def theme_refinement(
     prompt_template: str = THEME_REFINEMENT,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Refine and standardise condensed themes using an LLM.
 
     Args:
@@ -313,12 +314,12 @@ async def theme_refinement(
         concurrency: Number of concurrent API calls to make.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows)
+        TaskResult with output and failures DataFrames.
     """
     logger.info(f"Running theme refinement on {len(condensed_themes_df)} responses")
     condensed_themes_df["response_id"] = condensed_themes_df.index + 1
 
-    refined_themes, _ = await batch_and_run(
+    refine_result = await batch_and_run(
         condensed_themes_df,
         prompt_template,
         llm,
@@ -350,9 +351,9 @@ async def theme_refinement(
             df["topic_id"] = alpha_ids(len(df))
         return df
 
-    refined_themes = assign_sequential_topic_ids(refined_themes)
+    refined_themes = assign_sequential_topic_ids(refine_result.output)
 
-    return refined_themes, _
+    return TaskResult(output=refined_themes, failures=refine_result.failures)
 
 
 async def theme_mapping(
@@ -364,7 +365,7 @@ async def theme_mapping(
     prompt_template: str = THEME_MAPPING,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Map survey responses to refined themes using an LLM.
 
     Args:
@@ -378,7 +379,7 @@ async def theme_mapping(
         concurrency: Number of concurrent API calls to make.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows)
+        TaskResult with output and failures DataFrames.
     """
     logger.info(
         f"Running theme mapping on {len(responses_df)} responses using {len(refined_themes_df)} themes"
@@ -415,7 +416,7 @@ async def detail_detection(
     prompt_template: str = DETAIL_DETECTION,
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     concurrency: int = 10,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Identify responses that provide high-value detailed evidence.
 
     Args:
@@ -428,7 +429,7 @@ async def detail_detection(
         concurrency: Number of concurrent API calls to make.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows)
+        TaskResult with output and failures DataFrames.
     """
     logger.info(f"Running detail detection on {len(responses_df)} responses")
     return await batch_and_run(

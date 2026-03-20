@@ -112,15 +112,16 @@ async def _run_with_langfuse(
             )
 
             # Run theme mapping
-            result_df, unprocessable_df = await theme_mapping(
+            mapping_result = await theme_mapping(
                 responses_df=responses_df[["response_id", "response"]],
                 llm=llm,
                 question=question,
                 refined_themes_df=topics_df,
             )
-            if not unprocessable_df.empty:
+            result_df = mapping_result.output
+            if not mapping_result.failures.empty:
                 print(
-                    f"  Warning: {len(unprocessable_df)} responses could not be processed"
+                    f"  Warning: {len(mapping_result.failures)} responses could not be processed"
                 )
 
             # Build labels map
@@ -194,15 +195,15 @@ async def _run_local_fallback(
         topics_df = pd.DataFrame(item["input"]["topics"])
         expected_mappings = item["expected_output"]["mappings"]
 
-        result, unprocessable_df = await theme_mapping(
+        mapping_result = await theme_mapping(
             responses_df=responses_df[["response_id", "response"]],
             llm=llm,
             question=question,
             refined_themes_df=topics_df[["topic_id", "topic"]],
         )
-        if not unprocessable_df.empty:
+        if not mapping_result.failures.empty:
             print(
-                f"  Warning: {len(unprocessable_df)} responses could not be processed"
+                f"  Warning: {len(mapping_result.failures)} responses could not be processed"
             )
 
         # Merge for comparison
@@ -210,7 +211,7 @@ async def _run_local_fallback(
             responses_df["response_id"].astype(str).map(expected_mappings)
         )
         responses_df = responses_df.merge(
-            result[["response_id", "labels"]], "inner", on="response_id"
+            mapping_result.output[["response_id", "labels"]], "inner", on="response_id"
         )
 
         mapping_metrics = calculate_mapping_metrics(

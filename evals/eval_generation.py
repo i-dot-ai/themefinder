@@ -127,21 +127,22 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, judge_llm=None) ->
             question = item.input["question"]
 
             # Run full pipeline
-            themes_df, _ = await theme_generation(
+            gen_result = await theme_generation(
                 responses_df=responses_df,
                 llm=llm,
                 question=question,
             )
-            condensed_df, _ = await theme_condensation(
-                themes_df,
+            cond_result = await theme_condensation(
+                gen_result.output,
                 llm=llm,
                 question=question,
             )
-            refined_df, _ = await theme_refinement(
-                condensed_df,
+            ref_result = await theme_refinement(
+                cond_result.output,
                 llm=llm,
                 question=question,
             )
+            refined_df = ref_result.output
 
             # Parse combined "label: description" topic field into separate fields
             # for evaluators that need the label alone (specificity, redundancy)
@@ -256,21 +257,22 @@ async def _run_local_fallback(config: DatasetConfig, llm) -> dict:
         question = item["input"]["question"]
         theme_framework = item["expected_output"]["themes"]
 
-        themes_df, _ = await theme_generation(
+        gen_result = await theme_generation(
             responses_df=responses_df,
             llm=llm,
             question=question,
         )
-        condensed_df, _ = await theme_condensation(
-            themes_df,
+        cond_result = await theme_condensation(
+            gen_result.output,
             llm=llm,
             question=question,
         )
-        refined_df, _ = await theme_refinement(
-            condensed_df,
+        ref_result = await theme_refinement(
+            cond_result.output,
             llm=llm,
             question=question,
         )
+        refined_df = ref_result.output
 
         eval_scores = calculate_generation_metrics(refined_df, theme_framework)
         print(f"Theme Generation ({question_part}): \n {eval_scores}")

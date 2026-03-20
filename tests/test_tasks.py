@@ -54,7 +54,7 @@ async def test_batch_and_run_missing_id(monkeypatch, mock_llm, sample_df):
             (retry_response, []),
         ]
 
-        result_df, unprocessable_df = await batch_and_run(
+        result = await batch_and_run(
             input_df=sample_df,
             prompt_template="detail_detection",
             llm=mock_llm,
@@ -63,12 +63,12 @@ async def test_batch_and_run_missing_id(monkeypatch, mock_llm, sample_df):
             integrity_check=True,
         )
 
-        assert isinstance(result_df, pd.DataFrame)
-        assert len(result_df) == 2
-        assert 1 in result_df["response_id"].to_list()
-        assert 2 in result_df["response_id"].to_list()
+        assert isinstance(result.output, pd.DataFrame)
+        assert len(result.output) == 2
+        assert 1 in result.output["response_id"].to_list()
+        assert 2 in result.output["response_id"].to_list()
         assert mock_call_llm.await_count == 2
-        assert unprocessable_df.empty
+        assert result.failures.empty
 
 
 @pytest.mark.asyncio
@@ -97,14 +97,14 @@ async def test_theme_generation(mock_llm, sample_responses_df):
             [],
         )
 
-        result_df, _ = await theme_generation(
+        result = await theme_generation(
             sample_responses_df, mock_llm, question="test question", batch_size=2
         )
 
-        assert isinstance(result_df, pd.DataFrame)
-        assert "topic_label" in result_df.columns
-        assert "topic_description" in result_df.columns
-        assert "position" in result_df.columns
+        assert isinstance(result.output, pd.DataFrame)
+        assert "topic_label" in result.output.columns
+        assert "topic_description" in result.output.columns
+        assert "position" in result.output.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -134,18 +134,18 @@ async def test_theme_condensation_basic(mock_llm, sample_themes_df):
             [],
         )
 
-        result_df, unprocessable_df = await theme_condensation(
+        result = await theme_condensation(
             sample_themes_df,
             mock_llm,
             question="What are your thoughts on this product?",
             batch_size=10,
         )
 
-        assert isinstance(result_df, pd.DataFrame)
-        assert len(result_df) == 2
-        assert "topic_label" in result_df.columns
-        assert "topic_description" in result_df.columns
-        assert "source_topic_count" in result_df.columns
+        assert isinstance(result.output, pd.DataFrame)
+        assert len(result.output) == 2
+        assert "topic_label" in result.output.columns
+        assert "topic_description" in result.output.columns
+        assert "source_topic_count" in result.output.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -190,15 +190,15 @@ async def test_theme_condensation_recursive(mock_llm):
             (final_batch_responses, []),
         ]
 
-        result_df, unprocessable_df = await theme_condensation(
+        result = await theme_condensation(
             large_themes_df,
             mock_llm,
             question="What are your thoughts on this product?",
             batch_size=30,
         )
 
-        assert isinstance(result_df, pd.DataFrame)
-        assert len(result_df) == 25
+        assert isinstance(result.output, pd.DataFrame)
+        assert len(result.output) == 25
         assert (
             mock_call_llm.await_count == 3
         )  # while loop (100->50, 50->25) + final pass
@@ -241,16 +241,16 @@ async def test_theme_condensation_no_further_reduction(mock_llm):
             (original_responses, []),
         ]
 
-        result_df, unprocessable_df = await theme_condensation(
+        result = await theme_condensation(
             themes_df, mock_llm, question="test question", batch_size=2
         )
 
         assert (
             mock_call_llm.await_count == 1
         )  # 3 themes < target (30), only final pass runs
-        assert len(result_df) == 3
+        assert len(result.output) == 3
         original_labels = set(themes_df["topic_label"])
-        result_labels = set(result_df["topic_label"])
+        result_labels = set(result.output["topic_label"])
         assert original_labels == result_labels
 
 
@@ -274,13 +274,13 @@ async def test_theme_refinement(mock_llm):
             [],
         )
 
-        result_df, unprocessable_df = await theme_refinement(
+        result = await theme_refinement(
             condensed_df, mock_llm, question="test question", batch_size=2
         )
 
-        assert isinstance(result_df, pd.DataFrame)
-        assert "topic_id" in result_df.columns
-        assert "topic" in result_df.columns
+        assert isinstance(result.output, pd.DataFrame)
+        assert "topic_id" in result.output.columns
+        assert "topic" in result.output.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -313,7 +313,7 @@ async def test_theme_mapping(mock_llm, sample_responses_df):
             [],
         )
 
-        result_df, _ = await theme_mapping(
+        result = await theme_mapping(
             sample_responses_df,
             mock_llm,
             question="test question",
@@ -321,9 +321,9 @@ async def test_theme_mapping(mock_llm, sample_responses_df):
             batch_size=2,
         )
 
-        assert isinstance(result_df, pd.DataFrame)
-        assert "response_id" in result_df.columns
-        assert "labels" in result_df.columns
+        assert isinstance(result.output, pd.DataFrame)
+        assert "response_id" in result.output.columns
+        assert "labels" in result.output.columns
         assert mock_call_llm.await_count == 1
 
 
@@ -455,7 +455,7 @@ async def test_theme_clustering():
     mock_llm.ainvoke = AsyncMock(return_value=LLMResponse(parsed=mock_response))
 
     # Call theme_clustering
-    result, _ = await theme_clustering(
+    result = await theme_clustering(
         themes_df,
         mock_llm,
         max_iterations=1,
@@ -465,11 +465,11 @@ async def test_theme_clustering():
     )
 
     # Verify the result
-    assert isinstance(result, pd.DataFrame)
-    assert len(result) >= 0  # Can be 0 if nothing meets significance threshold
+    assert isinstance(result.output, pd.DataFrame)
+    assert len(result.output) >= 0  # Can be 0 if nothing meets significance threshold
 
     # Test with return_all_themes=True
-    result_all, _ = await theme_clustering(
+    result_all = await theme_clustering(
         themes_df,
         mock_llm,
         max_iterations=1,
@@ -478,7 +478,7 @@ async def test_theme_clustering():
         return_all_themes=True,
     )
 
-    assert isinstance(result_all, pd.DataFrame)
+    assert isinstance(result_all.output, pd.DataFrame)
 
 
 def test_hierarchical_clustering_response_validation():

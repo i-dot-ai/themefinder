@@ -67,10 +67,10 @@ async def test_retries(mock_llm, sample_df):
                 [],
             ),  # Second call succeeds
         ]
-        result_df, _ = await detail_detection(
+        result = await detail_detection(
             sample_df, mock_llm, question="doesn't matter"
         )
-        assert isinstance(result_df, pd.DataFrame)
+        assert isinstance(result.output, pd.DataFrame)
         assert mock_call_llm.call_count == 2
 
 
@@ -591,7 +591,7 @@ async def test_batch_and_run_successful(monkeypatch, mock_llm, sample_df):
         lambda *args, **kwargs: processed_df,
     )
 
-    result_df, unprocessable_df = await batch_and_run(
+    result = await batch_and_run(
         sample_df,
         "Test prompt: {responses}",
         mock_llm,
@@ -599,9 +599,9 @@ async def test_batch_and_run_successful(monkeypatch, mock_llm, sample_df):
         batch_size=2,
     )
 
-    assert len(result_df) == 3
-    assert len(unprocessable_df) == 0
-    assert all(result_df["llm_contribution"] == ["result1", "result2", "result3"])
+    assert len(result.output) == 3
+    assert len(result.failures) == 0
+    assert all(result.output["llm_contribution"] == ["result1", "result2", "result3"])
 
 
 @pytest.mark.asyncio
@@ -660,7 +660,7 @@ async def test_batch_and_run_with_retries(monkeypatch, mock_llm, sample_df):
         mock_process_llm_responses,
     )
 
-    result_df, unprocessable_df = await batch_and_run(
+    result = await batch_and_run(
         sample_df,
         "Test prompt: {responses}",
         mock_llm,
@@ -668,10 +668,10 @@ async def test_batch_and_run_with_retries(monkeypatch, mock_llm, sample_df):
         batch_size=2,
     )
 
-    assert len(result_df) == 2
-    assert len(unprocessable_df) == 0
-    assert set(result_df["response_id"]) == {1, 2}
-    assert set(result_df["llm_contribution"]) == {"result1", "result2"}
+    assert len(result.output) == 2
+    assert len(result.failures) == 0
+    assert set(result.output["response_id"]) == {1, 2}
+    assert set(result.output["llm_contribution"]) == {"result1", "result2"}
 
 
 @pytest.mark.asyncio
@@ -742,7 +742,7 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
         }
     )
 
-    result_df, unprocessable_df = await batch_and_run(
+    result = await batch_and_run(
         test_df,
         "Test prompt: {responses}",
         mock_llm,
@@ -750,10 +750,10 @@ async def test_batch_and_run_with_unprocessable_rows(monkeypatch, mock_llm):
         batch_size=3,
     )
 
-    assert len(result_df) == 2
-    assert len(unprocessable_df) == 1
-    assert set(result_df["response_id"]) == {1, 2}
-    assert set(unprocessable_df["response_id"]) == {3}
+    assert len(result.output) == 2
+    assert len(result.failures) == 1
+    assert set(result.output["response_id"]) == {1, 2}
+    assert set(result.failures["response_id"]) == {3}
 
 
 def test_get_missing_response_ids():

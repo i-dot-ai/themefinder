@@ -17,6 +17,7 @@ from tenacity import (
 )
 
 from themefinder.llm import LLM, LLMResponse
+from themefinder.models import TaskResult
 from themefinder.themefinder_logging import logger
 
 
@@ -36,7 +37,7 @@ async def batch_and_run(
     integrity_check: bool = False,
     concurrency: int = 10,
     **kwargs: Any,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> TaskResult:
     """Process a DataFrame of responses in batches using an LLM.
 
     Args:
@@ -51,9 +52,7 @@ async def batch_and_run(
         **kwargs: Additional keyword arguments to pass to the prompt template.
 
     Returns:
-        tuple[pd.DataFrame, pd.DataFrame]:
-            - The first DataFrame contains rows successfully processed by the LLM
-            - The second DataFrame contains rows that could not be processed
+        TaskResult with output and failures DataFrames.
     """
 
     logger.info(f"Running batch and run with batch size {batch_size}")
@@ -91,7 +90,7 @@ async def batch_and_run(
         processed_results = pd.concat([processed_results, retry_processed_results])
     else:
         unprocessable_df = pd.DataFrame()
-    return processed_results, unprocessable_df
+    return TaskResult(output=processed_results, failures=unprocessable_df)
 
 
 def partition_dataframe(
