@@ -109,13 +109,13 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm) -> dict:
             original_records = themes_df.to_dict(orient="records")
 
             # Run refinement
-            ref_result = await theme_refinement(
+            refinement_result = await theme_refinement(
                 themes_df,
                 llm=llm,
                 question=question,
             )
 
-            refined_records = ref_result.output.to_dict(orient="records")
+            refined_records = refinement_result.output.to_dict(orient="records")
             output = {"refined_themes": refined_records}
 
             # Update trace with output
@@ -201,13 +201,13 @@ async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
         with langfuse_utils.trace_context(
             langfuse_utils.LangfuseContext(client=None, handler=None)
         ):
-            ref_result = await theme_refinement(
+            refinement_result = await theme_refinement(
                 themes_df,
                 llm=llm,
                 question=question,
             )
 
-        refined_records = ref_result.output.to_dict(orient="records")
+        refined_records = refinement_result.output.to_dict(orient="records")
         all_results[f"{question_part}_output"] = {"refined_themes": refined_records}
 
         # LLM-as-judge: 4-dimension quality evaluation

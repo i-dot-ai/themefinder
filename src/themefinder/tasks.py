@@ -90,7 +90,7 @@ async def find_themes(
         system_prompt=system_prompt,
         concurrency=concurrency,
     )
-    detail_result = await detail_detection(
+    detection_result = await detail_detection(
         responses_df[["response_id", "response"]],
         llm,
         question=question,
@@ -104,7 +104,7 @@ async def find_themes(
         "question": question,
         "themes": refined_result.output,
         "mapping": mapping_result.output,
-        "detailed_responses": detail_result.output,
+        "detailed_responses": detection_result.output,
         "unprocessables": mapping_result.failures,
     }
 
@@ -185,7 +185,7 @@ async def theme_condensation(
         logger.info(
             f"{len(themes_df)} larger than {target}, using recursive theme condensation"
         )
-        condense_result = await batch_and_run(
+        condensation_result = await batch_and_run(
             themes_df,
             prompt_template,
             llm,
@@ -196,7 +196,7 @@ async def theme_condensation(
             concurrency=concurrency,
             **kwargs,
         )
-        themes_df = condense_result.output.sample(frac=1).reset_index(drop=True)
+        themes_df = condensation_result.output.sample(frac=1).reset_index(drop=True)
         themes_df["response_id"] = themes_df.index + 1
 
         if len(themes_df) == original_theme_count:
@@ -319,7 +319,7 @@ async def theme_refinement(
     logger.info(f"Running theme refinement on {len(condensed_themes_df)} responses")
     condensed_themes_df["response_id"] = condensed_themes_df.index + 1
 
-    refine_result = await batch_and_run(
+    refinement_result = await batch_and_run(
         condensed_themes_df,
         prompt_template,
         llm,
@@ -351,9 +351,9 @@ async def theme_refinement(
             df["topic_id"] = alpha_ids(len(df))
         return df
 
-    refined_themes = assign_sequential_topic_ids(refine_result.output)
+    refined_themes = assign_sequential_topic_ids(refinement_result.output)
 
-    return TaskResult(output=refined_themes, failures=refine_result.failures)
+    return TaskResult(output=refined_themes, failures=refinement_result.failures)
 
 
 async def theme_mapping(

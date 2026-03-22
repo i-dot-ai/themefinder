@@ -110,13 +110,13 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, eval_llm) -> dict:
             original_records = themes_df.to_dict(orient="records")
 
             # Run condensation
-            cond_result = await theme_condensation(
+            condensation_result = await theme_condensation(
                 themes_df,
                 llm=llm,
                 question=question,
             )
 
-            condensed_records = cond_result.output.to_dict(orient="records")
+            condensed_records = condensation_result.output.to_dict(orient="records")
             output = {"condensed_themes": condensed_records}
 
             # Update trace with output
@@ -222,13 +222,13 @@ async def _run_local_fallback(config: DatasetConfig, llm, eval_llm) -> dict:
         with langfuse_utils.trace_context(
             langfuse_utils.LangfuseContext(client=None, handler=None)
         ):
-            cond_result = await theme_condensation(
+            condensation_result = await theme_condensation(
                 themes_df,
                 llm=llm,
                 question=question,
             )
 
-        condensed_records = cond_result.output.to_dict(orient="records")
+        condensed_records = condensation_result.output.to_dict(orient="records")
         all_results[f"{question_part}_output"] = {"condensed_themes": condensed_records}
 
         # LLM-as-judge: compression quality + information retention

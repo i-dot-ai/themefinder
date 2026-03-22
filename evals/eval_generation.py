@@ -127,22 +127,22 @@ async def _run_with_langfuse(ctx, config: DatasetConfig, llm, judge_llm=None) ->
             question = item.input["question"]
 
             # Run full pipeline
-            gen_result = await theme_generation(
+            generation_result = await theme_generation(
                 responses_df=responses_df,
                 llm=llm,
                 question=question,
             )
-            cond_result = await theme_condensation(
-                gen_result.output,
+            condensation_result = await theme_condensation(
+                generation_result.output,
                 llm=llm,
                 question=question,
             )
-            ref_result = await theme_refinement(
-                cond_result.output,
+            refinement_result = await theme_refinement(
+                condensation_result.output,
                 llm=llm,
                 question=question,
             )
-            refined_df = ref_result.output
+            refined_df = refinement_result.output
 
             # Parse combined "label: description" topic field into separate fields
             # for evaluators that need the label alone (specificity, redundancy)
@@ -257,22 +257,22 @@ async def _run_local_fallback(config: DatasetConfig, llm) -> dict:
         question = item["input"]["question"]
         theme_framework = item["expected_output"]["themes"]
 
-        gen_result = await theme_generation(
+        generation_result = await theme_generation(
             responses_df=responses_df,
             llm=llm,
             question=question,
         )
-        cond_result = await theme_condensation(
-            gen_result.output,
+        condensation_result = await theme_condensation(
+            generation_result.output,
             llm=llm,
             question=question,
         )
-        ref_result = await theme_refinement(
-            cond_result.output,
+        refinement_result = await theme_refinement(
+            condensation_result.output,
             llm=llm,
             question=question,
         )
-        refined_df = ref_result.output
+        refined_df = refinement_result.output
 
         eval_scores = calculate_generation_metrics(refined_df, theme_framework)
         print(f"Theme Generation ({question_part}): \n {eval_scores}")
