@@ -67,9 +67,7 @@ async def test_retries(mock_llm, sample_df):
                 [],
             ),  # Second call succeeds
         ]
-        result = await detail_detection(
-            sample_df, mock_llm, question="doesn't matter"
-        )
+        result = await detail_detection(sample_df, mock_llm, question="doesn't matter")
         assert isinstance(result.output, pd.DataFrame)
         assert mock_call_llm.call_count == 2
 
