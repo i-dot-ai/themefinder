@@ -60,7 +60,7 @@ async def find_themes(
     """
     logger.setLevel(logging.INFO if verbose else logging.CRITICAL)
 
-    theme_result = await theme_generation(
+    generation_result = await theme_generation(
         responses_df,
         llm,
         question=question,
@@ -68,7 +68,7 @@ async def find_themes(
         concurrency=concurrency,
     )
     condensed_result = await theme_condensation(
-        theme_result.output,
+        generation_result.output,
         llm,
         question=question,
         system_prompt=system_prompt,
