@@ -51,16 +51,16 @@ class OpenAILLM:
     ) -> LLMResponse:
         kwargs = {
             "model": self.model,
-            "messages": [{"role": "user", "content": prompt}],
+            "input": prompt,
             **self.request_kwargs,
         }
         if output_model:
-            kwargs["response_format"] = output_model
-            response = await self.client.chat.completions.parse(**kwargs)
-            return LLMResponse(parsed=response.choices[0].message.parsed)
+            kwargs["text_format"] = output_model
+            response = await self.client.responses.parse(**kwargs)
+            return LLMResponse(parsed=response.output_parsed)
         else:
-            response = await self.client.chat.completions.create(**kwargs)
-            return LLMResponse(parsed=response.choices[0].message.content)
+            response = await self.client.responses.create(**kwargs)
+            return LLMResponse(parsed=response.output_text)
 
     def invoke(
         self, prompt: str, output_model: type[BaseModel] | None = None
