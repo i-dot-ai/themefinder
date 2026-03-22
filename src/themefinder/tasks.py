@@ -83,7 +83,7 @@ async def find_themes(
     )
 
     mapping_result = await theme_mapping(
-        responses_df[["response_id", "response"]],
+        responses_df,
         llm,
         question=question,
         refined_themes_df=refined_result.output,
@@ -91,7 +91,7 @@ async def find_themes(
         concurrency=concurrency,
     )
     detection_result = await detail_detection(
-        responses_df[["response_id", "response"]],
+        responses_df,
         llm,
         question=question,
         system_prompt=system_prompt,
