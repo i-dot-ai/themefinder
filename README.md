@@ -31,7 +31,7 @@ If you are using an Azure OpenAI endpoint, you will need the following variables
 - `AZURE_OPENAI_API_KEY`
 - `AZURE_OPENAI_ENDPOINT`
 - `OPENAI_API_VERSION`
-- `DEPLOYMENT_NAME`
+- `AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT`
 - `AZURE_OPENAI_BASE_URL`
 
 Otherwise you will need whichever variables [LangChain](https://www.langchain.com/) requires for your LLM of choice.
