@@ -35,7 +35,7 @@ def calculate_generation_metrics(
     """
     if llm is None:
         llm = OpenAILLM(
-            model=os.getenv("DEPLOYMENT_NAME"),
+            model=os.getenv("AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT"),
             request_kwargs={"temperature": 0},
             base_url=os.getenv("LLM_GATEWAY_URL"),
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),

@@ -128,7 +128,7 @@ def get_langfuse_context(
         version = _get_version()
         environment = os.getenv("ENVIRONMENT", "development")
         git_sha = os.getenv("GITHUB_SHA", "local")[:7]
-        model = os.getenv("DEPLOYMENT_NAME", "unknown")
+        model = os.getenv("AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT", "unknown")
 
         # Build standard tags - note: model tag is only added if not provided
         # by caller (benchmark.py provides its own model tag)
