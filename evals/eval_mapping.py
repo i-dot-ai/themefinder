@@ -113,7 +113,7 @@ async def _run_with_langfuse(
 
             # Run theme mapping
             mapping_result = await theme_mapping(
-                responses_df=responses_df[["response_id", "response"]],
+                responses_df=responses_df,
                 llm=llm,
                 question=question,
                 refined_themes_df=topics_df,
@@ -196,7 +196,7 @@ async def _run_local_fallback(
         expected_mappings = item["expected_output"]["mappings"]
 
         mapping_result = await theme_mapping(
-            responses_df=responses_df[["response_id", "response"]],
+            responses_df=responses_df,
             llm=llm,
             question=question,
             refined_themes_df=topics_df[["topic_id", "topic"]],
