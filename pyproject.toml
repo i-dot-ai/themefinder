@@ -32,7 +32,7 @@ dependencies = [
     "pydantic>=2.0.0",
     "protobuf==6.33.5",
     "cryptography==46.0.5",
-    "langchain-core==1.2.11",
+    "langchain-core==1.2.22",
 ]
 
 [project.optional-dependencies]
