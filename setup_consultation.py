@@ -247,10 +247,10 @@ def save_hybrid_questions(
         print("  No hybrid questions found, skipping.")
         return
     question_info.columns = [
-        "closed_column",
+        "open_column",
         "question_number",
         "question_text",
-        "open_column",
+        "closed_column",
     ]
 
     question_info["question_number"] = (
@@ -432,7 +432,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Set up a new consultation for ThemeFinder."
     )
-    parser.add_argument("name", nargs="?", help="Consultation name (used as folder name)")
+    parser.add_argument(
+        "name", nargs="?", help="Consultation name (used as folder name)"
+    )
     args = parser.parse_args()
 
     name = args.name
@@ -476,7 +478,9 @@ def main() -> None:
         qu_path = remaining[0]
         print(f"\nUsing '{qu_path.name}' as the template question understanding file.")
     else:
-        qu_path = prompt_file_selection(remaining, "template question understanding data")
+        qu_path = prompt_file_selection(
+            remaining, "template question understanding data"
+        )
 
     # Step 4: Run ingestion
     output_dir = str(consultation_dir / "inputs")
