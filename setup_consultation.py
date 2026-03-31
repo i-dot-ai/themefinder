@@ -2,17 +2,28 @@
 
 import argparse
 import os
+import re
 import sys
 import json
 from pathlib import Path
 from typing import Optional
 
+import boto3
 import pandas as pd
 
 
 CONFLUENCE_URL = "https://incubatorforartificialintelligence.atlassian.net/wiki/spaces/Consult/pages/136445956/1.2+Set+up+the+consultation+in+the+app"
 
 VALID_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+
+
+def to_snake_case(s: str) -> str:
+    """Convert a string to snake_case."""
+    s = re.sub(r"[^\w\s]", " ", s)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+    s = re.sub(r"([a-z\d])([A-Z])", r"\1_\2", s)
+    s = re.sub(r"[\s\-]+", "_", s)
+    return re.sub(r"_+", "_", s).strip("_").lower()
 
 
 # --- Data processing functions ---
@@ -400,6 +411,23 @@ def run_ingestion(
     print(f"\nAll input files written to: {output_dir}")
 
 
+def upload_inputs_to_s3(local_dir: str, bucket: str, s3_prefix: str) -> None:
+    """Upload all files in local_dir to s3://bucket/s3_prefix, preserving directory structure."""
+    s3 = boto3.client("s3")
+    local_path = Path(local_dir)
+    files = [f for f in local_path.rglob("*") if f.is_file()]
+    if not files:
+        print(f"No files found in {local_dir} to upload.")
+        return
+    print(f"\nUploading {len(files)} file(s) to s3://{bucket}/{s3_prefix}")
+    for file_path in files:
+        relative = file_path.relative_to(local_path)
+        s3_key = s3_prefix + str(relative)
+        print(f"  {relative} -> s3://{bucket}/{s3_key}")
+        s3.upload_file(str(file_path), bucket, s3_key)
+    print("Upload complete.")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Set up a new consultation for ThemeFinder."
@@ -413,6 +441,9 @@ def main() -> None:
         if not name:
             print("Error: consultation name cannot be empty.")
             sys.exit(1)
+
+    name = to_snake_case(name)
+    print(f"Using consultation name: {name}")
 
     base_dir = Path(__file__).resolve().parent / "consultations"
     consultation_dir = base_dir / name
@@ -451,7 +482,11 @@ def main() -> None:
     output_dir = str(consultation_dir / "inputs")
     run_ingestion(responses_path, qu_path, output_dir)
 
-    # Step 5: Point to Confluence
+    # Step 5: Upload inputs to S3
+    s3_prefix = f"app_data/consultations/{name}/inputs/"
+    upload_inputs_to_s3(output_dir, "i-dot-ai-prod-consult-data", s3_prefix)
+
+    # Step 6: Point to Confluence
     print("\n" + "=" * 60)
     print("Setup complete! For further instructions, see:")
     print(f"  {CONFLUENCE_URL}")

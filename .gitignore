@@ -96,3 +96,5 @@ evals/data/*
 evals/benchmark_*.log
 evals/benchmark_results/
 benchmark_report_*.html
+
+consultations/

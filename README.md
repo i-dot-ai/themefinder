@@ -148,6 +148,7 @@ This will:
 2. Prompt you to copy in the consultation response data and template question understanding file
 3. Ask you to identify which file is which
 4. Process the data and generate the required input files under `./consultations/<name>/inputs/`
+5. Upload the files to S3 to `i-dot-ai-prod-consult-data/app_data/consultations/<name>/inputs/`
 
 For further instructions on setting up the consultation in the app, see the [Confluence guide](https://incubatorforartificialintelligence.atlassian.net/wiki/spaces/Consult/pages/136445956/1.2+Set+up+the+consultation+in+the+app).
 
