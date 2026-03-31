@@ -129,6 +129,29 @@ ThemeFinder's structured output approach makes it compatible with a wide range o
 - Mistral models (e.g., Mistral 7B, Mixtral)
 
 
+## Setting up a consultation
+
+To set up a new consultation, run:
+
+```bash
+make setup-consultation NAME=my_consultation
+```
+
+Or without a name (you'll be prompted):
+
+```bash
+make setup-consultation
+```
+
+This will:
+1. Create a folder under `./consultations/<name>/`
+2. Prompt you to copy in the consultation response data and template question understanding file
+3. Ask you to identify which file is which
+4. Process the data and generate the required input files under `./consultations/<name>/inputs/`
+
+For further instructions on setting up the consultation in the app, see the [Confluence guide](https://incubatorforartificialintelligence.atlassian.net/wiki/spaces/Consult/pages/136445956/1.2+Set+up+the+consultation+in+the+app).
+
+
 ## Development
 
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.

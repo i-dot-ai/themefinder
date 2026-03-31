@@ -1,4 +1,4 @@
-.PHONY: test test-all lint run_evals run_benchmark pipeline
+.PHONY: test test-all lint run_evals run_benchmark pipeline setup-consultation
 
 test:
 	uv run pytest tests/test_tasks.py tests/test_models.py tests/test_llm_batch_processor.py -v -s
@@ -20,3 +20,6 @@ run_benchmark:
 # Need to replicate Consult Pipeline containers for this to work
 pipeline:
 	./run_pipeline.sh synthetic_gambling_XS gpt-4.1-sweden-2025-03
+
+setup-consultation:
+	uv run python setup_consultation.py $(NAME)
