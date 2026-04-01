@@ -556,17 +556,56 @@ def find_data_files(consultation_dir: str) -> list[Path]:
     return sorted(files)
 
 
+def _is_subheader_row(row0: pd.Series, row1: pd.Series) -> bool:
+    """Detect whether row1 is a descriptive sub-header rather than data.
+
+    Two-tier header files have short IDs on row 0 and long question text on
+    row 1.  Data rows have shorter, more varied values with more NaN cells.
+    """
+    non_null_1 = row1.dropna()
+    if len(non_null_1) == 0:
+        return False
+
+    # Sub-header rows are nearly fully populated (>90% non-null)
+    fill_ratio = len(non_null_1) / len(row1)
+    if fill_ratio < 0.9:
+        return False
+
+    # Sub-header rows have long descriptive text (median length > 25 chars)
+    median_len = non_null_1.astype(str).str.len().median()
+    return median_len > 25
+
+
 def load_responses(path: Path) -> tuple[pd.DataFrame, dict[str, str]]:
     """Load responses from CSV or Excel file.
 
     Returns the DataFrame (with columns renamed to Excel letters) and a
     dict mapping Excel column letter -> original column header string.
+
+    Handles three layout patterns automatically:
+      - Single header row, then data  (LGR files)
+      - Header row, blank row, then data  (SCR files)
+      - Two header rows (short IDs + full question text), then data  (Biomass)
     """
     ext = path.suffix.lower()
-    if ext == ".csv":
-        df = pd.read_csv(path, header=0)
-    else:
-        df = pd.read_excel(path, header=0)
+    read_fn = pd.read_csv if ext == ".csv" else pd.read_excel
+
+    # Read first 3 rows raw to detect layout
+    raw = read_fn(path, header=None, nrows=3)
+
+    header_row = 0
+
+    if len(raw) > 1 and _is_subheader_row(raw.iloc[0], raw.iloc[1]):
+        # Two-tier header — use row 1 (full question text) as the header
+        logger.info("Detected two-tier header in %s, using row 2 as header", path.name)
+        header_row = 1
+
+    # Full read with detected layout
+    df = read_fn(path, header=header_row)
+
+    # Drop all-NaN rows (handles blank separator rows and trailing empties)
+    df = df.dropna(how="all").reset_index(drop=True)
+
     original_headers = {
         get_excel_column_name(i): str(col)
         for i, col in enumerate(df.columns)
