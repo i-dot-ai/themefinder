@@ -287,7 +287,7 @@ def save_demographic_data(
     responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
 ) -> None:
     demographic_info = pd.read_excel(
-        question_understanding_path, sheet_name="Demographic", skiprows=3
+        question_understanding_path, sheet_name="Demographic", skiprows=3, header=None
     )
     if demographic_info.empty:
         print("  No demographic data found, skipping.")
@@ -352,7 +352,10 @@ def save_open_questions(
     responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
 ) -> None:
     question_info = pd.read_excel(
-        question_understanding_path, sheet_name="Open questions", skiprows=3
+        question_understanding_path,
+        sheet_name="Open questions",
+        skiprows=3,
+        header=None,
     )
     if question_info.empty:
         print("  No open questions found, skipping.")
@@ -462,7 +465,10 @@ def save_hybrid_questions(
     responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
 ) -> None:
     question_info = pd.read_excel(
-        question_understanding_path, sheet_name="Hybrid questions", skiprows=3
+        question_understanding_path,
+        sheet_name="Hybrid questions",
+        skiprows=3,
+        header=None,
     )
     if question_info.empty:
         print("  No hybrid questions found, skipping.")
@@ -547,7 +553,10 @@ def save_closed_questions(
     responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
 ) -> None:
     question_info = pd.read_excel(
-        question_understanding_path, sheet_name="Multiple Choice", skiprows=3
+        question_understanding_path,
+        sheet_name="Multiple Choice",
+        skiprows=3,
+        header=None,
     )
     if question_info.empty:
         print("  No closed questions found, skipping.")
