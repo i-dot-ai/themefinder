@@ -255,7 +255,7 @@ def load_and_number_question_sheets(
             f"question_number={num} appears in [{', '.join(keys)}]"
             for num, keys in sorted(duplicates.items())
         )
-        raise AssertionError(f"Non-unique question numbers found across sheets: {detail}")
+        raise ValueError(f"Non-unique question numbers found across sheets: {detail}")
 
     return sheets
 
@@ -306,6 +306,17 @@ def save_demographic_data(
     )
 
 
+def _clean_text_column(
+    series: pd.Series,
+    characters_to_remove: list[str] = ["/", "\\", "- Text", "_x000D_"],
+) -> pd.Series:
+    """Remove unwanted characters and non-ASCII bytes from a text column."""
+    series = series.astype(str).str.encode("ascii", "ignore").str.decode("ascii")
+    for bad_string in characters_to_remove:
+        series = series.apply(lambda x, bs=bad_string: x.replace(bs, " "))
+    return series
+
+
 def create_open_question_inputs(
     df: pd.DataFrame,
     open_questions: list[dict],
@@ -324,15 +335,8 @@ def create_open_question_inputs(
         if sample_size is not None and sample_size < len(question_answers):
             question_answers = question_answers.sample(sample_size)
 
-        for bad_string in characters_to_remove:
-            question_answers[question_col] = question_answers[question_col].apply(
-                lambda x, bs=bad_string: x.replace(bs, " ")
-            )
-        question_answers[question_col] = (
-            question_answers[question_col]
-            .astype(str)
-            .str.encode("ascii", "ignore")
-            .str.decode("ascii")
+        question_answers[question_col] = _clean_text_column(
+            question_answers[question_col], characters_to_remove
         )
         question_answers.columns = ["themefinder_id", "text"]
         question_answers[["themefinder_id", "text"]].to_json(
@@ -346,40 +350,6 @@ def create_open_question_inputs(
         }
         with open(os.path.join(q_dir, "question.json"), "w") as f:
             json.dump(question_data, f, indent=4)
-
-
-def save_open_questions(
-    responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
-) -> None:
-    question_info = pd.read_excel(
-        question_understanding_path,
-        sheet_name="Open questions",
-        skiprows=3,
-        header=None,
-    )
-    if question_info.empty:
-        print("  No open questions found, skipping.")
-        return
-    question_info.columns = ["column_name", "question_number", "question_text"]
-
-    only_nans = responses_df[question_info["column_name"].tolist()].isna().all()
-    column_names_with_only_nans = only_nans[only_nans].index.tolist()
-    question_info = question_info[
-        ~question_info["column_name"].isin(column_names_with_only_nans)
-    ]
-
-    question_info["question_number"] = (
-        question_info["question_number"]
-        .astype(str)
-        .str.replace(r"\D", "", regex=True)
-        .astype(int)
-    )
-    if not question_info["question_number"].is_unique:
-        raise AssertionError("Non-unique values found in 'question_number' column")
-
-    create_open_question_inputs(
-        responses_df, question_info.to_dict(orient="records"), output_dir
-    )
 
 
 def create_hybrid_question_inputs(
@@ -408,26 +378,12 @@ def create_hybrid_question_inputs(
         )
         question_answers[open_col] = question_answers[open_col].fillna("Not Provided")
 
-        question_answers[closed_col] = (
-            question_answers[closed_col]
-            .astype(str)
-            .str.encode("ascii", "ignore")
-            .str.decode("ascii")
+        question_answers[closed_col] = _clean_text_column(
+            question_answers[closed_col], characters_to_remove
         )
-        question_answers[open_col] = (
-            question_answers[open_col]
-            .astype(str)
-            .str.encode("ascii", "ignore")
-            .str.decode("ascii")
+        question_answers[open_col] = _clean_text_column(
+            question_answers[open_col], characters_to_remove
         )
-
-        for bad_string in characters_to_remove:
-            question_answers[closed_col] = question_answers[closed_col].apply(
-                lambda x, bs=bad_string: x.replace(bs, " ")
-            )
-            question_answers[open_col] = question_answers[open_col].apply(
-                lambda x, bs=bad_string: x.replace(bs, " ")
-            )
 
         question_answers[closed_col] = question_answers[closed_col].apply(
             lambda x: x.split(",")
@@ -447,51 +403,16 @@ def create_hybrid_question_inputs(
             "question_number": q_num,
             "question_text": question_string,
             "has_free_text": True,
-            "multi_choice_options": list(
+            "multi_choice_options": sorted(
                 set(
-                    [
-                        item
-                        for sublist in question_answers["options"]
-                        for item in sublist
-                    ]
+                    item
+                    for sublist in question_answers["options"]
+                    for item in sublist
                 )
             ),
         }
         with open(os.path.join(q_dir, "question.json"), "w") as f:
             json.dump(question_data, f, indent=4)
-
-
-def save_hybrid_questions(
-    responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
-) -> None:
-    question_info = pd.read_excel(
-        question_understanding_path,
-        sheet_name="Hybrid questions",
-        skiprows=3,
-        header=None,
-    )
-    if question_info.empty:
-        print("  No hybrid questions found, skipping.")
-        return
-    question_info.columns = [
-        "open_column",
-        "question_number",
-        "question_text",
-        "closed_column",
-    ]
-
-    question_info["question_number"] = (
-        question_info["question_number"]
-        .astype(str)
-        .str.replace(r"\D", "", regex=True)
-        .astype(int)
-    )
-    if not question_info["question_number"].is_unique:
-        raise AssertionError("Non-unique values found in 'question_number' column")
-
-    create_hybrid_question_inputs(
-        responses_df, question_info.to_dict(orient="records"), output_dir
-    )
 
 
 def create_closed_question_inputs(
@@ -512,16 +433,9 @@ def create_closed_question_inputs(
         if sample_size is not None:
             question_answers = question_answers.sample(sample_size)
 
-        question_answers[question_col] = (
-            question_answers[question_col]
-            .astype(str)
-            .str.encode("ascii", "ignore")
-            .str.decode("ascii")
+        question_answers[question_col] = _clean_text_column(
+            question_answers[question_col], characters_to_remove
         )
-        for bad_string in characters_to_remove:
-            question_answers[question_col] = question_answers[question_col].apply(
-                lambda x, bs=bad_string: x.replace(bs, " ")
-            )
 
         question_answers[question_col] = question_answers[question_col].apply(
             lambda x: x.split(",")
@@ -535,46 +449,16 @@ def create_closed_question_inputs(
             "question_number": q_num,
             "question_text": question_string,
             "has_free_text": False,
-            "multi_choice_options": list(
+            "multi_choice_options": sorted(
                 set(
-                    [
-                        item
-                        for sublist in question_answers["options"]
-                        for item in sublist
-                    ]
+                    item
+                    for sublist in question_answers["options"]
+                    for item in sublist
                 )
             ),
         }
         with open(os.path.join(q_dir, "question.json"), "w") as f:
             json.dump(question_data, f, indent=4)
-
-
-def save_closed_questions(
-    responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
-) -> None:
-    question_info = pd.read_excel(
-        question_understanding_path,
-        sheet_name="Multiple Choice",
-        skiprows=3,
-        header=None,
-    )
-    if question_info.empty:
-        print("  No closed questions found, skipping.")
-        return
-    question_info.columns = ["column_name", "question_number", "question_text"]
-
-    question_info["question_number"] = (
-        question_info["question_number"]
-        .astype(str)
-        .str.replace(r"\D", "", regex=True)
-        .astype(int)
-    )
-    if not question_info["question_number"].is_unique:
-        raise AssertionError("Non-unique values found in 'question_number' column")
-
-    create_closed_question_inputs(
-        responses_df, question_info.to_dict(orient="records"), output_dir
-    )
 
 
 # --- CLI logic ---
