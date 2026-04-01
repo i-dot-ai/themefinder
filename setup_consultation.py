@@ -51,6 +51,73 @@ def excel_column_to_number(col: str) -> int:
     return result
 
 
+# Matches valid Excel column IDs: 1-3 uppercase letters, possibly with trailing whitespace.
+# Used to distinguish real data rows from instruction sub-header rows in QU files.
+_EXCEL_COL_RE = re.compile(r"^[A-Z]{1,3}\s*$")
+
+
+def _load_qu_sheet(
+    path: str,
+    sheet_name: str,
+    n_columns: int,
+    column_names: list[str],
+) -> Optional[pd.DataFrame]:
+    """Load a single sheet from a Question Understanding Excel file.
+
+    QU files come in two formats:
+      Format A (e.g. mhclg_cur047): 3 header rows then data at row 4.
+      Format B (e.g. LGR files):    3 header rows, then an instruction sub-header
+                                     row ("Which column does the question appear
+                                     in..."), then data at row 5.
+
+    Rather than hardcoding skiprows, we always skip the first 3 rows (title,
+    description, column-header labels) and then auto-detect the instruction row.
+    Real data rows start with an Excel column ID like "A", "AC", or "BF";
+    instruction rows contain long descriptive text that fails that check.
+    """
+    try:
+        df = pd.read_excel(path, sheet_name=sheet_name, skiprows=3, header=None)
+    except Exception:
+        return None
+
+    if df.empty:
+        return None
+
+    # Only keep the columns we expect — some files have extra unnamed columns
+    # (e.g. abbreviated titles or notes in columns 4-5 of Multiple Choice)
+    df = df.iloc[:, :n_columns]
+
+    # Drop fully-empty trailing rows (the template has ~1000 rows in some sheets)
+    df = df.dropna(how="all").reset_index(drop=True)
+
+    if df.empty:
+        return None
+
+    # Auto-detect instruction sub-header row.
+    # If the first cell is NOT a valid Excel column ID, it's an instruction row
+    # like "Which column does the question appear in on the export spreadsheet?"
+    # or "Very short title to appear in the dashboard".
+    first_cell = str(df.iloc[0, 0]).strip()
+    if not _EXCEL_COL_RE.match(first_cell):
+        logger.info(
+            "Detected instruction row in sheet '%s', skipping: '%s'",
+            sheet_name, first_cell[:60],
+        )
+        df = df.iloc[1:].reset_index(drop=True)
+
+    if df.empty:
+        return None
+
+    df.columns = column_names
+
+    # Strip whitespace from column-ID fields — some files have "C " instead of "C"
+    for col in column_names:
+        if "column" in col.lower():
+            df[col] = df[col].astype(str).str.strip()
+
+    return df
+
+
 def _parse_question_numbers(values: pd.Series) -> list[int] | None:
     """Try to parse question numbers from a Series. Returns list of ints or None if any fail."""
     parsed = []
@@ -71,6 +138,8 @@ def validate_data(
     question_sheets: dict[str, pd.DataFrame],
     original_headers: dict[str, str],
     responses_df: pd.DataFrame,
+    demographic_columns: Optional[list[str]] = None,
+    demographic_labels: Optional[list[str]] = None,
 ) -> None:
     """Validate QU sheets against response data.
 
@@ -79,6 +148,7 @@ def validate_data(
     - More QU columns referenced than response columns available
     - Low string similarity between QU labels and response headers
     - Mismatched numbers extracted from QU labels vs response headers
+    - Demographic column value distributions
     If any issues found, prompts user to confirm before continuing.
     """
     col_id_field = {
@@ -100,6 +170,23 @@ def validate_data(
     print(f"    Rows: {n_rows}")
     print(f"    Columns: {resp_col_count}")
     print(f"    NaN cells: {nan_count} / {total_cells} ({nan_pct:.1f}%)")
+
+    # --- Demographic summary ---
+    if demographic_columns and demographic_labels:
+        print(f"\n  Demographic summary ({len(demographic_columns)} field(s)):")
+        for col_id, label in zip(demographic_columns, demographic_labels):
+            if col_id not in responses_df.columns:
+                print(f"    {label} (column {col_id}): column not found in response data")
+                continue
+            series = responses_df[col_id].fillna("Not Provided")
+            n_unique = series.nunique()
+            n_missing = int((series == "Not Provided").sum())
+            missing_pct = n_missing / n_rows * 100 if n_rows else 0
+            print(f"    {label} (column {col_id}): {n_unique} unique values, {n_missing} missing ({missing_pct:.1f}%)")
+            top_values = series.value_counts().head(5)
+            for value, count in top_values.items():
+                pct = count / n_rows * 100
+                print(f"      {value}: {count} ({pct:.1f}%)")
 
     # --- QU summary ---
     all_qu_columns: set[str] = set()
@@ -194,22 +281,16 @@ def load_and_number_question_sheets(
         "closed": "column_name",
     }
 
-    # Load and truncate each sheet to its useful columns
-    for sheet_key, (sheet_name, ncols, col_names) in {
+    # Load each sheet using robust format-detection (handles both Format A and B)
+    sheet_specs = {
         "open": ("Open questions", 3, ["column_name", "question_number", "question_text"]),
         "hybrid": ("Hybrid questions", 4, ["open_column", "question_number", "question_text", "closed_column"]),
         "closed": ("Multiple Choice", 3, ["column_name", "question_number", "question_text"]),
-    }.items():
-        try:
-            df = pd.read_excel(
-                question_understanding_path, sheet_name=sheet_name, skiprows=3
-            )
-            if not df.empty:
-                df = df.iloc[:, :ncols]
-                df.columns = col_names
-                sheets[sheet_key] = df
-        except Exception:
-            pass
+    }
+    for sheet_key, (sheet_name, ncols, col_names) in sheet_specs.items():
+        df = _load_qu_sheet(question_understanding_path, sheet_name, ncols, col_names)
+        if df is not None:
+            sheets[sheet_key] = df
 
     if not sheets:
         return sheets
@@ -286,14 +367,14 @@ def create_respondents_jsonl(
 def save_demographic_data(
     responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
 ) -> None:
-    demographic_info = pd.read_excel(
-        question_understanding_path, sheet_name="Demographic", skiprows=3, header=None
+    demographic_info = _load_qu_sheet(
+        question_understanding_path, "Demographic", 2, ["column_id", "label"]
     )
-    if demographic_info.empty:
+    if demographic_info is None:
         print("  No demographic data found, skipping.")
         return
-    demographic_questions = demographic_info[demographic_info.columns[0]].tolist()
-    demographic_labels = demographic_info[demographic_info.columns[1]].tolist()
+    demographic_questions = demographic_info["column_id"].tolist()
+    demographic_labels = demographic_info["label"].tolist()
     demographic_labels = [label.replace("/", "-") for label in demographic_labels]
 
     for c in demographic_questions:
@@ -519,13 +600,26 @@ def run_ingestion(
     qu_path = str(question_understanding_path)
 
     print("Processing demographics...")
+    # Load demographic info for validation summary and saving.
+    # Uses the same _load_qu_sheet helper so both Format A and B are handled.
+    demographic_columns = None
+    demographic_labels = None
+    demographic_info = _load_qu_sheet(qu_path, "Demographic", 2, ["column_id", "label"])
+    if demographic_info is not None:
+        demographic_columns = demographic_info["column_id"].tolist()
+        demographic_labels = [
+            label.replace("/", "-") for label in demographic_info["label"].tolist()
+        ]
     save_demographic_data(responses_df, qu_path, output_dir)
 
     # Load all question sheets with robust numbering
     question_sheets = load_and_number_question_sheets(qu_path)
 
     # Validate QU sheets against response data
-    validate_data(question_sheets, original_headers, responses_df)
+    validate_data(
+        question_sheets, original_headers, responses_df,
+        demographic_columns, demographic_labels,
+    )
 
     open_q = question_sheets.get("open")
     if open_q is not None and not open_q.empty:
