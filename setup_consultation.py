@@ -1,14 +1,12 @@
 """CLI script to set up a new consultation for ThemeFinder."""
 
 import argparse
+import json
 import logging
-import os
 import re
 import sys
-import json
 from difflib import SequenceMatcher
 from pathlib import Path
-from typing import Optional
 
 import boto3
 import pandas as pd
@@ -19,6 +17,28 @@ logger = logging.getLogger(__name__)
 CONFLUENCE_URL = "https://incubatorforartificialintelligence.atlassian.net/wiki/spaces/Consult/pages/136445956/1.2+Set+up+the+consultation+in+the+app"
 
 VALID_EXTENSIONS = {".csv", ".xlsx", ".xls"}
+
+# Maps question type -> list of column-ID fields in the Q.U. sheet.
+COL_ID_FIELDS: dict[str, list[str]] = {
+    "open": ["column_name"],
+    "hybrid": ["open_column", "closed_column"],
+    "closed": ["column_name"],
+}
+
+# The primary column used for sorting/numbering (first entry in each list).
+PRIMARY_COL_ID_FIELD: dict[str, str] = {
+    key: fields[0] for key, fields in COL_ID_FIELDS.items()
+}
+
+# Sheet name, expected column count, and column names for each Q.U. sheet type.
+QU_SHEET_SPECS: dict[str, tuple[str, int, list[str]]] = {
+    "open": ("Open questions", 3, ["column_name", "question_number", "question_text"]),
+    "hybrid": ("Hybrid questions", 4, ["open_column", "question_number", "question_text", "closed_column"]),
+    "closed": ("Multiple Choice", 3, ["column_name", "question_number", "question_text"]),
+}
+
+# Characters stripped from free-text columns during ingestion.
+CHARACTERS_TO_REMOVE: list[str] = ["/", "\\", "- Text", "_x000D_"]
 
 
 def to_snake_case(s: str) -> str:
@@ -52,19 +72,19 @@ def excel_column_to_number(col: str) -> int:
 
 
 # Matches valid Excel column IDs: 1-3 uppercase letters, possibly with trailing whitespace.
-# Used to distinguish real data rows from instruction sub-header rows in QU files.
+# Used to distinguish real data rows from instruction sub-header rows in Q.U. files.
 _EXCEL_COL_RE = re.compile(r"^[A-Z]{1,3}\s*$")
 
 
 def _load_qu_sheet(
-    path: str,
+    path: Path,
     sheet_name: str,
     n_columns: int,
     column_names: list[str],
-) -> Optional[pd.DataFrame]:
+) -> pd.DataFrame | None:
     """Load a single sheet from a Question Understanding Excel file.
 
-    QU files come in two formats:
+    Q.U. files come in two formats:
       Format A (e.g. mhclg_cur047): 3 header rows then data at row 4.
       Format B (e.g. LGR files):    3 header rows, then an instruction sub-header
                                      row ("Which column does the question appear
@@ -122,10 +142,10 @@ def _parse_question_numbers(values: pd.Series) -> list[int] | None:
     """Try to parse question numbers from a Series. Returns list of ints or None if any fail."""
     parsed = []
     for val in values.astype(str):
-        stripped = re.sub(r"\D", "", val)
-        if not stripped:
+        try:
+            parsed.append(int(val.strip()))
+        except ValueError:
             return None
-        parsed.append(int(stripped))
     return parsed
 
 
@@ -138,94 +158,111 @@ def validate_data(
     question_sheets: dict[str, pd.DataFrame],
     original_headers: dict[str, str],
     responses_df: pd.DataFrame,
-    demographic_columns: Optional[list[str]] = None,
-    demographic_labels: Optional[list[str]] = None,
+    demographic_columns: list[str] | None = None,
+    demographic_labels: list[str] | None = None,
 ) -> None:
-    """Validate QU sheets against response data.
+    """Validate Q.U. sheets against response data.
 
-    Prints summaries of responses and QU sheets, then checks for:
-    - QU columns that don't exist in the response data
-    - More QU columns referenced than response columns available
-    - Low string similarity between QU labels and response headers
-    - Mismatched numbers extracted from QU labels vs response headers
+    Prints summaries of responses and Q.U. sheets, then checks for:
+    - Q.U. columns that don't exist in the response data
+    - More Q.U. columns referenced than response columns available
+    - Low string similarity between Q.U. labels and response headers
+    - Mismatched numbers extracted from Q.U. labels vs response headers
     - Demographic column value distributions
     If any issues found, prompts user to confirm before continuing.
     """
-    col_id_field = {
-        "open": ["column_name"],
-        "hybrid": ["open_column", "closed_column"],
-        "closed": ["column_name"],
-    }
-
     issues: list[str] = []
 
-    # --- Response summary ---
+    # ── Response summary ──────────────────────────────────────────────
     n_rows, n_cols = responses_df.shape
-    # Exclude themefinder_id from column count (added by load_responses)
-    resp_col_count = n_cols - 1
+    resp_col_count = n_cols - 1  # exclude themefinder_id
     total_cells = n_rows * resp_col_count
     nan_count = int(responses_df.drop(columns=["themefinder_id"]).isna().sum().sum())
     nan_pct = (nan_count / total_cells * 100) if total_cells else 0
-    print(f"\n  Response data summary:")
-    print(f"    Rows: {n_rows}")
-    print(f"    Columns: {resp_col_count}")
-    print(f"    NaN cells: {nan_count} / {total_cells} ({nan_pct:.1f}%)")
+    print(f"\n  Response data: {n_rows} rows x {resp_col_count} cols, "
+          f"{nan_count}/{total_cells} NaN ({nan_pct:.1f}%)")
 
-    # --- Demographic summary ---
+    # ── Demographics ──────────────────────────────────────────────────
     if demographic_columns and demographic_labels:
-        print(f"\n  Demographic summary ({len(demographic_columns)} field(s)):")
+        print(f"\n  Demographics ({len(demographic_columns)} field(s)):")
         for col_id, label in zip(demographic_columns, demographic_labels):
             if col_id not in responses_df.columns:
-                print(f"    {label} (column {col_id}): column not found in response data")
+                print(f"    ✗ {label} (col {col_id}) — not found in response data")
+                issues.append(f"Demographic column {col_id} ({label}) not in response data")
                 continue
             series = responses_df[col_id].fillna("Not Provided")
             n_unique = series.nunique()
             n_missing = int((series == "Not Provided").sum())
             missing_pct = n_missing / n_rows * 100 if n_rows else 0
-            print(f"    {label} (column {col_id}): {n_unique} unique values, {n_missing} missing ({missing_pct:.1f}%)")
-            top_values = series.value_counts().head(5)
-            for value, count in top_values.items():
+            print(f"    {label} (col {col_id}): {n_unique} unique, {n_missing} missing ({missing_pct:.1f}%)")
+            for value, count in series.value_counts().head(5).items():
                 pct = count / n_rows * 100
                 print(f"      {value}: {count} ({pct:.1f}%)")
 
-    # --- QU summary ---
+    # ── Q.U. summary ────────────────────────────────────────────────────
     all_qu_columns: set[str] = set()
     total_questions = 0
-    print(f"\n  Question Understanding summary:")
+    print("\n  Question Understanding:")
     for sheet_key, df in question_sheets.items():
         n_questions = len(df)
         total_questions += n_questions
         cols_in_sheet: set[str] = set()
-        for col_field in col_id_field[sheet_key]:
+        for col_field in COL_ID_FIELDS[sheet_key]:
             cols_in_sheet.update(df[col_field].astype(str).str.strip().tolist())
         all_qu_columns.update(cols_in_sheet)
-        print(f"    {sheet_key}: {n_questions} question(s), {len(cols_in_sheet)} distinct column(s) referenced")
-    print(f"    Total: {total_questions} question(s), {len(all_qu_columns)} distinct column(s) referenced")
+        print(f"    {sheet_key}: {n_questions} question(s), {len(cols_in_sheet)} column(s)")
+    print(f"    Total: {total_questions} question(s), {len(all_qu_columns)} column(s)")
 
-    # --- Column count check ---
+    # ── Column ID format check ────────────────────────────────────────
+    bad_col_ids: list[str] = []
+    for sheet_key, df in question_sheets.items():
+        for col_field in COL_ID_FIELDS[sheet_key]:
+            for _, row in df.iterrows():
+                val = str(row[col_field]).strip()
+                if not _EXCEL_COL_RE.match(val):
+                    bad_col_ids.append(f"      {sheet_key}.{col_field} = {val!r}")
+    if bad_col_ids:
+        print("\n  ⚠ Column IDs that don't look like Excel columns (expected A, B, AA, ...):")
+        for line in bad_col_ids:
+            print(line)
+        issues.append("Non-Excel column IDs found in Q.U. sheets")
+
+    # ── Question number format check ──────────────────────────────────
+    bad_qnums: list[str] = []
+    for sheet_key, df in question_sheets.items():
+        for val in df["question_number"].astype(str):
+            try:
+                int(val.strip())
+            except ValueError:
+                bad_qnums.append(f"      {sheet_key}: {val!r}")
+    if bad_qnums:
+        print("\n  ⚠ Non-integer question numbers (column ID-based fallback will be used):")
+        for line in bad_qnums:
+            print(line)
+        issues.append("Non-integer question numbers in Q.U. sheets")
+
+    # ── Column existence check ────────────────────────────────────────
     if len(all_qu_columns) > resp_col_count:
-        msg = (
-            f"Q.U. sheets reference {len(all_qu_columns)} distinct columns "
-            f"but response data only has {resp_col_count} columns"
-        )
-        logger.warning(msg)
+        msg = (f"Q.U. references {len(all_qu_columns)} columns but response data only has {resp_col_count}")
+        print(f"\n  ⚠ {msg}")
         issues.append(msg)
 
-    # --- Check each QU column exists in responses ---
     max_resp_col = max(original_headers, key=excel_column_to_number) if original_headers else "?"
-    for col_id in sorted(all_qu_columns, key=excel_column_to_number):
-        if col_id not in original_headers:
-            msg = (
-                f"Q.U. references column {col_id} which does not exist in response data "
-                f"(response columns go up to {max_resp_col})"
-            )
-            logger.warning(msg)
-            issues.append(msg)
+    missing_cols = sorted(
+        [c for c in all_qu_columns if c not in original_headers],
+        key=excel_column_to_number,
+    )
+    if missing_cols:
+        print(f"\n  ⚠ Q.U. references columns not in response data (max is {max_resp_col}):")
+        for col_id in missing_cols:
+            print(f"      {col_id}")
+        issues.append(f"Q.U. references missing columns: {', '.join(missing_cols)}")
 
-    # --- Label matching ---
+    # ── Label matching ────────────────────────────────────────────────
+    label_issues: list[tuple[str, list[str], str, str]] = []
     for sheet_key, df in question_sheets.items():
         for _, row in df.iterrows():
-            for col_field in col_id_field[sheet_key]:
+            for col_field in COL_ID_FIELDS[sheet_key]:
                 col_id = str(row[col_field]).strip()
                 qu_label = str(row.get("question_text", "")).strip()
                 resp_header = original_headers.get(col_id)
@@ -233,40 +270,40 @@ def validate_data(
                 if resp_header is None:
                     continue  # already reported above
 
-                ratio = SequenceMatcher(None, qu_label.lower(), resp_header.lower()).ratio()
-
-                if ratio < 0.4:
-                    msg = (
-                        f"Low similarity ({ratio:.2f}) between Q.U. label and Response header for column {col_id}:\n"
-                        f"  Question Understanding = '{qu_label}'\n"
-                        f"  Response Header        = '{resp_header}'"
-                    )
-                    logger.warning(msg)
-                    issues.append(msg)
-
+                ratio = SequenceMatcher(None, qu_label.lower(), resp_header.lower(), autojunk=False).ratio()
                 qu_nums = set(_extract_numbers(qu_label))
                 resp_nums = set(_extract_numbers(resp_header))
-                if qu_nums and resp_nums and qu_nums != resp_nums:
-                    msg = (
-                        f"Number mismatch for column {col_id}: Q.U. has {sorted(qu_nums)}, response has {sorted(resp_nums)}.\n"
-                        f"  Question Understanding = '{qu_label}'\n"
-                        f"  Response Header        = '{resp_header}'"
-                    )
-                    logger.warning(msg)
-                    issues.append(msg)
 
+                problems: list[str] = []
+                if ratio < 0.4:
+                    problems.append(f"low similarity ({ratio:.0%})")
+                if qu_nums and resp_nums and qu_nums != resp_nums:
+                    problems.append(f"number mismatch (Q.U.:{sorted(qu_nums)} vs resp:{sorted(resp_nums)})")
+
+                if problems:
+                    label_issues.append((col_id, problems, qu_label, resp_header))
+
+    if label_issues:
+        print(f"\n  ⚠ Label mismatches ({len(label_issues)}):")
+        for col_id, problems, qu_label, resp_header in label_issues:
+            print(f"\n      col {col_id}: {', '.join(problems)}")
+            print(f"      ┌ Q.U.:   {qu_label}")
+            print(f"      └ Resp: {resp_header}")
+        issues.extend(["Label mismatch"] * len(label_issues))
+
+    # ── Result ────────────────────────────────────────────────────────
     if issues:
-        print(f"\n  Found {len(issues)} validation issue(s) (see warnings above).")
-        answer = input("Continue anyway? (y/n): ").strip().lower()
+        print(f"\n  Found {len(issues)} issue(s).")
+        answer = input("  Continue anyway? (y/n): ").strip().lower()
         if answer != "y":
             print("Aborting.")
             sys.exit(1)
     else:
-        print("  Validation passed — no issues found.")
+        print("\n  ✓ Validation passed.")
 
 
 def load_and_number_question_sheets(
-    question_understanding_path: str,
+    question_understanding_path: Path,
 ) -> dict[str, pd.DataFrame]:
     """Load all question sheets, truncate to useful columns, and assign question numbers.
 
@@ -275,19 +312,8 @@ def load_and_number_question_sheets(
     IDs across all sheets.
     """
     sheets: dict[str, pd.DataFrame] = {}
-    col_id_field = {
-        "open": "column_name",
-        "hybrid": "open_column",
-        "closed": "column_name",
-    }
 
-    # Load each sheet using robust format-detection (handles both Format A and B)
-    sheet_specs = {
-        "open": ("Open questions", 3, ["column_name", "question_number", "question_text"]),
-        "hybrid": ("Hybrid questions", 4, ["open_column", "question_number", "question_text", "closed_column"]),
-        "closed": ("Multiple Choice", 3, ["column_name", "question_number", "question_text"]),
-    }
-    for sheet_key, (sheet_name, ncols, col_names) in sheet_specs.items():
+    for sheet_key, (sheet_name, ncols, col_names) in QU_SHEET_SPECS.items():
         df = _load_qu_sheet(question_understanding_path, sheet_name, ncols, col_names)
         if df is not None:
             sheets[sheet_key] = df
@@ -303,12 +329,11 @@ def load_and_number_question_sheets(
             break
 
     if needs_fallback:
-        print("  Some question numbers are not numeric, using column-based numbering fallback.")
         # Collect (excel_col_id, sheet_key, df_index) from every row across all sheets
         all_entries: list[tuple[str, str, int]] = []
         for key, df in sheets.items():
             for idx in df.index:
-                all_entries.append((str(df.at[idx, col_id_field[key]]).strip(), key, idx))
+                all_entries.append((str(df.at[idx, PRIMARY_COL_ID_FIELD[key]]).strip(), key, idx))
 
         # Sort by Excel column order and assign sequential numbers
         all_entries.sort(key=lambda x: excel_column_to_number(x[0]))
@@ -321,6 +346,16 @@ def load_and_number_question_sheets(
     else:
         for key, df in sheets.items():
             df["question_number"] = _parse_question_numbers(df["question_number"])
+
+    # Show final numbering
+    print("\n  Question numbering:")
+    for key, df in sheets.items():
+        for _, row in df.iterrows():
+            col = str(row.get(PRIMARY_COL_ID_FIELD[key], "?")).strip()
+            label = str(row.get("question_text", ""))
+            if len(label) > 80:
+                label = label[:77] + "..."
+            print(f"    Q{row['question_number']:>3}  col {col:<4}  [{key}]  {label}")
 
     # Validate global uniqueness (numbers are used as directory names)
     all_numbers: list[tuple[str, int]] = []
@@ -345,7 +380,7 @@ def create_respondents_jsonl(
     df: pd.DataFrame,
     demographic_columns: list[str],
     demographic_labels: list[str],
-    output_dir: str,
+    output_dir: Path,
 ) -> None:
     for c in demographic_columns:
         df[c] = (
@@ -355,200 +390,97 @@ def create_respondents_jsonl(
             .str.encode("ascii", "ignore")
             .str.decode("ascii")
         )
-    for c in demographic_columns:
         df[c] = df[c].apply(lambda x: x.split(","))
     df.rename(columns=dict(zip(demographic_columns, demographic_labels)), inplace=True)
     df["demographic_data"] = df[demographic_labels].to_dict(orient="records")
     df[["themefinder_id", "demographic_data"]].to_json(
-        os.path.join(output_dir, "respondents.jsonl"), orient="records", lines=True
+        output_dir / "respondents.jsonl", orient="records", lines=True
     )
 
 
-def save_demographic_data(
-    responses_df: pd.DataFrame, question_understanding_path: str, output_dir: str
-) -> None:
-    demographic_info = _load_qu_sheet(
-        question_understanding_path, "Demographic", 2, ["column_id", "label"]
-    )
-    if demographic_info is None:
-        print("  No demographic data found, skipping.")
-        return
-    demographic_questions = demographic_info["column_id"].tolist()
-    demographic_labels = demographic_info["label"].tolist()
-    demographic_labels = [label.replace("/", "-") for label in demographic_labels]
-
-    for c in demographic_questions:
-        responses_df[c] = responses_df[c].fillna("Not Provided")
-        responses_df[c] = responses_df[c].apply(
-            lambda x: "Other" if isinstance(x, str) and "Other" in x else x
-        )
-    create_respondents_jsonl(
-        responses_df, demographic_questions, demographic_labels, output_dir
-    )
-
-
-def _clean_text_column(
-    series: pd.Series,
-    characters_to_remove: list[str] = ["/", "\\", "- Text", "_x000D_"],
-) -> pd.Series:
+def _clean_text_column(series: pd.Series) -> pd.Series:
     """Remove unwanted characters and non-ASCII bytes from a text column."""
     series = series.astype(str).str.encode("ascii", "ignore").str.decode("ascii")
-    for bad_string in characters_to_remove:
+    for bad_string in CHARACTERS_TO_REMOVE:
         series = series.apply(lambda x, bs=bad_string: x.replace(bs, " "))
     return series
 
 
-def create_open_question_inputs(
+def create_question_inputs(
     df: pd.DataFrame,
-    open_questions: list[dict],
-    output_dir: str,
-    characters_to_remove: list[str] = ["/", "\\", "- Text", "_x000D_"],
-    sample_size: Optional[int] = None,
+    questions: list[dict],
+    question_type: str,
+    output_dir: Path,
+    sample_size: int | None = None,
 ) -> None:
-    for question in open_questions:
+    """Write responses.jsonl, multi_choice.jsonl, and question.json for each question."""
+    has_free_text = question_type in ("open", "hybrid")
+    has_options = question_type in ("closed", "hybrid")
+
+    for question in questions:
         q_num = question["question_number"]
-        question_col = question["column_name"]
-        q_dir = os.path.join(output_dir, f"question_part_{q_num}")
-        os.makedirs(q_dir, exist_ok=True)
+        q_dir = output_dir / f"question_part_{q_num}"
+        q_dir.mkdir(parents=True, exist_ok=True)
 
-        question_string = question["question_text"]
-        question_answers = df[["themefinder_id", question_col]].dropna()
-        if sample_size is not None and sample_size < len(question_answers):
-            question_answers = question_answers.sample(sample_size)
+        # Select relevant columns and drop empty rows
+        if question_type == "hybrid":
+            open_col = question["open_column"]
+            closed_col = question["closed_column"]
+            data_cols = [closed_col, open_col]
+            answers = df[["themefinder_id"] + data_cols].dropna(subset=data_cols, how="all")
+            answers[closed_col] = answers[closed_col].fillna("Not Provided")
+            answers[open_col] = answers[open_col].fillna("Not Provided")
+        else:
+            col = question["column_name"]
+            data_cols = [col]
+            answers = df[["themefinder_id"] + data_cols].dropna()
 
-        question_answers[question_col] = _clean_text_column(
-            question_answers[question_col], characters_to_remove
-        )
-        question_answers.columns = ["themefinder_id", "text"]
-        question_answers[["themefinder_id", "text"]].to_json(
-            os.path.join(q_dir, "responses.jsonl"), orient="records", lines=True
-        )
+        if sample_size is not None and sample_size < len(answers):
+            answers = answers.sample(sample_size)
 
-        question_data = {
+        # Clean text columns
+        for c in data_cols:
+            answers[c] = _clean_text_column(answers[c])
+
+        # Write multi_choice.jsonl
+        if has_options:
+            options_col = question["closed_column"] if question_type == "hybrid" else question["column_name"]
+            answers[options_col] = answers[options_col].apply(lambda x: x.split(","))
+            answers.rename(columns={options_col: "options"}, inplace=True)
+            answers[["themefinder_id", "options"]].to_json(
+                q_dir / "multi_choice.jsonl", orient="records", lines=True
+            )
+
+        # Write responses.jsonl
+        if has_free_text:
+            text_col = question["open_column"] if question_type == "hybrid" else question["column_name"]
+            # For hybrid, text_col is already the original name (not renamed)
+            answers.rename(columns={text_col: "text"}, inplace=True)
+            answers[["themefinder_id", "text"]].to_json(
+                q_dir / "responses.jsonl", orient="records", lines=True
+            )
+
+        # Write question.json
+        question_data: dict = {
             "question_number": q_num,
-            "question_text": question_string,
-            "has_free_text": True,
+            "question_text": question["question_text"],
+            "has_free_text": has_free_text,
         }
-        with open(os.path.join(q_dir, "question.json"), "w") as f:
-            json.dump(question_data, f, indent=4)
-
-
-def create_hybrid_question_inputs(
-    df: pd.DataFrame,
-    hybrid_questions: list[dict],
-    output_dir: str,
-    characters_to_remove: list[str] = ["/", "\\", "- Text", "_x000D_"],
-    sample_size: Optional[int] = None,
-) -> None:
-    for question in hybrid_questions:
-        q_num = question["question_number"]
-        q_dir = os.path.join(output_dir, f"question_part_{q_num}")
-        closed_col = question["closed_column"]
-        open_col = question["open_column"]
-        question_string = question["question_text"]
-        os.makedirs(q_dir, exist_ok=True)
-
-        question_answers = df[["themefinder_id"] + [closed_col, open_col]].dropna(
-            subset=[closed_col, open_col], how="all"
-        )
-        if sample_size is not None and sample_size < len(question_answers):
-            question_answers = question_answers.sample(sample_size)
-
-        question_answers[closed_col] = question_answers[closed_col].fillna(
-            "Not Provided"
-        )
-        question_answers[open_col] = question_answers[open_col].fillna("Not Provided")
-
-        question_answers[closed_col] = _clean_text_column(
-            question_answers[closed_col], characters_to_remove
-        )
-        question_answers[open_col] = _clean_text_column(
-            question_answers[open_col], characters_to_remove
-        )
-
-        question_answers[closed_col] = question_answers[closed_col].apply(
-            lambda x: x.split(",")
-        )
-        question_answers.rename(
-            columns={closed_col: "options", open_col: "text"}, inplace=True
-        )
-
-        question_answers[["themefinder_id", "options"]].to_json(
-            os.path.join(q_dir, "multi_choice.jsonl"), orient="records", lines=True
-        )
-        question_answers[["themefinder_id", "text"]].to_json(
-            os.path.join(q_dir, "responses.jsonl"), orient="records", lines=True
-        )
-
-        question_data = {
-            "question_number": q_num,
-            "question_text": question_string,
-            "has_free_text": True,
-            "multi_choice_options": sorted(
-                set(
-                    item
-                    for sublist in question_answers["options"]
-                    for item in sublist
-                )
-            ),
-        }
-        with open(os.path.join(q_dir, "question.json"), "w") as f:
-            json.dump(question_data, f, indent=4)
-
-
-def create_closed_question_inputs(
-    df: pd.DataFrame,
-    closed_questions: list[dict],
-    output_dir: str,
-    characters_to_remove: list[str] = ["/", "\\", "- Text", "_x000D_"],
-    sample_size: Optional[int] = None,
-) -> None:
-    for question in closed_questions:
-        q_num = question["question_number"]
-        question_col = question["column_name"]
-        q_dir = os.path.join(output_dir, f"question_part_{q_num}")
-        os.makedirs(q_dir, exist_ok=True)
-
-        question_string = question["question_text"]
-        question_answers = df[["themefinder_id", question_col]].dropna()
-        if sample_size is not None:
-            question_answers = question_answers.sample(sample_size)
-
-        question_answers[question_col] = _clean_text_column(
-            question_answers[question_col], characters_to_remove
-        )
-
-        question_answers[question_col] = question_answers[question_col].apply(
-            lambda x: x.split(",")
-        )
-        question_answers.columns = ["themefinder_id", "options"]
-        question_answers[["themefinder_id", "options"]].to_json(
-            os.path.join(q_dir, "multi_choice.jsonl"), orient="records", lines=True
-        )
-
-        question_data = {
-            "question_number": q_num,
-            "question_text": question_string,
-            "has_free_text": False,
-            "multi_choice_options": sorted(
-                set(
-                    item
-                    for sublist in question_answers["options"]
-                    for item in sublist
-                )
-            ),
-        }
-        with open(os.path.join(q_dir, "question.json"), "w") as f:
+        if has_options:
+            question_data["multi_choice_options"] = sorted(
+                set(item for sublist in answers["options"] for item in sublist)
+            )
+        with open(q_dir / "question.json", "w") as f:
             json.dump(question_data, f, indent=4)
 
 
 # --- CLI logic ---
 
 
-def find_data_files(consultation_dir: str) -> list[Path]:
+def find_data_files(consultation_dir: Path) -> list[Path]:
     """Find CSV and Excel files in the consultation directory, ignoring temp files."""
     files = []
-    for f in Path(consultation_dir).iterdir():
+    for f in consultation_dir.iterdir():
         if f.name.startswith("~$"):
             continue
         if f.suffix.lower() in VALID_EXTENSIONS:
@@ -556,18 +488,18 @@ def find_data_files(consultation_dir: str) -> list[Path]:
     return sorted(files)
 
 
-def _is_subheader_row(row0: pd.Series, row1: pd.Series) -> bool:
-    """Detect whether row1 is a descriptive sub-header rather than data.
+def _is_subheader_row(row: pd.Series) -> bool:
+    """Detect whether a row is a descriptive sub-header rather than data.
 
     Two-tier header files have short IDs on row 0 and long question text on
     row 1.  Data rows have shorter, more varied values with more NaN cells.
     """
-    non_null_1 = row1.dropna()
+    non_null_1 = row.dropna()
     if len(non_null_1) == 0:
         return False
 
     # Sub-header rows are nearly fully populated (>90% non-null)
-    fill_ratio = len(non_null_1) / len(row1)
+    fill_ratio = len(non_null_1) / len(row)
     if fill_ratio < 0.9:
         return False
 
@@ -595,7 +527,7 @@ def load_responses(path: Path) -> tuple[pd.DataFrame, dict[str, str]]:
 
     header_row = 0
 
-    if len(raw) > 1 and _is_subheader_row(raw.iloc[0], raw.iloc[1]):
+    if len(raw) > 1 and _is_subheader_row(raw.iloc[1]):
         # Two-tier header — use row 1 (full question text) as the header
         logger.info("Detected two-tier header in %s, using row 2 as header", path.name)
         header_row = 1
@@ -628,80 +560,77 @@ def prompt_file_selection(files: list[Path], role: str) -> Path:
 
 
 def run_ingestion(
-    responses_path: Path, question_understanding_path: Path, output_dir: str
+    responses_path: Path, question_understanding_path: Path, output_dir: Path
 ) -> None:
-    """Run the full ingestion pipeline."""
+    """Run the full ingestion pipeline: load → validate → ingest."""
+
+    # ── Phase 1: Load ─────────────────────────────────────────────────
     print(f"\nLoading responses from: {responses_path.name}")
     responses_df, original_headers = load_responses(responses_path)
     print(f"  Loaded {len(responses_df)} responses")
 
-    os.makedirs(output_dir, exist_ok=True)
-    qu_path = str(question_understanding_path)
+    question_sheets = load_and_number_question_sheets(question_understanding_path)
 
-    print("Processing demographics...")
-    # Load demographic info for validation summary and saving.
-    # Uses the same _load_qu_sheet helper so both Format A and B are handled.
-    demographic_columns = None
-    demographic_labels = None
-    demographic_info = _load_qu_sheet(qu_path, "Demographic", 2, ["column_id", "label"])
+    demographic_columns: list[str] | None = None
+    demographic_labels: list[str] | None = None
+    demographic_info = _load_qu_sheet(
+        question_understanding_path, "Demographic", 2, ["column_id", "label"]
+    )
     if demographic_info is not None:
         demographic_columns = demographic_info["column_id"].tolist()
         demographic_labels = [
             label.replace("/", "-") for label in demographic_info["label"].tolist()
         ]
-    save_demographic_data(responses_df, qu_path, output_dir)
 
-    # Load all question sheets with robust numbering
-    question_sheets = load_and_number_question_sheets(qu_path)
-
-    # Validate QU sheets against response data
+    # ── Phase 2: Validate ─────────────────────────────────────────────
     validate_data(
         question_sheets, original_headers, responses_df,
         demographic_columns, demographic_labels,
     )
 
-    open_q = question_sheets.get("open")
-    if open_q is not None and not open_q.empty:
-        print("Processing open questions...")
-        only_nans = responses_df[open_q["column_name"].tolist()].isna().all()
-        nan_cols = only_nans[only_nans].index.tolist()
-        open_q = open_q[~open_q["column_name"].isin(nan_cols)]
-        create_open_question_inputs(
-            responses_df, open_q.to_dict(orient="records"), output_dir
-        )
-    else:
-        print("  No open questions found, skipping.")
+    # ── Phase 3: Ingest ───────────────────────────────────────────────
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    hybrid_q = question_sheets.get("hybrid")
-    if hybrid_q is not None and not hybrid_q.empty:
-        print("Processing hybrid questions...")
-        create_hybrid_question_inputs(
-            responses_df, hybrid_q.to_dict(orient="records"), output_dir
+    # Demographics
+    if demographic_columns and demographic_labels:
+        print("Writing demographics...")
+        for c in demographic_columns:
+            responses_df[c] = responses_df[c].fillna("Not Provided")
+            responses_df[c] = responses_df[c].apply(
+                lambda x: "Other" if isinstance(x, str) and "Other" in x else x
+            )
+        create_respondents_jsonl(
+            responses_df, demographic_columns, demographic_labels, output_dir
         )
     else:
-        print("  No hybrid questions found, skipping.")
+        print("  No demographic data found, skipping.")
 
-    closed_q = question_sheets.get("closed")
-    if closed_q is not None and not closed_q.empty:
-        print("Processing closed questions...")
-        create_closed_question_inputs(
-            responses_df, closed_q.to_dict(orient="records"), output_dir
+    # Questions
+    for qtype in ("open", "hybrid", "closed"):
+        q_df = question_sheets.get(qtype)
+        if q_df is None or q_df.empty:
+            print(f"  No {qtype} questions found, skipping.")
+            continue
+        # Skip open questions where the response column is entirely NaN
+        if qtype == "open":
+            all_nan = responses_df[q_df["column_name"].tolist()].isna().all()
+            q_df = q_df[~q_df["column_name"].isin(all_nan[all_nan].index)]
+        print(f"Writing {qtype} questions...")
+        create_question_inputs(
+            responses_df, q_df.to_dict(orient="records"), qtype, output_dir
         )
-    else:
-        print("  No closed questions found, skipping.")
 
     print(f"\nAll input files written to: {output_dir}")
 
 
-def upload_inputs_to_s3(local_dir: str, bucket: str, s3_prefix: str) -> None:
+def upload_inputs_to_s3(local_dir: Path, bucket: str, s3_prefix: str) -> None:
     """Upload all files in local_dir to s3://bucket/s3_prefix, preserving directory structure.
 
     Checks for existing objects at the S3 prefix before uploading. If any exist,
     warns and requires confirmation. Always prompts before uploading.
     """
     s3 = boto3.client("s3")
-    local_path = Path(local_dir)
-    files = [f for f in local_path.rglob("*") if f.is_file()]
+    files = [f for f in local_dir.rglob("*") if f.is_file()]
     if not files:
         print(f"No files found in {local_dir} to upload.")
         return
@@ -723,7 +652,7 @@ def upload_inputs_to_s3(local_dir: str, bucket: str, s3_prefix: str) -> None:
 
     print(f"\nReady to upload {len(files)} file(s) to s3://{bucket}/{s3_prefix}")
     for file_path in files:
-        relative = file_path.relative_to(local_path)
+        relative = file_path.relative_to(local_dir)
         print(f"  {relative}")
     answer = input("Proceed with upload? (y/n): ").strip().lower()
     if answer != "y":
@@ -731,7 +660,7 @@ def upload_inputs_to_s3(local_dir: str, bucket: str, s3_prefix: str) -> None:
         return
 
     for file_path in files:
-        relative = file_path.relative_to(local_path)
+        relative = file_path.relative_to(local_dir)
         s3_key = s3_prefix + str(relative)
         print(f"  Uploading {relative} -> s3://{bucket}/{s3_key}")
         s3.upload_file(str(file_path), bucket, s3_key)
@@ -795,7 +724,7 @@ def main() -> None:
         )
 
     # Step 4: Run ingestion
-    output_dir = str(consultation_dir / "inputs")
+    output_dir = consultation_dir / "inputs"
     run_ingestion(responses_path, qu_path, output_dir)
 
     # Step 5: Upload inputs to S3
