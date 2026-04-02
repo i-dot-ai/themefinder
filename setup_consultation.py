@@ -347,15 +347,19 @@ def load_and_number_question_sheets(
         for key, df in sheets.items():
             df["question_number"] = _parse_question_numbers(df["question_number"])
 
-    # Show final numbering
-    print("\n  Question numbering:")
+    # Show final numbering, sorted by question number
+    all_rows: list[tuple[int, str, str, str]] = []
     for key, df in sheets.items():
         for _, row in df.iterrows():
             col = str(row.get(PRIMARY_COL_ID_FIELD[key], "?")).strip()
             label = str(row.get("question_text", ""))
-            if len(label) > 80:
-                label = label[:77] + "..."
-            print(f"    Q{row['question_number']:>3}  col {col:<4}  [{key}]  {label}")
+            if len(label) > 120:
+                label = label[:117] + "..."
+            all_rows.append((row["question_number"], col, key, label))
+    all_rows.sort()
+    print("\n  Question numbering:")
+    for q_num, col, key, label in all_rows:
+        print(f"    Q{q_num:>3}  col {col:<4}  [{key}]  {label}")
 
     # Validate global uniqueness (numbers are used as directory names)
     all_numbers: list[tuple[str, int]] = []
