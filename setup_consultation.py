@@ -160,6 +160,7 @@ def validate_data(
     responses_df: pd.DataFrame,
     demographic_columns: list[str] | None = None,
     demographic_labels: list[str] | None = None,
+    interactive: bool = True,
 ) -> None:
     """Validate Q.U. sheets against response data.
 
@@ -249,20 +250,6 @@ def validate_data(
         for line in bad_col_ids:
             print(line)
         issues.append("Non-Excel column IDs found in Q.U. sheets")
-
-    # ── Question number format check ──────────────────────────────────
-    bad_qnums: list[str] = []
-    for sheet_key, df in question_sheets.items():
-        for val in df["question_number"].astype(str):
-            try:
-                int(val.strip())
-            except ValueError:
-                bad_qnums.append(f"      {sheet_key}: {val!r}")
-    if bad_qnums:
-        print("\n  ⚠ Non-integer question numbers (column ID-based fallback will be used):")
-        for line in bad_qnums:
-            print(line)
-        issues.append("Non-integer question numbers in Q.U. sheets")
 
     # ── Duplicate column reference check ─────────────────────────────────
     # Hybrid questions legitimately use two columns (open + closed) for the
@@ -429,10 +416,10 @@ def validate_data(
     demographic_set = set(demographic_columns) if demographic_columns else set()
     all_resp_cols = set(responses_df.columns) - {"themefinder_id"}
     referenced_cols = all_qu_columns | demographic_set
-    unreferenced = sorted(
-        all_resp_cols - referenced_cols,
-        key=excel_column_to_number,
-    )
+    unreferenced = [
+        col for col in sorted(all_resp_cols - referenced_cols, key=excel_column_to_number)
+        if "response id" not in str(original_headers.get(col, "")).lower()
+    ]
     if unreferenced:
         print(f"\n  ⚠ {len(unreferenced)} response column(s) not referenced by any question or demographic:")
         for col_id in unreferenced:
@@ -449,10 +436,11 @@ def validate_data(
     # ── Result ────────────────────────────────────────────────────────
     if issues:
         print(f"\n  Found {len(issues)} issue(s).")
-        answer = input("  Continue anyway? (y/n): ").strip().lower()
-        if answer != "y":
-            print("Aborting.")
-            sys.exit(1)
+        if interactive:
+            answer = input("  Continue anyway? (y/n): ").strip().lower()
+            if answer != "y":
+                print("Aborting.")
+                sys.exit(1)
     else:
         print("\n  ✓ Validation passed.")
 
@@ -484,6 +472,18 @@ def load_and_number_question_sheets(
             break
 
     if needs_fallback:
+        # Report which values are non-numeric
+        print("\n  ⚠ Non-numeric question numbers found in Q.U. sheets"
+              " — a column ID-based fallback will be applied:")
+        for key, df in sheets.items():
+            sheet_name = QU_SHEET_SPECS[key][0]
+            for idx, val in enumerate(df["question_number"].astype(str)):
+                try:
+                    int(val.strip())
+                except ValueError:
+                    print(f"      \"{sheet_name}\" row {idx + 1}: "
+                          f"question_number = {val!r} (not a valid integer)")
+
         # Collect (excel_col_id, sheet_key, df_index) from every row across all sheets
         all_entries: list[tuple[str, str, int]] = []
         for key, df in sheets.items():
@@ -719,9 +719,12 @@ def prompt_file_selection(files: list[Path], role: str) -> Path:
 
 
 def run_ingestion(
-    responses_path: Path, question_understanding_path: Path, output_dir: Path
+    responses_path: Path,
+    question_understanding_path: Path,
+    output_dir: Path,
+    validate_only: bool = False,
 ) -> None:
-    """Run the full ingestion pipeline: load → validate → ingest."""
+    """Run the ingestion pipeline: load → validate → ingest."""
 
     # ── Phase 1: Load ─────────────────────────────────────────────────
     print(f"\nLoading responses from: {responses_path.name}")
@@ -745,7 +748,11 @@ def run_ingestion(
     validate_data(
         question_sheets, original_headers, responses_df,
         demographic_columns, demographic_labels,
+        interactive=not validate_only,
     )
+
+    if validate_only:
+        return
 
     # ── Phase 3: Ingest ───────────────────────────────────────────────
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -845,6 +852,9 @@ def main() -> None:
         "--qu", type=Path, help="Path to question understanding file (skip file selection)"
     )
     parser.add_argument(
+        "--validate-only", action="store_true", help="Run validation only, skip ingestion and upload"
+    )
+    parser.add_argument(
         "--upload", action="store_true", help="Upload inputs to S3 after ingestion"
     )
     args = parser.parse_args()
@@ -917,9 +927,12 @@ def main() -> None:
                     remaining, "template question understanding data"
                 )
 
-    # Step 3: Run ingestion
+    # Step 3: Run ingestion (or validation only)
     output_dir = consultation_dir / "inputs"
-    run_ingestion(responses_path, qu_path, output_dir)
+    run_ingestion(responses_path, qu_path, output_dir, validate_only=args.validate_only)
+
+    if args.validate_only:
+        return
 
     # Step 4: Upload inputs to S3 (only if --upload flag is set)
     if args.upload:
