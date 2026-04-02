@@ -241,6 +241,24 @@ def validate_data(
             print(line)
         issues.append("Non-integer question numbers in Q.U. sheets")
 
+    # ── Duplicate column reference check ─────────────────────────────────
+    col_refs: list[tuple[str, str, int]] = []  # (col_id, sheet_key, q_num)
+    for sheet_key, df in question_sheets.items():
+        for _, row in df.iterrows():
+            q_num = row["question_number"]
+            for col_field in COL_ID_FIELDS[sheet_key]:
+                col_refs.append((str(row[col_field]).strip(), sheet_key, q_num))
+    seen: dict[str, list[tuple[str, int]]] = {}
+    for col_id, sheet_key, q_num in col_refs:
+        seen.setdefault(col_id, []).append((sheet_key, q_num))
+    dupes = {col_id: refs for col_id, refs in seen.items() if len(refs) > 1}
+    if dupes:
+        print("\n  ⚠ Columns referenced more than once across Q.U. sheets:")
+        for col_id, refs in sorted(dupes.items(), key=lambda x: excel_column_to_number(x[0])):
+            ref_strs = [f"Q{q_num} ({sheet_key})" for sheet_key, q_num in refs]
+            print(f"      Column {col_id}: {', '.join(ref_strs)}")
+        issues.append(f"Duplicate column references: {', '.join(sorted(dupes, key=excel_column_to_number))}")
+
     # ── Column existence check ────────────────────────────────────────
     if len(all_qu_columns) > resp_col_count:
         msg = (f"Q.U. references {len(all_qu_columns)} columns but response data only has {resp_col_count}")
@@ -257,6 +275,97 @@ def validate_data(
         for col_id in missing_cols:
             print(f"      {col_id}")
         issues.append(f"Q.U. references missing columns: {', '.join(missing_cols)}")
+
+    # ── Column data type checks ─────────────────────────────────────────
+    # Multichoice columns should have few unique values and few distinct
+    # options after comma-splitting. Free-text columns should have high
+    # uniqueness. These checks catch misclassified question types.
+    MAX_EXPECTED_OPTIONS = 10
+    CLOSED_UNIQUENESS_THRESHOLD = 0.3
+    OPEN_UNIQUENESS_THRESHOLD = 0.3
+
+    def _check_looks_like_multichoice(
+        col_id: str, q_num: int, sheet_key: str, col_role: str,
+    ) -> None:
+        """Warn if a column expected to be multichoice looks like free text."""
+        if col_id not in responses_df.columns:
+            return
+        series = responses_df[col_id].dropna().astype(str)
+        n_responses = len(series)
+        if n_responses == 0:
+            return
+        sheet_name = QU_SHEET_SPECS[sheet_key][0]
+
+        # Check distinct options after comma-split
+        all_options: set[str] = set()
+        for cell in series:
+            all_options.update(item.strip() for item in cell.split(","))
+        if len(all_options) > MAX_EXPECTED_OPTIONS:
+            msg = (
+                f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
+                f"expecting ≤{MAX_EXPECTED_OPTIONS} unique options, "
+                f"but got {len(all_options)} — is it actually free text?"
+            )
+            print(f"\n  ⚠ {msg}")
+            issues.append(msg)
+
+        # Check uniqueness ratio
+        n_unique = series.nunique()
+        ratio = n_unique / n_responses
+        if ratio > CLOSED_UNIQUENESS_THRESHOLD:
+            msg = (
+                f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
+                f"{n_unique}/{n_responses} responses are unique ({ratio:.0%}) — "
+                f"expected ≤{CLOSED_UNIQUENESS_THRESHOLD:.0%} for multichoice. "
+                f"Should this be on the \"Open questions\" sheet instead?"
+            )
+            print(f"\n  ⚠ {msg}")
+            issues.append(msg)
+
+    def _check_looks_like_free_text(
+        col_id: str, q_num: int, sheet_key: str, col_role: str,
+    ) -> None:
+        """Warn if a column expected to be free text looks like multichoice."""
+        if col_id not in responses_df.columns:
+            return
+        series = responses_df[col_id].dropna().astype(str)
+        n_responses = len(series)
+        if n_responses == 0:
+            return
+        sheet_name = QU_SHEET_SPECS[sheet_key][0]
+        n_unique = series.nunique()
+        ratio = n_unique / n_responses
+        if ratio < OPEN_UNIQUENESS_THRESHOLD:
+            msg = (
+                f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
+                f"only {n_unique}/{n_responses} responses are unique ({ratio:.0%}) — "
+                f"expected >{OPEN_UNIQUENESS_THRESHOLD:.0%} for free text. "
+                f"Should this be on the \"Multiple Choice\" sheet instead?"
+            )
+            print(f"\n  ⚠ {msg}")
+            issues.append(msg)
+
+    for sheet_key in ("closed", "hybrid", "open"):
+        df = question_sheets.get(sheet_key)
+        if df is None or df.empty:
+            continue
+        for _, row in df.iterrows():
+            q_num = row["question_number"]
+            if sheet_key == "closed":
+                _check_looks_like_multichoice(
+                    str(row["column_name"]).strip(), q_num, sheet_key, "closed column",
+                )
+            elif sheet_key == "hybrid":
+                _check_looks_like_multichoice(
+                    str(row["closed_column"]).strip(), q_num, sheet_key, "closed part",
+                )
+                _check_looks_like_free_text(
+                    str(row["open_column"]).strip(), q_num, sheet_key, "open part",
+                )
+            elif sheet_key == "open":
+                _check_looks_like_free_text(
+                    str(row["column_name"]).strip(), q_num, sheet_key, "open column",
+                )
 
     # ── Label matching ────────────────────────────────────────────────
     label_issues: list[tuple[str, list[str], str, str]] = []
@@ -290,6 +399,28 @@ def validate_data(
             print(f"      ┌ Q.U.:   {qu_label}")
             print(f"      └ Resp: {resp_header}")
         issues.extend(["Label mismatch"] * len(label_issues))
+
+    # ── Unreferenced columns check ──────────────────────────────────────
+    # Flag response columns not referenced by any question or demographic.
+    demographic_set = set(demographic_columns) if demographic_columns else set()
+    all_resp_cols = set(responses_df.columns) - {"themefinder_id"}
+    referenced_cols = all_qu_columns | demographic_set
+    unreferenced = sorted(
+        all_resp_cols - referenced_cols,
+        key=excel_column_to_number,
+    )
+    if unreferenced:
+        print(f"\n  ⚠ {len(unreferenced)} response column(s) not referenced by any question or demographic:")
+        for col_id in unreferenced:
+            series = responses_df[col_id].dropna().astype(str)
+            n_responses = len(series)
+            n_unique = series.nunique()
+            header = original_headers.get(col_id, "?")
+            if len(header) > 60:
+                header = header[:57] + "..."
+            print(f"      {col_id}: \"{header}\" — {n_responses} non-null, {n_unique} unique")
+        print("      Should any of these be included as demographics?")
+        issues.append(f"Unreferenced columns: {', '.join(unreferenced)}")
 
     # ── Result ────────────────────────────────────────────────────────
     if issues:
