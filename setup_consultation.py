@@ -213,6 +213,29 @@ def validate_data(
         print(f"    {sheet_key}: {n_questions} question(s), {len(cols_in_sheet)} column(s)")
     print(f"    Total: {total_questions} question(s), {len(all_qu_columns)} column(s)")
 
+    # ── Missing fields in Q.U. rows ─────────────────────────────────────
+    incomplete_rows: list[str] = []
+    for sheet_key, df in question_sheets.items():
+        sheet_name = QU_SHEET_SPECS[sheet_key][0]
+        expected_fields = QU_SHEET_SPECS[sheet_key][2]
+        for idx, row in df.iterrows():
+            missing = [
+                f for f in expected_fields
+                if pd.isna(row.get(f)) or str(row.get(f)).strip() in ("", "nan")
+            ]
+            if missing:
+                q_text = str(row.get("question_text", "")).strip()
+                label = q_text[:50] + "..." if len(q_text) > 50 else q_text
+                incomplete_rows.append(
+                    f"      \"{sheet_name}\" row {idx + 1}: missing {', '.join(missing)}"
+                    f"  ({label!r})" if label else ""
+                )
+    if incomplete_rows:
+        print("\n  ⚠ Q.U. rows with missing fields:")
+        for line in incomplete_rows:
+            print(line)
+        issues.append(f"Incomplete Q.U. rows: {len(incomplete_rows)}")
+
     # ── Column ID format check ────────────────────────────────────────
     bad_col_ids: list[str] = []
     for sheet_key, df in question_sheets.items():
@@ -242,8 +265,13 @@ def validate_data(
         issues.append("Non-integer question numbers in Q.U. sheets")
 
     # ── Duplicate column reference check ─────────────────────────────────
+    # Hybrid questions legitimately use two columns (open + closed) for the
+    # same question, so we track (col_id, q_num) pairs and only flag a column
+    # when it's referenced by more than one distinct question.
     col_refs: list[tuple[str, str, int]] = []  # (col_id, sheet_key, q_num)
     for sheet_key, df in question_sheets.items():
+        if sheet_key == "hybrid":
+            continue
         for _, row in df.iterrows():
             q_num = row["question_number"]
             for col_field in COL_ID_FIELDS[sheet_key]:
@@ -296,28 +324,24 @@ def validate_data(
             return
         sheet_name = QU_SHEET_SPECS[sheet_key][0]
 
-        # Check distinct options after comma-split
+        # Gather both signals, report as one warning
+        problems: list[str] = []
+
         all_options: set[str] = set()
         for cell in series:
             all_options.update(item.strip() for item in cell.split(","))
         if len(all_options) > MAX_EXPECTED_OPTIONS:
-            msg = (
-                f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
-                f"expecting ≤{MAX_EXPECTED_OPTIONS} unique options, "
-                f"but got {len(all_options)} — is it actually free text?"
-            )
-            print(f"\n  ⚠ {msg}")
-            issues.append(msg)
+            problems.append(f"{len(all_options)} unique options after comma-split (expected ≤{MAX_EXPECTED_OPTIONS})")
 
-        # Check uniqueness ratio
         n_unique = series.nunique()
         ratio = n_unique / n_responses
         if ratio > CLOSED_UNIQUENESS_THRESHOLD:
+            problems.append(f"{n_unique}/{n_responses} responses are unique ({ratio:.0%}, expected ≤{CLOSED_UNIQUENESS_THRESHOLD:.0%})")
+
+        if problems:
             msg = (
                 f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
-                f"{n_unique}/{n_responses} responses are unique ({ratio:.0%}) — "
-                f"expected ≤{CLOSED_UNIQUENESS_THRESHOLD:.0%} for multichoice. "
-                f"Should this be on the \"Open questions\" sheet instead?"
+                f"looks like free text, not multichoice: {'; '.join(problems)}"
             )
             print(f"\n  ⚠ {msg}")
             issues.append(msg)
@@ -811,9 +835,24 @@ def main() -> None:
     parser.add_argument(
         "name", nargs="?", help="Consultation name (used as folder name)"
     )
+    parser.add_argument(
+        "--dir", type=Path, help="Path to consultation directory (skip interactive prompt)"
+    )
+    parser.add_argument(
+        "--responses", type=Path, help="Path to response data file (skip file selection)"
+    )
+    parser.add_argument(
+        "--qu", type=Path, help="Path to question understanding file (skip file selection)"
+    )
+    parser.add_argument(
+        "--upload", action="store_true", help="Upload inputs to S3 after ingestion"
+    )
     args = parser.parse_args()
 
     name = args.name
+    if not name and args.dir:
+        # Derive name from directory
+        name = args.dir.resolve().name
     if not name:
         name = input("Enter consultation name: ").strip()
         if not name:
@@ -824,49 +863,70 @@ def main() -> None:
     print(f"Using consultation name: {name}")
 
     base_dir = Path(__file__).resolve().parent / "consultations"
-    consultation_dir = base_dir / name
 
-    # Step 1: Create the consultation folder
+    # Step 1: Resolve consultation directory
+    if args.dir:
+        consultation_dir = args.dir.resolve()
+    else:
+        consultation_dir = base_dir / name
     consultation_dir.mkdir(parents=True, exist_ok=True)
     print(f"Consultation directory: {consultation_dir}")
 
-    # Step 2: Check for data files
-    print(
-        "\nPlease copy the consultation response data and the template question"
-        " understanding file into:"
-    )
-    print(f"  {consultation_dir}")
-    input("\nPress Enter when the files are in place...")
-
-    files = find_data_files(consultation_dir)
-    if len(files) < 2:
-        print(
-            f"\nError: Expected at least 2 data files (.csv/.xlsx/.xls) but found"
-            f" {len(files)}."
-        )
-        print("Please add the missing files and re-run the script.")
-        sys.exit(1)
-
-    # Step 3: Identify which file is which
-    responses_path = prompt_file_selection(files, "consultation response data")
-    remaining = [f for f in files if f != responses_path]
-    if len(remaining) == 1:
-        qu_path = remaining[0]
-        print(f"\nUsing '{qu_path.name}' as the template question understanding file.")
+    # Step 2: Resolve file paths
+    if args.responses and args.qu:
+        responses_path = args.responses.resolve()
+        qu_path = args.qu.resolve()
+        for label, path in [("Responses", responses_path), ("Q.U.", qu_path)]:
+            if not path.exists():
+                print(f"Error: {label} file not found: {path}")
+                sys.exit(1)
+        print(f"Responses file: {responses_path.name}")
+        print(f"Q.U. file: {qu_path.name}")
     else:
-        qu_path = prompt_file_selection(
-            remaining, "template question understanding data"
-        )
+        if not (args.responses or args.qu):
+            print(
+                "\nPlease copy the consultation response data and the template question"
+                " understanding file into:"
+            )
+            print(f"  {consultation_dir}")
+            input("\nPress Enter when the files are in place...")
 
-    # Step 4: Run ingestion
+        files = find_data_files(consultation_dir)
+        if len(files) < 2:
+            print(
+                f"\nError: Expected at least 2 data files (.csv/.xlsx/.xls) but found"
+                f" {len(files)}."
+            )
+            print("Please add the missing files and re-run the script.")
+            sys.exit(1)
+
+        if args.responses:
+            responses_path = args.responses.resolve()
+        else:
+            responses_path = prompt_file_selection(files, "consultation response data")
+
+        if args.qu:
+            qu_path = args.qu.resolve()
+        else:
+            remaining = [f for f in files if f != responses_path]
+            if len(remaining) == 1:
+                qu_path = remaining[0]
+                print(f"\nUsing '{qu_path.name}' as the template question understanding file.")
+            else:
+                qu_path = prompt_file_selection(
+                    remaining, "template question understanding data"
+                )
+
+    # Step 3: Run ingestion
     output_dir = consultation_dir / "inputs"
     run_ingestion(responses_path, qu_path, output_dir)
 
-    # Step 5: Upload inputs to S3
-    s3_prefix = f"app_data/consultations/{name}/inputs/"
-    upload_inputs_to_s3(output_dir, "i-dot-ai-prod-consult-data", s3_prefix)
+    # Step 4: Upload inputs to S3 (only if --upload flag is set)
+    if args.upload:
+        s3_prefix = f"app_data/consultations/{name}/inputs/"
+        upload_inputs_to_s3(output_dir, "i-dot-ai-prod-consult-data", s3_prefix)
 
-    # Step 6: Point to Confluence
+    # Step 5: Point to Confluence
     print("\n" + "=" * 60)
     print("Setup complete! For further instructions, see:")
     print(f"  {CONFLUENCE_URL}")

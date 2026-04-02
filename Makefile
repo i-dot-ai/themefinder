@@ -22,4 +22,8 @@ pipeline:
 	./run_pipeline.sh synthetic_gambling_XS gpt-4.1-sweden-2025-03
 
 setup-consultation:
-	uv run python setup_consultation.py $(NAME)
+	uv run python setup_consultation.py $(NAME) \
+		$(if $(DIR),--dir $(DIR)) \
+		$(if $(RESPONSES),--responses $(RESPONSES)) \
+		$(if $(QU),--qu $(QU)) \
+		$(if $(UPLOAD),--upload)
