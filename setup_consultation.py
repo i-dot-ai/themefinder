@@ -246,19 +246,14 @@ def validate_data(
                 if not _EXCEL_COL_RE.match(val):
                     bad_col_ids.append(f"      {sheet_key}.{col_field} = {val!r}")
     if bad_col_ids:
-        print("\n  ⚠ Column IDs that don't look like Excel columns (expected A, B, AA, ...):")
+        print("\n  ⚠ Column IDs that don't look like Excel columns (expected 'A', 'B', 'AA', ...):")
         for line in bad_col_ids:
             print(line)
         issues.append("Non-Excel column IDs found in Q.U. sheets")
 
     # ── Duplicate column reference check ─────────────────────────────────
-    # Hybrid questions legitimately use two columns (open + closed) for the
-    # same question, so we track (col_id, q_num) pairs and only flag a column
-    # when it's referenced by more than one distinct question.
     col_refs: list[tuple[str, str, int]] = []  # (col_id, sheet_key, q_num)
     for sheet_key, df in question_sheets.items():
-        if sheet_key == "hybrid":
-            continue
         for _, row in df.iterrows():
             q_num = row["question_number"]
             for col_field in COL_ID_FIELDS[sheet_key]:
