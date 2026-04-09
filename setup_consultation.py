@@ -33,8 +33,16 @@ PRIMARY_COL_ID_FIELD: dict[str, str] = {
 # Sheet name, expected column count, and column names for each Q.U. sheet type.
 QU_SHEET_SPECS: dict[str, tuple[str, int, list[str]]] = {
     "open": ("Open questions", 3, ["column_name", "question_number", "question_text"]),
-    "hybrid": ("Hybrid questions", 4, ["open_column", "question_number", "question_text", "closed_column"]),
-    "closed": ("Multiple Choice", 3, ["column_name", "question_number", "question_text"]),
+    "hybrid": (
+        "Hybrid questions",
+        4,
+        ["open_column", "question_number", "question_text", "closed_column"],
+    ),
+    "closed": (
+        "Multiple Choice",
+        3,
+        ["column_name", "question_number", "question_text"],
+    ),
 }
 
 # Characters stripped from free-text columns during ingestion.
@@ -121,7 +129,8 @@ def _load_qu_sheet(
     if not _EXCEL_COL_RE.match(first_cell):
         logger.info(
             "Detected instruction row in sheet '%s', skipping: '%s'",
-            sheet_name, first_cell[:60],
+            sheet_name,
+            first_cell[:60],
         )
         df = df.iloc[1:].reset_index(drop=True)
 
@@ -180,8 +189,10 @@ def validate_data(
     total_cells = n_rows * resp_col_count
     nan_count = int(responses_df.drop(columns=["themefinder_id"]).isna().sum().sum())
     nan_pct = (nan_count / total_cells * 100) if total_cells else 0
-    print(f"\n  Response data: {n_rows} rows x {resp_col_count} cols, "
-          f"{nan_count}/{total_cells} NaN ({nan_pct:.1f}%)")
+    print(
+        f"\n  Response data: {n_rows} rows x {resp_col_count} cols, "
+        f"{nan_count}/{total_cells} NaN ({nan_pct:.1f}%)"
+    )
 
     # ── Demographics ──────────────────────────────────────────────────
     if demographic_columns and demographic_labels:
@@ -189,13 +200,17 @@ def validate_data(
         for col_id, label in zip(demographic_columns, demographic_labels):
             if col_id not in responses_df.columns:
                 print(f"    ✗ {label} (col {col_id}) — not found in response data")
-                issues.append(f"Demographic column {col_id} ({label}) not in response data")
+                issues.append(
+                    f"Demographic column {col_id} ({label}) not in response data"
+                )
                 continue
             series = responses_df[col_id].fillna("Not Provided")
             n_unique = series.nunique()
             n_missing = int((series == "Not Provided").sum())
             missing_pct = n_missing / n_rows * 100 if n_rows else 0
-            print(f"    {label} (col {col_id}): {n_unique} unique, {n_missing} missing ({missing_pct:.1f}%)")
+            print(
+                f"    {label} (col {col_id}): {n_unique} unique, {n_missing} missing ({missing_pct:.1f}%)"
+            )
             for value, count in series.value_counts().head(5).items():
                 pct = count / n_rows * 100
                 print(f"      {value}: {count} ({pct:.1f}%)")
@@ -211,7 +226,9 @@ def validate_data(
         for col_field in COL_ID_FIELDS[sheet_key]:
             cols_in_sheet.update(df[col_field].astype(str).str.strip().tolist())
         all_qu_columns.update(cols_in_sheet)
-        print(f"    {sheet_key}: {n_questions} question(s), {len(cols_in_sheet)} column(s)")
+        print(
+            f"    {sheet_key}: {n_questions} question(s), {len(cols_in_sheet)} column(s)"
+        )
     print(f"    Total: {total_questions} question(s), {len(all_qu_columns)} column(s)")
 
     # ── Missing fields in Q.U. rows ─────────────────────────────────────
@@ -221,15 +238,18 @@ def validate_data(
         expected_fields = QU_SHEET_SPECS[sheet_key][2]
         for idx, row in df.iterrows():
             missing = [
-                f for f in expected_fields
+                f
+                for f in expected_fields
                 if pd.isna(row.get(f)) or str(row.get(f)).strip() in ("", "nan")
             ]
             if missing:
                 q_text = str(row.get("question_text", "")).strip()
                 label = q_text[:50] + "..." if len(q_text) > 50 else q_text
                 incomplete_rows.append(
-                    f"      \"{sheet_name}\" row {idx + 1}: missing {', '.join(missing)}"
-                    f"  ({label!r})" if label else ""
+                    f'      "{sheet_name}" row {idx + 1}: missing {", ".join(missing)}'
+                    f"  ({label!r})"
+                    if label
+                    else ""
                 )
     if incomplete_rows:
         print("\n  ⚠ Q.U. rows with missing fields:")
@@ -246,7 +266,9 @@ def validate_data(
                 if not _EXCEL_COL_RE.match(val):
                     bad_col_ids.append(f"      {sheet_key}.{col_field} = {val!r}")
     if bad_col_ids:
-        print("\n  ⚠ Column IDs that don't look like Excel columns (expected 'A', 'B', 'AA', ...):")
+        print(
+            "\n  ⚠ Column IDs that don't look like Excel columns (expected 'A', 'B', 'AA', ...):"
+        )
         for line in bad_col_ids:
             print(line)
         issues.append("Non-Excel column IDs found in Q.U. sheets")
@@ -264,24 +286,32 @@ def validate_data(
     dupes = {col_id: refs for col_id, refs in seen.items() if len(refs) > 1}
     if dupes:
         print("\n  ⚠ Columns referenced more than once across Q.U. sheets:")
-        for col_id, refs in sorted(dupes.items(), key=lambda x: excel_column_to_number(x[0])):
+        for col_id, refs in sorted(
+            dupes.items(), key=lambda x: excel_column_to_number(x[0])
+        ):
             ref_strs = [f"Q{q_num} ({sheet_key})" for sheet_key, q_num in refs]
             print(f"      Column {col_id}: {', '.join(ref_strs)}")
-        issues.append(f"Duplicate column references: {', '.join(sorted(dupes, key=excel_column_to_number))}")
+        issues.append(
+            f"Duplicate column references: {', '.join(sorted(dupes, key=excel_column_to_number))}"
+        )
 
     # ── Column existence check ────────────────────────────────────────
     if len(all_qu_columns) > resp_col_count:
-        msg = (f"Q.U. references {len(all_qu_columns)} columns but response data only has {resp_col_count}")
+        msg = f"Q.U. references {len(all_qu_columns)} columns but response data only has {resp_col_count}"
         print(f"\n  ⚠ {msg}")
         issues.append(msg)
 
-    max_resp_col = max(original_headers, key=excel_column_to_number) if original_headers else "?"
+    max_resp_col = (
+        max(original_headers, key=excel_column_to_number) if original_headers else "?"
+    )
     missing_cols = sorted(
         [c for c in all_qu_columns if c not in original_headers],
         key=excel_column_to_number,
     )
     if missing_cols:
-        print(f"\n  ⚠ Q.U. references columns not in response data (max is {max_resp_col}):")
+        print(
+            f"\n  ⚠ Q.U. references columns not in response data (max is {max_resp_col}):"
+        )
         for col_id in missing_cols:
             print(f"      {col_id}")
         issues.append(f"Q.U. references missing columns: {', '.join(missing_cols)}")
@@ -295,7 +325,10 @@ def validate_data(
     OPEN_UNIQUENESS_THRESHOLD = 0.3
 
     def _check_looks_like_multichoice(
-        col_id: str, q_num: int, sheet_key: str, col_role: str,
+        col_id: str,
+        q_num: int,
+        sheet_key: str,
+        col_role: str,
     ) -> None:
         """Warn if a column expected to be multichoice looks like free text."""
         if col_id not in responses_df.columns:
@@ -313,23 +346,30 @@ def validate_data(
         for cell in series:
             all_options.update(item.strip() for item in cell.split(","))
         if len(all_options) > MAX_EXPECTED_OPTIONS:
-            problems.append(f"{len(all_options)} unique options after comma-split (expected ≤{MAX_EXPECTED_OPTIONS})")
+            problems.append(
+                f"{len(all_options)} unique options after comma-split (expected ≤{MAX_EXPECTED_OPTIONS})"
+            )
 
         n_unique = series.nunique()
         ratio = n_unique / n_responses
         if ratio > CLOSED_UNIQUENESS_THRESHOLD:
-            problems.append(f"{n_unique}/{n_responses} responses are unique ({ratio:.0%}, expected ≤{CLOSED_UNIQUENESS_THRESHOLD:.0%})")
+            problems.append(
+                f"{n_unique}/{n_responses} responses are unique ({ratio:.0%}, expected ≤{CLOSED_UNIQUENESS_THRESHOLD:.0%})"
+            )
 
         if problems:
             msg = (
-                f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
+                f'Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet "{sheet_name}" — '
                 f"looks like free text, not multichoice: {'; '.join(problems)}"
             )
             print(f"\n  ⚠ {msg}")
             issues.append(msg)
 
     def _check_looks_like_free_text(
-        col_id: str, q_num: int, sheet_key: str, col_role: str,
+        col_id: str,
+        q_num: int,
+        sheet_key: str,
+        col_role: str,
     ) -> None:
         """Warn if a column expected to be free text looks like multichoice."""
         if col_id not in responses_df.columns:
@@ -343,10 +383,10 @@ def validate_data(
         ratio = n_unique / n_responses
         if ratio < OPEN_UNIQUENESS_THRESHOLD:
             msg = (
-                f"Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet \"{sheet_name}\" — "
+                f'Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet "{sheet_name}" — '
                 f"only {n_unique}/{n_responses} responses are unique ({ratio:.0%}) — "
                 f"expected >{OPEN_UNIQUENESS_THRESHOLD:.0%} for free text. "
-                f"Should this be on the \"Multiple Choice\" sheet instead?"
+                f'Should this be on the "Multiple Choice" sheet instead?'
             )
             print(f"\n  ⚠ {msg}")
             issues.append(msg)
@@ -359,18 +399,30 @@ def validate_data(
             q_num = row["question_number"]
             if sheet_key == "closed":
                 _check_looks_like_multichoice(
-                    str(row["column_name"]).strip(), q_num, sheet_key, "closed column",
+                    str(row["column_name"]).strip(),
+                    q_num,
+                    sheet_key,
+                    "closed column",
                 )
             elif sheet_key == "hybrid":
                 _check_looks_like_multichoice(
-                    str(row["closed_column"]).strip(), q_num, sheet_key, "closed part",
+                    str(row["closed_column"]).strip(),
+                    q_num,
+                    sheet_key,
+                    "closed part",
                 )
                 _check_looks_like_free_text(
-                    str(row["open_column"]).strip(), q_num, sheet_key, "open part",
+                    str(row["open_column"]).strip(),
+                    q_num,
+                    sheet_key,
+                    "open part",
                 )
             elif sheet_key == "open":
                 _check_looks_like_free_text(
-                    str(row["column_name"]).strip(), q_num, sheet_key, "open column",
+                    str(row["column_name"]).strip(),
+                    q_num,
+                    sheet_key,
+                    "open column",
                 )
 
     # ── Label matching ────────────────────────────────────────────────
@@ -385,7 +437,9 @@ def validate_data(
                 if resp_header is None:
                     continue  # already reported above
 
-                ratio = SequenceMatcher(None, qu_label.lower(), resp_header.lower(), autojunk=False).ratio()
+                ratio = SequenceMatcher(
+                    None, qu_label.lower(), resp_header.lower(), autojunk=False
+                ).ratio()
                 qu_nums = set(_extract_numbers(qu_label))
                 resp_nums = set(_extract_numbers(resp_header))
 
@@ -393,7 +447,9 @@ def validate_data(
                 if ratio < 0.4:
                     problems.append(f"low similarity ({ratio:.0%})")
                 if qu_nums and resp_nums and qu_nums != resp_nums:
-                    problems.append(f"number mismatch (Q.U.:{sorted(qu_nums)} vs resp:{sorted(resp_nums)})")
+                    problems.append(
+                        f"number mismatch (Q.U.:{sorted(qu_nums)} vs resp:{sorted(resp_nums)})"
+                    )
 
                 if problems:
                     label_issues.append((col_id, problems, qu_label, resp_header))
@@ -412,11 +468,14 @@ def validate_data(
     all_resp_cols = set(responses_df.columns) - {"themefinder_id"}
     referenced_cols = all_qu_columns | demographic_set
     unreferenced = [
-        col for col in sorted(all_resp_cols - referenced_cols, key=excel_column_to_number)
+        col
+        for col in sorted(all_resp_cols - referenced_cols, key=excel_column_to_number)
         if "response id" not in str(original_headers.get(col, "")).lower()
     ]
     if unreferenced:
-        print(f"\n  ⚠ {len(unreferenced)} response column(s) not referenced by any question or demographic:")
+        print(
+            f"\n  ⚠ {len(unreferenced)} response column(s) not referenced by any question or demographic:"
+        )
         for col_id in unreferenced:
             series = responses_df[col_id].dropna().astype(str)
             n_responses = len(series)
@@ -424,7 +483,9 @@ def validate_data(
             header = original_headers.get(col_id, "?")
             if len(header) > 60:
                 header = header[:57] + "..."
-            print(f"      {col_id}: \"{header}\" — {n_responses} non-null, {n_unique} unique")
+            print(
+                f'      {col_id}: "{header}" — {n_responses} non-null, {n_unique} unique'
+            )
         print("      Should any of these be included as demographics?")
         issues.append(f"Unreferenced columns: {', '.join(unreferenced)}")
 
@@ -468,22 +529,28 @@ def load_and_number_question_sheets(
 
     if needs_fallback:
         # Report which values are non-numeric
-        print("\n  ⚠ Non-numeric question numbers found in Q.U. sheets"
-              " — a column ID-based fallback will be applied:")
+        print(
+            "\n  ⚠ Non-numeric question numbers found in Q.U. sheets"
+            " — a column ID-based fallback will be applied:"
+        )
         for key, df in sheets.items():
             sheet_name = QU_SHEET_SPECS[key][0]
             for idx, val in enumerate(df["question_number"].astype(str)):
                 try:
                     int(val.strip())
                 except ValueError:
-                    print(f"      \"{sheet_name}\" row {idx + 1}: "
-                          f"question_number = {val!r} (not a valid integer)")
+                    print(
+                        f'      "{sheet_name}" row {idx + 1}: '
+                        f"question_number = {val!r} (not a valid integer)"
+                    )
 
         # Collect (excel_col_id, sheet_key, df_index) from every row across all sheets
         all_entries: list[tuple[str, str, int]] = []
         for key, df in sheets.items():
             for idx in df.index:
-                all_entries.append((str(df.at[idx, PRIMARY_COL_ID_FIELD[key]]).strip(), key, idx))
+                all_entries.append(
+                    (str(df.at[idx, PRIMARY_COL_ID_FIELD[key]]).strip(), key, idx)
+                )
 
         # Sort by Excel column order and assign sequential numbers
         all_entries.sort(key=lambda x: excel_column_to_number(x[0]))
@@ -581,7 +648,9 @@ def create_question_inputs(
             open_col = question["open_column"]
             closed_col = question["closed_column"]
             data_cols = [closed_col, open_col]
-            answers = df[["themefinder_id"] + data_cols].dropna(subset=data_cols, how="all")
+            answers = df[["themefinder_id"] + data_cols].dropna(
+                subset=data_cols, how="all"
+            )
             answers[closed_col] = answers[closed_col].fillna("Not Provided")
             answers[open_col] = answers[open_col].fillna("Not Provided")
         else:
@@ -598,7 +667,11 @@ def create_question_inputs(
 
         # Write multi_choice.jsonl
         if has_options:
-            options_col = question["closed_column"] if question_type == "hybrid" else question["column_name"]
+            options_col = (
+                question["closed_column"]
+                if question_type == "hybrid"
+                else question["column_name"]
+            )
             answers[options_col] = answers[options_col].apply(lambda x: x.split(","))
             answers.rename(columns={options_col: "options"}, inplace=True)
             answers[["themefinder_id", "options"]].to_json(
@@ -607,7 +680,11 @@ def create_question_inputs(
 
         # Write responses.jsonl
         if has_free_text:
-            text_col = question["open_column"] if question_type == "hybrid" else question["column_name"]
+            text_col = (
+                question["open_column"]
+                if question_type == "hybrid"
+                else question["column_name"]
+            )
             # For hybrid, text_col is already the original name (not renamed)
             answers.rename(columns={text_col: "text"}, inplace=True)
             answers[["themefinder_id", "text"]].to_json(
@@ -693,8 +770,7 @@ def load_responses(path: Path) -> tuple[pd.DataFrame, dict[str, str]]:
     df = df.dropna(how="all").reset_index(drop=True)
 
     original_headers = {
-        get_excel_column_name(i): str(col)
-        for i, col in enumerate(df.columns)
+        get_excel_column_name(i): str(col) for i, col in enumerate(df.columns)
     }
     df.columns = [get_excel_column_name(i) for i in range(len(df.columns))]
     df["themefinder_id"] = range(1, len(df) + 1)
@@ -741,8 +817,11 @@ def run_ingestion(
 
     # ── Phase 2: Validate ─────────────────────────────────────────────
     validate_data(
-        question_sheets, original_headers, responses_df,
-        demographic_columns, demographic_labels,
+        question_sheets,
+        original_headers,
+        responses_df,
+        demographic_columns,
+        demographic_labels,
         interactive=not validate_only,
     )
 
@@ -808,7 +887,8 @@ def upload_inputs_to_s3(local_dir: Path, bucket: str, s3_prefix: str) -> None:
             print("    ... (more objects not shown)")
         logger.warning(
             "Uploading will overwrite existing data at s3://%s/%s",
-            bucket, s3_prefix,
+            bucket,
+            s3_prefix,
         )
 
     print(f"\nReady to upload {len(files)} file(s) to s3://{bucket}/{s3_prefix}")
@@ -838,16 +918,24 @@ def main() -> None:
         "name", nargs="?", help="Consultation name (used as folder name)"
     )
     parser.add_argument(
-        "--dir", type=Path, help="Path to consultation directory (skip interactive prompt)"
+        "--dir",
+        type=Path,
+        help="Path to consultation directory (skip interactive prompt)",
     )
     parser.add_argument(
-        "--responses", type=Path, help="Path to response data file (skip file selection)"
+        "--responses",
+        type=Path,
+        help="Path to response data file (skip file selection)",
     )
     parser.add_argument(
-        "--qu", type=Path, help="Path to question understanding file (skip file selection)"
+        "--qu",
+        type=Path,
+        help="Path to question understanding file (skip file selection)",
     )
     parser.add_argument(
-        "--validate-only", action="store_true", help="Run validation only, skip ingestion and upload"
+        "--validate-only",
+        action="store_true",
+        help="Run validation only, skip ingestion and upload",
     )
     parser.add_argument(
         "--upload", action="store_true", help="Upload inputs to S3 after ingestion"
@@ -916,7 +1004,9 @@ def main() -> None:
             remaining = [f for f in files if f != responses_path]
             if len(remaining) == 1:
                 qu_path = remaining[0]
-                print(f"\nUsing '{qu_path.name}' as the template question understanding file.")
+                print(
+                    f"\nUsing '{qu_path.name}' as the template question understanding file."
+                )
             else:
                 qu_path = prompt_file_selection(
                     remaining, "template question understanding data"
