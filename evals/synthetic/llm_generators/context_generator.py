@@ -153,13 +153,17 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
     for attempt in range(MAX_RETRIES):
         try:
             result = (
-                await client.beta.chat.completions.parse(
-                    model="gpt-5-mini",
-                    messages=messages,
-                    response_format=ContextFieldSet,
-                    reasoning_effort="medium",
+                (
+                    await client.beta.chat.completions.parse(
+                        model="gpt-5-mini",
+                        messages=messages,
+                        response_format=ContextFieldSet,
+                        reasoning_effort="medium",
+                    )
                 )
-            ).choices[0].message.parsed
+                .choices[0]
+                .message.parsed
+            )
             break
         except (ValidationError, Exception) as e:
             last_error = e
@@ -261,13 +265,17 @@ Focus on characteristics directly relevant to this policy."""
     for attempt in range(MAX_RETRIES):
         try:
             result = (
-                await client.beta.chat.completions.parse(
-                    model="gpt-5-mini",
-                    messages=messages,
-                    response_format=ContextFieldSet,
-                    reasoning_effort="medium",
+                (
+                    await client.beta.chat.completions.parse(
+                        model="gpt-5-mini",
+                        messages=messages,
+                        response_format=ContextFieldSet,
+                        reasoning_effort="medium",
+                    )
                 )
-            ).choices[0].message.parsed
+                .choices[0]
+                .message.parsed
+            )
             break
         except (ValidationError, Exception) as e:
             last_error = e

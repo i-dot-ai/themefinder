@@ -163,13 +163,17 @@ For each question, provide:
     ]
 
     result = (
-        await client.beta.chat.completions.parse(
-            model="gpt-5-mini",
-            messages=messages,
-            response_format=QuestionSet,
-            reasoning_effort="high",
+        (
+            await client.beta.chat.completions.parse(
+                model="gpt-5-mini",
+                messages=messages,
+                response_format=QuestionSet,
+                reasoning_effort="high",
+            )
         )
-    ).choices[0].message.parsed
+        .choices[0]
+        .message.parsed
+    )
     return result.questions
 
 
@@ -224,13 +228,17 @@ Generate ONE new question that:
     ]
 
     return (
-        await client.beta.chat.completions.parse(
-            model="gpt-5-mini",
-            messages=messages,
-            response_format=GeneratedQuestion,
-            reasoning_effort="high",
+        (
+            await client.beta.chat.completions.parse(
+                model="gpt-5-mini",
+                messages=messages,
+                response_format=GeneratedQuestion,
+                reasoning_effort="high",
+            )
         )
-    ).choices[0].message.parsed
+        .choices[0]
+        .message.parsed
+    )
 
 
 class DatasetName(BaseModel):
@@ -288,13 +296,17 @@ Generate ONE dataset name."""
     ]
 
     result = (
-        await client.beta.chat.completions.parse(
-            model="gpt-5-mini",
-            messages=messages,
-            response_format=DatasetName,
-            reasoning_effort="high",
+        (
+            await client.beta.chat.completions.parse(
+                model="gpt-5-mini",
+                messages=messages,
+                response_format=DatasetName,
+                reasoning_effort="high",
+            )
         )
-    ).choices[0].message.parsed
+        .choices[0]
+        .message.parsed
+    )
 
     # Sanitise the name to ensure it's filesystem-safe
     name = result.name.lower().strip()

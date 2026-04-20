@@ -152,13 +152,17 @@ async def generate_respondent_survey(
         for attempt in range(MAX_RETRIES):
             try:
                 response = (
-                    await client.beta.chat.completions.parse(
-                        model=deployment,
-                        messages=messages,
-                        response_format=GeneratedResponse,
-                        reasoning_effort="medium",
+                    (
+                        await client.beta.chat.completions.parse(
+                            model=deployment,
+                            messages=messages,
+                            response_format=GeneratedResponse,
+                            reasoning_effort="medium",
+                        )
                     )
-                ).choices[0].message.parsed
+                    .choices[0]
+                    .message.parsed
+                )
                 break  # Success - exit retry loop
             except (ValidationError, Exception) as e:
                 last_error = e

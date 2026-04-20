@@ -253,13 +253,17 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
         for attempt in range(MAX_RETRIES):
             try:
                 result = (
-                    await client.beta.chat.completions.parse(
-                        model="gpt-5-mini",
-                        messages=messages,
-                        response_format=ThemeSet,
-                        reasoning_effort="medium",
+                    (
+                        await client.beta.chat.completions.parse(
+                            model="gpt-5-mini",
+                            messages=messages,
+                            response_format=ThemeSet,
+                            reasoning_effort="medium",
+                        )
                     )
-                ).choices[0].message.parsed
+                    .choices[0]
+                    .message.parsed
+                )
                 themes = [
                     {
                         "topic_label": t.topic_label,
@@ -366,13 +370,17 @@ Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
     for attempt in range(MAX_RETRIES):
         try:
             result = (
-                await client.beta.chat.completions.parse(
-                    model="gpt-5-mini",
-                    messages=messages,
-                    response_format=ThemeSet,
-                    reasoning_effort="low",
+                (
+                    await client.beta.chat.completions.parse(
+                        model="gpt-5-mini",
+                        messages=messages,
+                        response_format=ThemeSet,
+                        reasoning_effort="low",
+                    )
                 )
-            ).choices[0].message.parsed
+                .choices[0]
+                .message.parsed
+            )
             break
         except (ValidationError, Exception) as e:
             last_error = e
