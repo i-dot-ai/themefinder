@@ -91,7 +91,7 @@ openai==2.15.0
     # via langchain-openai
 openpyxl==3.1.5
     # via themefinder (pyproject.toml)
-orjson==3.11.5
+orjson==3.11.6
     # via
     #   langgraph-sdk
     #   langsmith
