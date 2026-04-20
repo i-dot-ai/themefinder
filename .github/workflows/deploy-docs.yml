@@ -20,10 +20,7 @@ jobs:
         uses: astral-sh/setup-uv@v4
 
       - name: Install dependencies
-        run: |
-          uv venv
-          uv pip sync requirements-dev.txt
-          uv pip install -e ".[docs]"
+        run: uv sync --extra docs
 
       - name: Deploy docs
         run: |
