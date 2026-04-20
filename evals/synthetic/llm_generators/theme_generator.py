@@ -9,12 +9,10 @@ import logging
 import os
 from collections.abc import Callable
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import AzureChatOpenAI
+import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import DemographicField
-from structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -112,30 +110,6 @@ consultation question. Your task is to:
 - Use sequential IDs: A, B, C, ... Z, AA, AB, ..."""
 
 
-def _get_generation_llm(
-    reasoning_effort: str = "medium",
-    callbacks: list | None = None,
-) -> AzureChatOpenAI:
-    """Create LLM instance for theme generation.
-
-    Args:
-        reasoning_effort: Reasoning level (low, medium, high).
-        callbacks: LangChain callbacks for tracing.
-
-    Returns:
-        Configured AzureChatOpenAI instance.
-    """
-    return AzureChatOpenAI(
-        azure_deployment="gpt-5-mini",
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        reasoning_effort=reasoning_effort,
-        callbacks=callbacks or [],
-        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
-    )
-
-
 def _generate_topic_ids(n: int) -> list[str]:
     """Generate topic IDs for n themes.
 
@@ -163,7 +137,6 @@ async def generate_themes(
     topic: str,
     question: str,
     demographic_fields: list[DemographicField],
-    callbacks: list | None = None,
     on_fan_out_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """Generate comprehensive themes for a consultation question.
@@ -175,27 +148,22 @@ async def generate_themes(
         topic: Overall consultation topic.
         question: Specific question text.
         demographic_fields: Enabled demographic fields for perspective consideration.
-        callbacks: LangChain callbacks for tracing.
         on_fan_out_complete: Callback invoked after each fan-out call completes.
 
     Returns:
         List of theme dicts with topic_id, topic_label, topic_description, topic.
     """
-    # Step 1: Fan-out - 10 parallel calls for diverse theme discovery
     raw_themes = await _fan_out_theme_generation(
         topic=topic,
         question=question,
         demographic_fields=demographic_fields,
-        callbacks=callbacks,
         on_complete=on_fan_out_complete,
     )
 
-    # Step 2: Consolidate - deduplicate and rationalise
     consolidated_themes = await _consolidate_themes(
         raw_themes=raw_themes,
         topic=topic,
         question=question,
-        callbacks=callbacks,
     )
 
     # Add special themes X and Y (always required per spec)
@@ -219,11 +187,19 @@ async def generate_themes(
     return consolidated_themes
 
 
+def _make_client() -> openai.AsyncAzureOpenAI:
+    return openai.AsyncAzureOpenAI(
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
+        timeout=600,
+    )
+
+
 async def _fan_out_theme_generation(
     topic: str,
     question: str,
     demographic_fields: list[DemographicField],
-    callbacks: list | None = None,
     on_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """Generate themes with fan-out parallelisation.
@@ -234,15 +210,12 @@ async def _fan_out_theme_generation(
         topic: Consultation topic.
         question: Question text.
         demographic_fields: Demographic fields for context.
-        callbacks: LangChain callbacks.
         on_complete: Callback for each completed call.
 
     Returns:
         Combined list of all themes from all calls (with duplicates).
     """
-    llm = _get_generation_llm(reasoning_effort="medium", callbacks=callbacks)
-    structured_llm = with_structured_output(llm, ThemeSet)
-
+    client = _make_client()
     demographic_context = _build_demographic_context(demographic_fields)
 
     human_prompt = f"""Analyse this UK government consultation question and generate a comprehensive theme framework.
@@ -270,17 +243,23 @@ limit the number - be thorough.
 Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=human_prompt),
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": human_prompt},
     ]
 
     async def single_call(call_id: int) -> list[dict]:
-        """Execute a single theme generation call with retry logic."""
         last_error = None
 
         for attempt in range(MAX_RETRIES):
             try:
-                result = await structured_llm.ainvoke(messages)
+                result = (
+                    await client.beta.chat.completions.parse(
+                        model="gpt-5-mini",
+                        messages=messages,
+                        response_format=ThemeSet,
+                        reasoning_effort="medium",
+                    )
+                ).choices[0].message.parsed
                 themes = [
                     {
                         "topic_label": t.topic_label,
@@ -295,7 +274,6 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
                 last_error = e
                 error_type = type(e).__name__
 
-                # Check if it's a retryable error
                 is_validation_error = isinstance(e, ValidationError)
                 is_connection_error = (
                     "ECONNRESET" in str(e)
@@ -318,11 +296,9 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
 
         raise last_error  # type: ignore[misc]
 
-    # Run FAN_OUT_COUNT calls in parallel - return_exceptions prevents one failure cancelling all
     tasks = [asyncio.create_task(single_call(i)) for i in range(FAN_OUT_COUNT)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
-    # Filter out failed calls and log errors
     all_themes = []
     for i, result in enumerate(results):
         if isinstance(result, Exception):
@@ -342,7 +318,6 @@ async def _consolidate_themes(
     raw_themes: list[dict],
     topic: str,
     question: str,
-    callbacks: list | None = None,
 ) -> list[dict]:
     """Consolidate and deduplicate themes from fan-out generation.
 
@@ -352,16 +327,12 @@ async def _consolidate_themes(
         raw_themes: Combined themes from all fan-out calls.
         topic: Consultation topic.
         question: Question text.
-        callbacks: LangChain callbacks.
 
     Returns:
         Deduplicated and rationalised theme list.
     """
-    # Use low reasoning for consolidation - it's mostly deduplication
-    llm = _get_generation_llm(reasoning_effort="low", callbacks=callbacks)
-    structured_llm = with_structured_output(llm, ThemeSet)
+    client = _make_client()
 
-    # Format raw themes for the prompt
     themes_text = "\n".join(
         f"- {t['topic_label']}: {t['topic_description']}" for t in raw_themes
     )
@@ -385,17 +356,23 @@ Consolidate them by removing duplicates and merging highly similar themes.
 Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
 
     messages = [
-        SystemMessage(content=CONSOLIDATION_SYSTEM_PROMPT),
-        HumanMessage(content=human_prompt),
+        {"role": "system", "content": CONSOLIDATION_SYSTEM_PROMPT},
+        {"role": "user", "content": human_prompt},
     ]
 
-    # Retry loop for transient LLM errors
     result = None
     last_error = None
 
     for attempt in range(MAX_RETRIES):
         try:
-            result = await structured_llm.ainvoke(messages)
+            result = (
+                await client.beta.chat.completions.parse(
+                    model="gpt-5-mini",
+                    messages=messages,
+                    response_format=ThemeSet,
+                    reasoning_effort="low",
+                )
+            ).choices[0].message.parsed
             break
         except (ValidationError, Exception) as e:
             last_error = e
@@ -424,10 +401,8 @@ Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
     if result is None:
         raise last_error  # type: ignore[misc]
 
-    # Normalise topic IDs to ensure sequential ordering
     topic_ids = _generate_topic_ids(len(result.themes))
 
-    # Build final theme list
     themes = [
         {
             "topic_id": topic_ids[i],

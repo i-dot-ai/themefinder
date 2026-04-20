@@ -6,11 +6,8 @@ principles and the Gunning Principles for fair consultation.
 
 import os
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import AzureChatOpenAI
+import openai
 from pydantic import BaseModel, Field
-
-from structured_output import with_structured_output
 
 
 class GeneratedQuestion(BaseModel):
@@ -92,22 +89,12 @@ Consultation Principles and the Gunning Principles for fair public consultation.
 Generate questions that would realistically appear in a UK government consultation."""
 
 
-def _get_question_generation_llm(callbacks: list | None = None) -> AzureChatOpenAI:
-    """Create LLM instance for question generation.
-
-    Args:
-        callbacks: LangChain callbacks for tracing.
-
-    Returns:
-        Configured AzureChatOpenAI instance.
-    """
-    return AzureChatOpenAI(
-        azure_deployment="gpt-5-mini",
+def _make_client() -> openai.AsyncAzureOpenAI:
+    """Create Azure OpenAI client for question generation."""
+    return openai.AsyncAzureOpenAI(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        reasoning_effort="high",
-        callbacks=callbacks or [],
         timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
@@ -117,7 +104,6 @@ async def generate_questions(
     n_questions: int,
     existing_questions: list[str] | None = None,
     feedback: str | None = None,
-    callbacks: list | None = None,
 ) -> list[GeneratedQuestion]:
     """Generate consultation questions for a policy topic.
 
@@ -126,13 +112,11 @@ async def generate_questions(
         n_questions: Number of questions to generate.
         existing_questions: Previously approved questions (to avoid duplication).
         feedback: User feedback on previously rejected questions.
-        callbacks: LangChain callbacks for tracing.
 
     Returns:
         List of GeneratedQuestion objects.
     """
-    llm = _get_question_generation_llm(callbacks)
-    structured_llm = with_structured_output(llm, QuestionSet)
+    client = _make_client()
 
     # Build context about existing questions
     existing_context = ""
@@ -174,11 +158,18 @@ For each question, provide:
 - A brief rationale explaining why this question is valuable"""
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=human_prompt),
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": human_prompt},
     ]
 
-    result = await structured_llm.ainvoke(messages)
+    result = (
+        await client.beta.chat.completions.parse(
+            model="gpt-5-mini",
+            messages=messages,
+            response_format=QuestionSet,
+            reasoning_effort="high",
+        )
+    ).choices[0].message.parsed
     return result.questions
 
 
@@ -187,7 +178,6 @@ async def regenerate_single_question(
     rejected_question: str,
     feedback: str,
     existing_questions: list[str],
-    callbacks: list | None = None,
 ) -> GeneratedQuestion:
     """Regenerate a single question based on user feedback.
 
@@ -196,13 +186,11 @@ async def regenerate_single_question(
         rejected_question: The question that was rejected.
         feedback: User's feedback on why it was rejected.
         existing_questions: Other approved questions to avoid duplication.
-        callbacks: LangChain callbacks for tracing.
 
     Returns:
         A new GeneratedQuestion.
     """
-    llm = _get_question_generation_llm(callbacks)
-    structured_llm = with_structured_output(llm, GeneratedQuestion)
+    client = _make_client()
 
     existing_list = (
         "\n".join(f"- {q}" for q in existing_questions)
@@ -231,12 +219,18 @@ Generate ONE new question that:
 4. Follows UK government consultation best practices"""
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=human_prompt),
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": human_prompt},
     ]
 
-    result = await structured_llm.ainvoke(messages)
-    return result
+    return (
+        await client.beta.chat.completions.parse(
+            model="gpt-5-mini",
+            messages=messages,
+            response_format=GeneratedQuestion,
+            reasoning_effort="high",
+        )
+    ).choices[0].message.parsed
 
 
 class DatasetName(BaseModel):
@@ -250,20 +244,17 @@ class DatasetName(BaseModel):
 async def generate_dataset_name(
     topic: str,
     questions: list[str],
-    callbacks: list | None = None,
 ) -> str:
     """Generate a short, descriptive dataset name from the consultation topic and questions.
 
     Args:
         topic: The consultation topic (can be long document).
         questions: List of approved question texts.
-        callbacks: Optional LangChain callbacks.
 
     Returns:
         Short snake_case dataset name suitable for file paths.
     """
-    llm = _get_question_generation_llm(callbacks)
-    structured_llm = with_structured_output(llm, DatasetName)
+    client = _make_client()
 
     # Truncate topic if very long (just use first 2000 chars for context)
     topic_excerpt = topic[:2000] + "..." if len(topic) > 2000 else topic
@@ -289,13 +280,21 @@ async def generate_dataset_name(
 Generate ONE dataset name."""
 
     messages = [
-        SystemMessage(
-            content="You generate short, descriptive dataset names for UK government consultations."
-        ),
-        HumanMessage(content=human_prompt),
+        {
+            "role": "system",
+            "content": "You generate short, descriptive dataset names for UK government consultations.",
+        },
+        {"role": "user", "content": human_prompt},
     ]
 
-    result = await structured_llm.ainvoke(messages)
+    result = (
+        await client.beta.chat.completions.parse(
+            model="gpt-5-mini",
+            messages=messages,
+            response_format=DatasetName,
+            reasoning_effort="high",
+        )
+    ).choices[0].message.parsed
 
     # Sanitise the name to ensure it's filesystem-safe
     name = result.name.lower().strip()

@@ -6,12 +6,10 @@ import random
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import AzureChatOpenAI
+import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import NoiseLevel, QuestionConfig, ResponseLength, ResponseType
-from structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -88,12 +86,11 @@ Generate authentic-sounding responses. Vary sentence structure and vocabulary.""
 
 
 async def generate_respondent_survey(
-    llm: AzureChatOpenAI,
+    llm: tuple[openai.AsyncAzureOpenAI, str],
     respondent: RespondentSpec,
     questions: list[QuestionConfig],
     themes_by_question: dict[int, list[dict]],
     noise_level: NoiseLevel,
-    callbacks: list | None = None,
     on_response_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """Generate all responses for a single respondent across all questions.
@@ -102,19 +99,17 @@ async def generate_respondent_survey(
     to maintain consistency in the respondent's viewpoint.
 
     Args:
-        llm: Azure OpenAI LLM instance.
+        llm: Tuple of (AsyncAzureOpenAI client, deployment name).
         respondent: Respondent specification with persona and base disposition.
         questions: List of question configurations in order.
         themes_by_question: Dict mapping question number to themes list.
         noise_level: Noise injection intensity.
-        callbacks: LangChain callbacks for tracing.
         on_response_complete: Callback invoked when each response finishes.
 
     Returns:
         List of response dicts, one per question, with all required fields.
     """
-    structured_llm = with_structured_output(llm, GeneratedResponse)
-    config = {"callbacks": callbacks} if callbacks else {}
+    client, deployment = llm
 
     previous_responses: list[PreviousResponse] = []
     results = []
@@ -146,8 +141,8 @@ async def generate_respondent_survey(
         )
 
         messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=human_prompt),
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": human_prompt},
         ]
 
         # Retry loop for transient LLM errors (JSON parsing, connection issues, content filter)
@@ -156,7 +151,14 @@ async def generate_respondent_survey(
 
         for attempt in range(MAX_RETRIES):
             try:
-                response = await structured_llm.ainvoke(messages, config=config)
+                response = (
+                    await client.beta.chat.completions.parse(
+                        model=deployment,
+                        messages=messages,
+                        response_format=GeneratedResponse,
+                        reasoning_effort="medium",
+                    )
+                ).choices[0].message.parsed
                 break  # Success - exit retry loop
             except (ValidationError, Exception) as e:
                 last_error = e
@@ -226,12 +228,11 @@ async def generate_respondent_survey(
 
 
 async def generate_respondent_batch(
-    llm: AzureChatOpenAI,
+    llm: tuple[openai.AsyncAzureOpenAI, str],
     respondents: list[RespondentSpec],
     questions: list[QuestionConfig],
     themes_by_question: dict[int, list[dict]],
     noise_level: NoiseLevel,
-    callbacks: list | None = None,
     on_response_complete: Callable[[], None] | None = None,
 ) -> list[dict]:
     """Generate responses for a batch of respondents (parallelised across respondents).
@@ -240,12 +241,11 @@ async def generate_respondent_batch(
     but multiple respondents are processed in parallel.
 
     Args:
-        llm: Azure OpenAI LLM instance.
+        llm: Tuple of (AsyncAzureOpenAI client, deployment name).
         respondents: List of respondent specifications.
         questions: List of question configurations in order.
         themes_by_question: Dict mapping question number to themes list.
         noise_level: Noise injection intensity.
-        callbacks: LangChain callbacks for tracing.
         on_response_complete: Callback invoked when each response finishes.
 
     Returns:
@@ -261,7 +261,6 @@ async def generate_respondent_batch(
                 questions=questions,
                 themes_by_question=themes_by_question,
                 noise_level=noise_level,
-                callbacks=callbacks,
                 on_response_complete=on_response_complete,
             )
         )
