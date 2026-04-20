@@ -1005,7 +1005,7 @@ Examples:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick CI smoke test: gambling_XS dataset, 1 run, azure provider, gpt-4.1-mini only.",
+        help="Quick CI smoke test: gambling_XS dataset, 1 run, azure provider, gpt-4.1 only.",
     )
     args = parser.parse_args()
 
@@ -1014,7 +1014,7 @@ Examples:
         args.dataset = "gambling_XS"
         args.runs = 1
         args.provider = "azure"
-        args.models = ["gpt-4.1-mini"]
+        args.models = ["gpt-4.1"]
 
     # Get models based on provider or specific model names
     if args.models:
