@@ -6,7 +6,6 @@ then consolidates with light-touch rationalisation.
 
 import asyncio
 import logging
-import os
 from collections.abc import Callable
 
 import openai
@@ -134,6 +133,7 @@ def _generate_topic_ids(n: int) -> list[str]:
 
 
 async def generate_themes(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     question: str,
     demographic_fields: list[DemographicField],
@@ -154,6 +154,7 @@ async def generate_themes(
         List of theme dicts with topic_id, topic_label, topic_description, topic.
     """
     raw_themes = await _fan_out_theme_generation(
+        client=client,
         topic=topic,
         question=question,
         demographic_fields=demographic_fields,
@@ -161,6 +162,7 @@ async def generate_themes(
     )
 
     consolidated_themes = await _consolidate_themes(
+        client=client,
         raw_themes=raw_themes,
         topic=topic,
         question=question,
@@ -188,16 +190,8 @@ async def generate_themes(
     return consolidated_themes
 
 
-def _make_client() -> openai.AsyncAzureOpenAI:
-    return openai.AsyncAzureOpenAI(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        timeout=600,
-    )
-
-
 async def _fan_out_theme_generation(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     question: str,
     demographic_fields: list[DemographicField],
@@ -216,7 +210,6 @@ async def _fan_out_theme_generation(
     Returns:
         Combined list of all themes from all calls (with duplicates).
     """
-    client = _make_client()
     demographic_context = _build_demographic_context(demographic_fields)
 
     human_prompt = f"""Analyse this UK government consultation question and generate a comprehensive theme framework.
@@ -320,6 +313,7 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
 
 
 async def _consolidate_themes(
+    client: openai.AsyncAzureOpenAI,
     raw_themes: list[dict],
     topic: str,
     question: str,
@@ -336,8 +330,6 @@ async def _consolidate_themes(
     Returns:
         Deduplicated and rationalised theme list.
     """
-    client = _make_client()
-
     themes_text = "\n".join(
         f"- {t['topic_label']}: {t['topic_description']}" for t in raw_themes
     )

@@ -100,7 +100,9 @@ class SyntheticDatasetGenerator:
 
         async def generate_themes_for_question(question_config):
             """Generate themes for a single question."""
+            client, _ = self.llm
             themes = await generate_themes(
+                client=client,
                 topic=self.config.topic,
                 question=question_config.text,
                 demographic_fields=self.config.demographic_fields,

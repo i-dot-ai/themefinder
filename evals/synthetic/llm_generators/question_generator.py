@@ -4,8 +4,6 @@ Generates UK government-style consultation questions following Cabinet Office
 principles and the Gunning Principles for fair consultation.
 """
 
-import os
-
 import openai
 from pydantic import BaseModel, Field
 
@@ -89,17 +87,8 @@ Consultation Principles and the Gunning Principles for fair public consultation.
 Generate questions that would realistically appear in a UK government consultation."""
 
 
-def _make_client() -> openai.AsyncAzureOpenAI:
-    """Create Azure OpenAI client for question generation."""
-    return openai.AsyncAzureOpenAI(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
-    )
-
-
 async def generate_questions(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     n_questions: int,
     existing_questions: list[str] | None = None,
@@ -116,8 +105,6 @@ async def generate_questions(
     Returns:
         List of GeneratedQuestion objects.
     """
-    client = _make_client()
-
     # Build context about existing questions
     existing_context = ""
     if existing_questions:
@@ -178,6 +165,7 @@ For each question, provide:
 
 
 async def regenerate_single_question(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     rejected_question: str,
     feedback: str,
@@ -186,6 +174,7 @@ async def regenerate_single_question(
     """Regenerate a single question based on user feedback.
 
     Args:
+        client: Azure OpenAI client.
         topic: The policy topic for the consultation.
         rejected_question: The question that was rejected.
         feedback: User's feedback on why it was rejected.
@@ -194,8 +183,6 @@ async def regenerate_single_question(
     Returns:
         A new GeneratedQuestion.
     """
-    client = _make_client()
-
     existing_list = (
         "\n".join(f"- {q}" for q in existing_questions)
         if existing_questions
@@ -250,20 +237,20 @@ class DatasetName(BaseModel):
 
 
 async def generate_dataset_name(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     questions: list[str],
 ) -> str:
     """Generate a short, descriptive dataset name from the consultation topic and questions.
 
     Args:
+        client: Azure OpenAI client.
         topic: The consultation topic (can be long document).
         questions: List of approved question texts.
 
     Returns:
         Short snake_case dataset name suitable for file paths.
     """
-    client = _make_client()
-
     # Truncate topic if very long (just use first 2000 chars for context)
     topic_excerpt = topic[:2000] + "..." if len(topic) > 2000 else topic
 

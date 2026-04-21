@@ -7,7 +7,6 @@ characteristics that influence how respondents answer.
 
 import asyncio
 import logging
-import os
 
 import openai
 from pydantic import BaseModel, Field, ValidationError
@@ -94,17 +93,8 @@ Generate 3-5 context fields that capture the most important respondent character
 for understanding perspectives on this policy."""
 
 
-def _make_client() -> openai.AsyncAzureOpenAI:
-    """Create Azure OpenAI client for context field generation."""
-    return openai.AsyncAzureOpenAI(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
-    )
-
-
 async def generate_context_fields(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     questions: list[QuestionConfig],
     n_fields: int = 4,
@@ -119,8 +109,6 @@ async def generate_context_fields(
     Returns:
         List of DemographicField objects with is_policy_context=True.
     """
-    client = _make_client()
-
     # Format questions for context
     questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
 
@@ -217,6 +205,7 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
 
 
 async def regenerate_context_fields(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     questions: list[QuestionConfig],
     feedback: str,
@@ -225,6 +214,7 @@ async def regenerate_context_fields(
     """Regenerate context fields based on user feedback.
 
     Args:
+        client: Azure OpenAI client.
         topic: Consultation topic.
         questions: List of consultation questions.
         feedback: User's feedback on what to change.
@@ -233,8 +223,6 @@ async def regenerate_context_fields(
     Returns:
         List of regenerated DemographicField objects.
     """
-    client = _make_client()
-
     questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
 
     human_prompt = f"""Regenerate policy-specific context questions for this UK government consultation,
