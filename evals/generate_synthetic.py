@@ -31,15 +31,6 @@ from synthetic.cli import (
 )
 from synthetic.generator import SyntheticDatasetGenerator
 
-# Optional Langfuse integration
-try:
-    import langfuse_utils
-
-    LANGFUSE_AVAILABLE = True
-except ImportError:
-    LANGFUSE_AVAILABLE = False
-
-
 async def main() -> None:
     """Main entry point for synthetic dataset generation."""
     dotenv.load_dotenv()
@@ -59,20 +50,6 @@ async def main() -> None:
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
         timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
-
-    # Optional Langfuse tracking
-    langfuse_ctx = None
-
-    if LANGFUSE_AVAILABLE:
-        langfuse_ctx = langfuse_utils.get_langfuse_context(
-            session_id=f"synthetic_{config.dataset_name}",
-            eval_type="synthetic_generation",
-            metadata={
-                "dataset": config.dataset_name,
-                "n_responses": config.n_responses,
-            },
-            tags=[config.dataset_name, "synthetic"],
-        )
 
     # Initialise generator
     generator = SyntheticDatasetGenerator(
@@ -113,10 +90,6 @@ async def main() -> None:
     except Exception as e:
         print_error(e)
         raise
-
-    finally:
-        if LANGFUSE_AVAILABLE and langfuse_ctx:
-            langfuse_utils.flush(langfuse_ctx)
 
 
 if __name__ == "__main__":
