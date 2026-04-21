@@ -164,7 +164,7 @@ async def generate_respondent_survey(
                     .message.parsed
                 )
                 break  # Success - exit retry loop
-            except (ValidationError, Exception) as e:
+            except Exception as e:
                 last_error = e
                 error_type = type(e).__name__
                 error_str = str(e)

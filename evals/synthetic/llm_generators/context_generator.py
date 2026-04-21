@@ -153,7 +153,7 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
                 .message.parsed
             )
             break
-        except (ValidationError, Exception) as e:
+        except Exception as e:
             last_error = e
             error_type = type(e).__name__
 
@@ -265,7 +265,7 @@ Focus on characteristics directly relevant to this policy."""
                 .message.parsed
             )
             break
-        except (ValidationError, Exception) as e:
+        except Exception as e:
             last_error = e
             error_type = type(e).__name__
 

@@ -268,7 +268,7 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
                 if on_complete:
                     on_complete()
                 return themes
-            except (ValidationError, Exception) as e:
+            except Exception as e:
                 last_error = e
                 error_type = type(e).__name__
 
@@ -375,7 +375,7 @@ Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
                 .message.parsed
             )
             break
-        except (ValidationError, Exception) as e:
+        except Exception as e:
             last_error = e
             error_type = type(e).__name__
 
