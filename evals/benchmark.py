@@ -221,7 +221,7 @@ AZURE_MODELS = [
     ModelConfig(name="gpt-5-nano", deployment="gpt-5-nano", reasoning_effort="low"),
     ModelConfig(name="gpt-5-mini", deployment="gpt-5-mini", reasoning_effort="low"),
 ]
- 
+
 # Vertex AI models (Gemini and Claude)
 # Requires: uv pip install -e ".[vertex]" and GOOGLE_CLOUD_PROJECT env var
 VERTEX_MODELS = [
