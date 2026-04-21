@@ -166,17 +166,18 @@ async def generate_themes(
         question=question,
     )
 
-    # Add special themes X and Y (always required per spec)
+    # XX and XY are used as fixed fallback IDs — safe since the sequential generator
+    # would need 650+ themes to reach them
     consolidated_themes.extend(
         [
             {
-                "topic_id": "X",
+                "topic_id": "XX",
                 "topic_label": "None of the Above",
                 "topic_description": "Response discusses a topic not covered by listed themes",
                 "topic": "None of the Above: Response discusses a topic not covered by listed themes",
             },
             {
-                "topic_id": "Y",
+                "topic_id": "XY",
                 "topic_label": "No Reason Given",
                 "topic_description": "Response does not provide a substantive answer",
                 "topic": "No Reason Given: Response does not provide a substantive answer",

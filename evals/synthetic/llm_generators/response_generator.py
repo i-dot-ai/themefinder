@@ -312,16 +312,16 @@ def _select_themes_for_response(
         Tuple of (theme_ids, stances).
     """
     if base_disposition == ResponseType.OFF_TOPIC:
-        return ["X"], ["NEUTRAL"]
+        return ["XX"], ["NEUTRAL"]
 
     if base_disposition == ResponseType.LOW_QUALITY:
-        return ["Y"], ["NEUTRAL"]
+        return ["XY"], ["NEUTRAL"]
 
-    # Get regular themes (excluding X and Y)
-    regular_themes = [t for t in themes if t["topic_id"] not in ("X", "Y")]
+    # Get regular themes (excluding fallback themes)
+    regular_themes = [t for t in themes if t["topic_id"] not in ("XX", "XY")]
 
     if not regular_themes:
-        return ["X"], ["NEUTRAL"]
+        return ["XX"], ["NEUTRAL"]
 
     # Select 1-3 themes
     n_themes = random.choice([1, 2, 3])
