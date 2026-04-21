@@ -31,6 +31,7 @@ from synthetic.cli import (
 )
 from synthetic.generator import SyntheticDatasetGenerator
 
+
 async def main() -> None:
     """Main entry point for synthetic dataset generation."""
     dotenv.load_dotenv()
