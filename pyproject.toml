@@ -31,7 +31,7 @@ dependencies = [
     "numpy>=1.24.0",
     "pydantic>=2.0.0",
     "protobuf==6.33.5",
-    "cryptography==46.0.5",
+    "cryptography>=46.0.7",
     "langchain-core==1.2.11",
 ]
 
