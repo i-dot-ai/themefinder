@@ -74,7 +74,9 @@ def save_demographic_data(
         print("  No demographic data found, skipping.")
         return
     demographic_info = demographic_info[
-        demographic_info[demographic_info.columns[0]].astype(str).str.match(EXCEL_COLUMN_RE)
+        demographic_info[demographic_info.columns[0]]
+        .astype(str)
+        .str.match(EXCEL_COLUMN_RE)
     ].reset_index(drop=True)
     demographic_questions = demographic_info[demographic_info.columns[0]].tolist()
     demographic_labels = demographic_info[demographic_info.columns[1]].tolist()
@@ -162,7 +164,9 @@ def save_open_questions(
         .astype(int)
     )
     if not question_info["question_number"].is_unique:
-        dupes = question_info[question_info["question_number"].duplicated(keep=False)]["question_number"].tolist()
+        dupes = question_info[question_info["question_number"].duplicated(keep=False)][
+            "question_number"
+        ].tolist()
         raise AssertionError(
             f"Non-unique values found in 'question_number' column of 'Open questions' sheet: {dupes}"
         )
@@ -280,7 +284,9 @@ def save_hybrid_questions(
         .astype(int)
     )
     if not question_info["question_number"].is_unique:
-        dupes = question_info[question_info["question_number"].duplicated(keep=False)]["question_number"].tolist()
+        dupes = question_info[question_info["question_number"].duplicated(keep=False)][
+            "question_number"
+        ].tolist()
         raise AssertionError(
             f"Non-unique values found in 'question_number' column of 'Hybrid questions' sheet: {dupes}"
         )
@@ -369,7 +375,9 @@ def save_closed_questions(
         .astype(int)
     )
     if not question_info["question_number"].is_unique:
-        dupes = question_info[question_info["question_number"].duplicated(keep=False)]["question_number"].tolist()
+        dupes = question_info[question_info["question_number"].duplicated(keep=False)][
+            "question_number"
+        ].tolist()
         raise AssertionError(
             f"Non-unique values found in 'question_number' column of 'Multiple Choice' sheet: {dupes}"
         )
