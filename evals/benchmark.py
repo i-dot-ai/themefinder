@@ -31,6 +31,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -861,7 +862,7 @@ def query_langfuse_costs(benchmark_id: str) -> pd.DataFrame:
         # Fetch traces with benchmark tag
         traces = client.api.trace.list(
             tags=[f"benchmark:{benchmark_id}"],
-            limit=1000,
+            limit=100,
         )
 
         if not traces.data:
@@ -1005,7 +1006,7 @@ Examples:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick CI smoke test: gambling_XS dataset, 1 run, azure provider, gpt-4.1-mini only.",
+        help="Quick CI smoke test: gambling_XS dataset, 1 run, azure provider, gpt-4.1 only.",
     )
     args = parser.parse_args()
 
@@ -1014,7 +1015,7 @@ Examples:
         args.dataset = "gambling_XS"
         args.runs = 1
         args.provider = "azure"
-        args.models = ["gpt-4.1-mini"]
+        args.models = ["gpt-4.1"]
 
     # Get models based on provider or specific model names
     if args.models:
@@ -1074,6 +1075,13 @@ Examples:
 
     # Print results
     runner.print_results_table()
+
+    if not runner.results:
+        console.print(
+            "[bold red]No results collected — all evals failed "
+            "(check for authentication errors above)[/bold red]"
+        )
+        sys.exit(1)
 
     # Query and print costs
     cost_df = query_langfuse_costs(runner.benchmark_id)

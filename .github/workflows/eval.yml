@@ -87,6 +87,7 @@ jobs:
           DATASET: ${{ github.event.inputs.dataset || 'gambling_XS' }}
           EVAL_TYPE: ${{ github.event.inputs.eval_type || 'generation' }}
         run: |
+          set -o pipefail
           cd evals
 
           if [ "$EVAL_TYPE" = "all" ]; then
