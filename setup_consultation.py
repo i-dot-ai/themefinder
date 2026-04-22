@@ -102,6 +102,10 @@ def _load_qu_sheet(
     description, column-header labels) and then auto-detect the instruction row.
     Real data rows start with an Excel column ID like "A", "AC", or "BF";
     instruction rows contain long descriptive text that fails that check.
+
+    At most one instruction row is skipped. If a file contains additional
+    description rows beyond the standard format, it is considered malformed
+    and the team should correct it before re-running.
     """
     try:
         df = pd.read_excel(path, sheet_name=sheet_name, skiprows=3, header=None)
@@ -176,9 +180,11 @@ def validate_data(
     Prints summaries of responses and Q.U. sheets, then checks for:
     - Q.U. columns that don't exist in the response data
     - More Q.U. columns referenced than response columns available
+    - Duplicate column references across Q.U. sheets
     - Low string similarity between Q.U. labels and response headers
     - Mismatched numbers extracted from Q.U. labels vs response headers
     - Demographic column value distributions
+    - Response columns not referenced by any question or demographic
     If any issues found, prompts user to confirm before continuing.
     """
     issues: list[str] = []
@@ -509,6 +515,10 @@ def load_and_number_question_sheets(
     If any question_number value across any sheet cannot be parsed as an integer,
     falls back to numbering all questions sequentially by sorting their Excel column
     IDs across all sheets.
+
+    Raises:
+        ValueError: if question numbers are not globally unique across all sheets
+                    after numbering (numbers are used as output directory names).
     """
     sheets: dict[str, pd.DataFrame] = {}
 
