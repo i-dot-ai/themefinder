@@ -2,7 +2,7 @@ import logging
 from collections import defaultdict
 from typing import List, Optional, Annotated
 from enum import Enum
-from pydantic import BaseModel, Field, model_validator, AfterValidator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, AfterValidator
 
 logger = logging.getLogger(__file__)
 
@@ -136,6 +136,8 @@ def lower_case_strip_str(value: str) -> str:
 class Theme(ValidatedModel):
     """Model for a single extracted theme"""
 
+    model_config = ConfigDict(frozen=True)
+
     topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
         ..., description="Short label summarizing the topic in a few words"
     )
@@ -146,9 +148,6 @@ class Theme(ValidatedModel):
         ...,
         description="SENTIMENT ABOUT THIS TOPIC (AGREEMENT, DISAGREEMENT, OR UNCLEAR)",
     )
-
-    class Config:
-        frozen = True
 
 
 class ThemeGenerationResponses(BaseModel):
@@ -187,6 +186,8 @@ class ThemeGenerationResponses(BaseModel):
 class CondensedTheme(ValidatedModel):
     """Model for a single condensed theme"""
 
+    model_config = ConfigDict(frozen=True)
+
     topic_label: Annotated[str, AfterValidator(lower_case_strip_str)] = Field(
         ..., description="Representative label for the condensed topic"
     )
@@ -197,9 +198,6 @@ class CondensedTheme(ValidatedModel):
     source_topic_count: int = Field(
         ..., gt=0, description="Sum of source_topic_counts from combined topics"
     )
-
-    class Config:
-        frozen = True
 
 
 class ThemeCondensationResponses(BaseModel):
