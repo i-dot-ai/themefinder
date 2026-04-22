@@ -162,7 +162,10 @@ def save_open_questions(
         .astype(int)
     )
     if not question_info["question_number"].is_unique:
-        raise AssertionError("Non-unique values found in 'question_number' column")
+        dupes = question_info[question_info["question_number"].duplicated(keep=False)]["question_number"].tolist()
+        raise AssertionError(
+            f"Non-unique values found in 'question_number' column of 'Open questions' sheet: {dupes}"
+        )
 
     create_open_question_inputs(
         responses_df, question_info.to_dict(orient="records"), output_dir
@@ -277,7 +280,10 @@ def save_hybrid_questions(
         .astype(int)
     )
     if not question_info["question_number"].is_unique:
-        raise AssertionError("Non-unique values found in 'question_number' column")
+        dupes = question_info[question_info["question_number"].duplicated(keep=False)]["question_number"].tolist()
+        raise AssertionError(
+            f"Non-unique values found in 'question_number' column of 'Hybrid questions' sheet: {dupes}"
+        )
 
     create_hybrid_question_inputs(
         responses_df, question_info.to_dict(orient="records"), output_dir
@@ -363,7 +369,10 @@ def save_closed_questions(
         .astype(int)
     )
     if not question_info["question_number"].is_unique:
-        raise AssertionError("Non-unique values found in 'question_number' column")
+        dupes = question_info[question_info["question_number"].duplicated(keep=False)]["question_number"].tolist()
+        raise AssertionError(
+            f"Non-unique values found in 'question_number' column of 'Multiple Choice' sheet: {dupes}"
+        )
 
     create_closed_question_inputs(
         responses_df, question_info.to_dict(orient="records"), output_dir
