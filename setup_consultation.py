@@ -54,7 +54,7 @@ def create_respondents_jsonl(
             .str.decode("ascii")
         )
     for c in demographic_columns:
-        df[c] = df[c].apply(lambda x: x.split(","))
+        df[c] = df[c].apply(lambda x: list(dict.fromkeys(x.split(","))))
     df.rename(columns=dict(zip(demographic_columns, demographic_labels)), inplace=True)
     df["demographic_data"] = df[demographic_labels].to_dict(orient="records")
     df[["themefinder_id", "demographic_data"]].to_json(
@@ -209,7 +209,7 @@ def create_hybrid_question_inputs(
             )
 
         question_answers[closed_col] = question_answers[closed_col].apply(
-            lambda x: x.split(",")
+            lambda x: list(dict.fromkeys(x.split(",")))
         )
         question_answers.rename(
             columns={closed_col: "options", open_col: "text"}, inplace=True
@@ -303,7 +303,7 @@ def create_closed_question_inputs(
             )
 
         question_answers[question_col] = question_answers[question_col].apply(
-            lambda x: x.split(",")
+            lambda x: list(dict.fromkeys(x.split(",")))
         )
         question_answers.columns = ["themefinder_id", "options"]
         question_answers[["themefinder_id", "options"]].to_json(
