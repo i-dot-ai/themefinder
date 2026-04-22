@@ -682,7 +682,9 @@ def create_question_inputs(
                 if question_type == "hybrid"
                 else question["column_name"]
             )
-            answers[options_col] = answers[options_col].apply(lambda x: list(dict.fromkeys(x.split(","))))
+            answers[options_col] = answers[options_col].apply(
+                lambda x: list(dict.fromkeys(x.split(",")))
+            )
             answers.rename(columns={options_col: "options"}, inplace=True)
             answers[["themefinder_id", "options"]].to_json(
                 q_dir / "multi_choice.jsonl", orient="records", lines=True
