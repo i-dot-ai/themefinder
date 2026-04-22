@@ -16,6 +16,8 @@ CONFLUENCE_URL = "https://incubatorforartificialintelligence.atlassian.net/wiki/
 
 VALID_EXTENSIONS = {".csv", ".xlsx", ".xls"}
 
+EXCEL_COLUMN_RE = re.compile(r"^[A-Z]{1,3}$")
+
 
 def to_snake_case(s: str) -> str:
     """Convert a string to snake_case."""
@@ -71,6 +73,9 @@ def save_demographic_data(
     if demographic_info.empty:
         print("  No demographic data found, skipping.")
         return
+    demographic_info = demographic_info[
+        demographic_info[demographic_info.columns[0]].astype(str).str.match(EXCEL_COLUMN_RE)
+    ].reset_index(drop=True)
     demographic_questions = demographic_info[demographic_info.columns[0]].tolist()
     demographic_labels = demographic_info[demographic_info.columns[1]].tolist()
     demographic_labels = [label.replace("/", "-") for label in demographic_labels]
@@ -139,6 +144,9 @@ def save_open_questions(
     if question_info.empty:
         print("  No open questions found, skipping.")
         return
+    question_info = question_info[
+        question_info[question_info.columns[0]].astype(str).str.match(EXCEL_COLUMN_RE)
+    ].reset_index(drop=True)
     question_info.columns = ["column_name", "question_number", "question_text"]
 
     only_nans = responses_df[question_info["column_name"].tolist()].isna().all()
@@ -252,6 +260,9 @@ def save_hybrid_questions(
     if question_info.empty:
         print("  No hybrid questions found, skipping.")
         return
+    question_info = question_info[
+        question_info[question_info.columns[0]].astype(str).str.match(EXCEL_COLUMN_RE)
+    ].reset_index(drop=True)
     question_info.columns = [
         "open_column",
         "question_number",
@@ -340,6 +351,9 @@ def save_closed_questions(
     if question_info.empty:
         print("  No closed questions found, skipping.")
         return
+    question_info = question_info[
+        question_info[question_info.columns[0]].astype(str).str.match(EXCEL_COLUMN_RE)
+    ].reset_index(drop=True)
     question_info.columns = ["column_name", "question_number", "question_text"]
 
     question_info["question_number"] = (
