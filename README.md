@@ -150,6 +150,25 @@ This will:
 4. Process the data and generate the required input files under `./consultations/<name>/inputs/`
 5. Upload the files to S3 to `i-dot-ai-prod-consult-data/app_data/consultations/<name>/inputs/`
 
+#### Optional flags
+
+| Makefile variable | Description |
+|---|---|
+| `VALIDATE_ONLY=1` | Run validation checks only — no files are written and no upload is performed. Useful for a quick sanity-check before committing to ingestion. |
+| `DIR=<path>` | Path to an existing consultation directory (skips the interactive prompt to create one). |
+| `RESPONSES=<path>` | Path to the response data file (skips file-selection prompt). |
+| `QU=<path>` | Path to the question understanding Excel file (skips file-selection prompt). |
+| `UPLOAD=1` | Upload the generated input files to S3 after ingestion. |
+
+Example — validate without ingesting:
+
+```bash
+make setup-consultation NAME=my_consultation \
+  RESPONSES=path/to/responses.xlsx \
+  QU=path/to/question_understanding.xlsx \
+  VALIDATE_ONLY=1
+```
+
 For further instructions on setting up the consultation in the app, see the [Confluence guide](https://incubatorforartificialintelligence.atlassian.net/wiki/spaces/Consult/pages/136445956/1.2+Set+up+the+consultation+in+the+app).
 
 
