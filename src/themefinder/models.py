@@ -4,7 +4,7 @@ from typing import List, Optional, Annotated
 from enum import Enum
 from pydantic import BaseModel, Field, model_validator, AfterValidator
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class Position(str, Enum):
