@@ -55,7 +55,9 @@ async def main() -> None:
 
     # Initialise LLM for response generation (gpt-5-nano with medium reasoning)
     # Medium reasoning ≈ o1 performance, 2x faster throughput than mini/low
-    _AzureClientClass = _LangfuseAzureOpenAI if LANGFUSE_AVAILABLE else openai.AsyncAzureOpenAI
+    _AzureClientClass = (
+        _LangfuseAzureOpenAI if LANGFUSE_AVAILABLE else openai.AsyncAzureOpenAI
+    )
     client = _AzureClientClass(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
