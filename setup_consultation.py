@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import re
+import shutil
 import sys
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -845,7 +846,9 @@ def run_pipeline(
         return
 
     # ── Build ─────────────────────────────────────────────────────────
-    output_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
 
     # Demographics
     if demographic_columns and demographic_labels:
