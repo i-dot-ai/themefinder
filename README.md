@@ -180,10 +180,8 @@ This project uses [uv](https://docs.astral.sh/uv/) for dependency management.
 # Clone and set up development environment
 git clone https://github.com/i-dot-ai/themefinder.git
 cd themefinder
-uv venv
+uv sync --extra dev
 source .venv/bin/activate
-uv pip sync requirements-dev.txt
-uv pip install -e .
 
 # Run tests
 pytest tests/
