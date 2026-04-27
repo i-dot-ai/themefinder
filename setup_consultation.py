@@ -4,11 +4,13 @@ import argparse
 import json
 import logging
 import re
+import shutil
 import sys
 from difflib import SequenceMatcher
 from pathlib import Path
 
 import boto3
+import botocore.exceptions
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -801,15 +803,18 @@ def prompt_file_selection(files: list[Path], role: str) -> Path:
         print("Invalid choice, try again.")
 
 
-def run_ingestion(
+PIPELINE_STAGES = ("validate", "build", "upload")
+
+
+def run_pipeline(
     responses_path: Path,
     question_understanding_path: Path,
     output_dir: Path,
-    validate_only: bool = False,
+    until: str = "upload",
 ) -> None:
-    """Run the ingestion pipeline: load → validate → ingest."""
+    """Run the setup pipeline: load → validate → build → upload."""
 
-    # ── Phase 1: Load ─────────────────────────────────────────────────
+    # ── Load ──────────────────────────────────────────────────────────
     print(f"\nLoading responses from: {responses_path.name}")
     responses_df, original_headers = load_responses(responses_path)
     print(f"  Loaded {len(responses_df)} responses")
@@ -827,21 +832,23 @@ def run_ingestion(
             label.replace("/", "-") for label in demographic_info["label"].tolist()
         ]
 
-    # ── Phase 2: Validate ─────────────────────────────────────────────
+    # ── Validate ──────────────────────────────────────────────────────
     validate_data(
         question_sheets,
         original_headers,
         responses_df,
         demographic_columns,
         demographic_labels,
-        interactive=not validate_only,
+        interactive=until != "validate",
     )
 
-    if validate_only:
+    if until == "validate":
         return
 
-    # ── Phase 3: Ingest ───────────────────────────────────────────────
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # ── Build ─────────────────────────────────────────────────────────
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
 
     # Demographics
     if demographic_columns and demographic_labels:
@@ -945,12 +952,10 @@ def main() -> None:
         help="Path to question understanding file (skip file selection)",
     )
     parser.add_argument(
-        "--validate-only",
-        action="store_true",
-        help="Run validation only, skip ingestion and upload",
-    )
-    parser.add_argument(
-        "--upload", action="store_true", help="Upload inputs to S3 after ingestion"
+        "--until",
+        choices=PIPELINE_STAGES,
+        default="upload",
+        help="How far to run the pipeline: validate, build, or upload (default: upload)",
     )
     args = parser.parse_args()
 
@@ -1024,17 +1029,24 @@ def main() -> None:
                     remaining, "template question understanding data"
                 )
 
-    # Step 3: Run ingestion (or validation only)
+    # Step 3: Run pipeline
     output_dir = consultation_dir / "inputs"
-    run_ingestion(responses_path, qu_path, output_dir, validate_only=args.validate_only)
+    run_pipeline(responses_path, qu_path, output_dir, until=args.until)
 
-    if args.validate_only:
+    if args.until == "validate":
         return
 
-    # Step 4: Upload inputs to S3 (only if --upload flag is set)
-    if args.upload:
+    # Step 4: Upload inputs to S3
+    if args.until == "upload":
         s3_prefix = f"app_data/consultations/{name}/inputs/"
-        upload_inputs_to_s3(output_dir, "i-dot-ai-prod-consult-data", s3_prefix)
+        try:
+            upload_inputs_to_s3(output_dir, "i-dot-ai-prod-consult-data", s3_prefix)
+        except botocore.exceptions.NoCredentialsError as e:
+            print(f"\nAWS error: {e}")
+            print("\nTo fix, either:")
+            print("1. Run: aws-vault exec first")
+            print("2. Re-run with UNTIL=build to skip the upload step")
+            sys.exit(1)
 
     # Step 5: Point to Confluence
     print("\n" + "=" * 60)

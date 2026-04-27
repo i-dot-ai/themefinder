@@ -26,5 +26,4 @@ setup-consultation:
 		$(if $(DIR),--dir $(DIR)) \
 		$(if $(RESPONSES),--responses $(RESPONSES)) \
 		$(if $(QU),--qu $(QU)) \
-		$(if $(UPLOAD),--upload) \
-		$(if $(VALIDATE_ONLY),--validate-only)
+		$(if $(UNTIL),--until $(UNTIL))
