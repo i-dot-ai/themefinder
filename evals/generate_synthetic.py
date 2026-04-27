@@ -16,9 +16,10 @@ including:
 import asyncio
 import os
 import sys
+from contextlib import nullcontext
 
 import dotenv
-from langchain_openai import AzureChatOpenAI
+import openai
 
 # Add parent to path for imports
 sys.path.insert(0, str(os.path.dirname(__file__)))
@@ -34,6 +35,7 @@ from synthetic.generator import SyntheticDatasetGenerator
 # Optional Langfuse integration
 try:
     import langfuse_utils
+    from langfuse.openai import AsyncAzureOpenAI as _LangfuseAzureOpenAI
 
     LANGFUSE_AVAILABLE = True
 except ImportError:
@@ -53,17 +55,17 @@ async def main() -> None:
 
     # Initialise LLM for response generation (gpt-5-nano with medium reasoning)
     # Medium reasoning ≈ o1 performance, 2x faster throughput than mini/low
-    llm = AzureChatOpenAI(
-        azure_deployment="gpt-5-nano",
+    _AzureClientClass = (
+        _LangfuseAzureOpenAI if LANGFUSE_AVAILABLE else openai.AsyncAzureOpenAI
+    )
+    client = _AzureClientClass(
         azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
         api_key=os.getenv("AZURE_OPENAI_API_KEY"),
         api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        reasoning_effort="medium",
         timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
     # Optional Langfuse tracking
-    callbacks = []
     langfuse_ctx = None
 
     if LANGFUSE_AVAILABLE:
@@ -76,14 +78,11 @@ async def main() -> None:
             },
             tags=[config.dataset_name, "synthetic"],
         )
-        if langfuse_ctx.handler:
-            callbacks.append(langfuse_ctx.handler)
 
     # Initialise generator
     generator = SyntheticDatasetGenerator(
         config=config,
-        llm=llm,
-        callbacks=callbacks,
+        llm=(client, "gpt-5-nano"),
     )
 
     # Calculate total responses for summary
@@ -95,9 +94,16 @@ async def main() -> None:
     output_path = None
     n_themes = 0
 
+    _trace = (
+        langfuse_utils.trace_context(langfuse_ctx, name="synthetic_generation")
+        if langfuse_ctx
+        else nullcontext()
+    )
+
     try:
-        with progress:
-            output_path = await generator.generate(progress)
+        with _trace:
+            with progress:
+                output_path = await generator.generate(progress)
 
         # Count themes from first question for summary (after progress bar closes)
         themes_file = (

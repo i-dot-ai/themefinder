@@ -1,7 +1,9 @@
 """Interactive CLI for synthetic consultation dataset generation."""
 
+import os
 from pathlib import Path
 
+import openai
 from rich.box import DOUBLE, HEAVY, ROUNDED
 from rich.console import Console
 from rich.panel import Panel
@@ -196,6 +198,13 @@ async def run_interactive_cli() -> GenerationConfig:
     console.clear()
     console.print(BANNER)
 
+    client = openai.AsyncAzureOpenAI(
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
+        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
+        timeout=600,
+    )
+
     # Step 1: Policy topic
     _print_step_header(1, "Policy Topic")
     console.print(
@@ -235,10 +244,10 @@ async def run_interactive_cli() -> GenerationConfig:
         )
     )
 
-    questions = await _question_approval_workflow(topic, n_questions)
+    questions = await _question_approval_workflow(client, topic, n_questions)
 
     # Step 4: Policy Context Fields
-    policy_context_fields = await _context_field_workflow(topic, questions)
+    policy_context_fields = await _context_field_workflow(client, topic, questions)
 
     # Step 5: Number of responses
     _print_step_header(5, "Number of Responses")
@@ -296,6 +305,7 @@ async def run_interactive_cli() -> GenerationConfig:
         spinner="dots",
     ):
         suggested_name = await generate_dataset_name(
+            client=client,
             topic=topic,
             questions=[q.text for q in questions],
         )
@@ -342,7 +352,9 @@ async def run_interactive_cli() -> GenerationConfig:
 
 
 async def _question_approval_workflow(
-    topic: str, n_questions: int
+    client: openai.AsyncAzureOpenAI,
+    topic: str,
+    n_questions: int,
 ) -> list[QuestionConfig]:
     """Interactive workflow for generating and approving questions.
 
@@ -364,6 +376,7 @@ async def _question_approval_workflow(
             spinner="dots",
         ):
             generated = await generate_questions(
+                client=client,
                 topic=topic,
                 n_questions=remaining,
                 existing_questions=approved_texts if approved_texts else None,
@@ -374,6 +387,7 @@ async def _question_approval_workflow(
                 break
 
             question_config = await _review_single_question(
+                client,
                 gen_q,
                 topic,
                 len(approved_questions) + 1,
@@ -400,6 +414,7 @@ async def _question_approval_workflow(
 
 
 async def _context_field_workflow(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     questions: list[QuestionConfig],
 ) -> list[DemographicField]:
@@ -433,6 +448,7 @@ async def _context_field_workflow(
         spinner="dots",
     ):
         context_fields = await generate_context_fields(
+            client=client,
             topic=topic,
             questions=questions,
             n_fields=4,
@@ -469,6 +485,7 @@ async def _context_field_workflow(
                 spinner="dots",
             ):
                 context_fields = await regenerate_context_fields(
+                    client=client,
                     topic=topic,
                     questions=questions,
                     feedback=feedback,
@@ -516,6 +533,7 @@ def _display_context_fields(fields: list[DemographicField]) -> None:
 
 
 async def _review_single_question(
+    client: openai.AsyncAzureOpenAI,
     gen_q: GeneratedQuestion,
     topic: str,
     question_num: int,
@@ -610,6 +628,7 @@ async def _review_single_question(
                 spinner="dots",
             ):
                 gen_q = await regenerate_single_question(
+                    client=client,
                     topic=topic,
                     rejected_question=gen_q.question_text,
                     feedback=feedback,

@@ -181,13 +181,13 @@ def _validate_outputs(
                 theme_ids = {t["topic_id"] for t in themes}
 
                 # Check special themes
-                if "X" not in theme_ids:
+                if "XX" not in theme_ids:
                     errors.append(
-                        f"Missing special theme X in {themes_file.relative_to(dataset_path)}"
+                        f"Missing special theme XX in {themes_file.relative_to(dataset_path)}"
                     )
-                if "Y" not in theme_ids:
+                if "XY" not in theme_ids:
                     errors.append(
-                        f"Missing special theme Y in {themes_file.relative_to(dataset_path)}"
+                        f"Missing special theme XY in {themes_file.relative_to(dataset_path)}"
                     )
             except json.JSONDecodeError as e:
                 errors.append(f"Invalid JSON in {qp_name}/themes.json: {e}")
