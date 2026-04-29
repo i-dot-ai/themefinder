@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 
 import numpy as np
-from langchain_openai import AzureChatOpenAI
+import openai
 from rich.progress import Progress, TaskID
 
 from synthetic.config import (
@@ -40,21 +40,18 @@ class SyntheticDatasetGenerator:
     def __init__(
         self,
         config: GenerationConfig,
-        llm: AzureChatOpenAI,
-        callbacks: list | None = None,
+        llm: tuple[openai.AsyncAzureOpenAI, str],
         seed: int = 42,
     ) -> None:
         """Initialise generator with configuration.
 
         Args:
             config: Generation configuration.
-            llm: Azure OpenAI LLM for response generation.
-            callbacks: LangChain callbacks for tracing.
+            llm: Tuple of (AsyncAzureOpenAI client, deployment name) for response generation.
             seed: Random seed for reproducibility.
         """
         self.config = config
         self.llm = llm
-        self.callbacks = callbacks or []
         self.rng = np.random.default_rng(seed)
         self.writer = DatasetWriter(config.output_dir)
 
@@ -103,11 +100,12 @@ class SyntheticDatasetGenerator:
 
         async def generate_themes_for_question(question_config):
             """Generate themes for a single question."""
+            client, _ = self.llm
             themes = await generate_themes(
+                client=client,
                 topic=self.config.topic,
                 question=question_config.text,
                 demographic_fields=self.config.demographic_fields,
-                callbacks=self.callbacks,
                 on_fan_out_complete=on_fan_out_complete,
             )
             logger.info(
@@ -199,7 +197,6 @@ class SyntheticDatasetGenerator:
                 questions=self.config.questions,
                 themes_by_question=themes_by_question,
                 noise_level=self.config.noise_level,
-                callbacks=self.callbacks,
                 on_response_complete=on_response_complete,
             )
 

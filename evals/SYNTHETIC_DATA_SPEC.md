@@ -99,8 +99,8 @@ This specification defines the output schema and requirements for generating syn
 | `topic` | string | Yes | Combined `{label}: {description}` |
 
 **Special Themes (always include):**
-- `X`: "None of the Above" - Response doesn't match any theme
-- `Y`: "No Reason Given" - Response lacks substantive content
+- `XX`: "None of the Above" - Response doesn't match any theme
+- `XY`: "No Reason Given" - Response lacks substantive content
 
 ---
 
@@ -135,7 +135,7 @@ This specification defines the output schema and requirements for generating syn
 **Constraints:**
 - `labels` and `stances` arrays must have equal length
 - `labels` must reference valid `topic_id` values from themes.json
-- Empty `labels` not permitted (use `X` or `Y` for edge cases)
+- Empty `labels` not permitted (use `XX` or `XY` for edge cases)
 
 ---
 
@@ -212,8 +212,8 @@ The generator MUST produce responses that include:
 
 - Each theme MUST have at least `n_responses * 0.02` mappings (2% minimum coverage)
 - No single theme should exceed 40% of mappings
-- Theme `X` (None of Above) should be 2-5% of responses
-- Theme `Y` (No Reason) should be 1-3% of responses
+- Theme `XX` (None of Above) should be 2-5% of responses
+- Theme `XY` (No Reason) should be 1-3% of responses
 
 ---
 
@@ -284,7 +284,7 @@ Before a generated dataset is considered valid:
 - [ ] Theme count within 80-120% of target
 - [ ] Position distribution within ±10% of requested
 - [ ] No duplicate response_id within a question part
-- [ ] Special themes X and Y present in all theme sets
+- [ ] Special themes XX and XY present in all theme sets
 - [ ] Date folder uses ISO format (YYYY-MM-DD)
 
 ---

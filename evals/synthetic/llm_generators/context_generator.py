@@ -7,14 +7,11 @@ characteristics that influence how respondents answer.
 
 import asyncio
 import logging
-import os
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import AzureChatOpenAI
+import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from synthetic.config import DemographicField, QuestionConfig
-from structured_output import with_structured_output
 
 logger = logging.getLogger(__name__)
 
@@ -96,31 +93,11 @@ Generate 3-5 context fields that capture the most important respondent character
 for understanding perspectives on this policy."""
 
 
-def _get_context_llm(callbacks: list | None = None) -> AzureChatOpenAI:
-    """Create LLM instance for context field generation.
-
-    Args:
-        callbacks: LangChain callbacks for tracing.
-
-    Returns:
-        Configured AzureChatOpenAI instance.
-    """
-    return AzureChatOpenAI(
-        azure_deployment="gpt-5-mini",
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
-        reasoning_effort="medium",
-        callbacks=callbacks or [],
-        timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
-    )
-
-
 async def generate_context_fields(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     questions: list[QuestionConfig],
     n_fields: int = 4,
-    callbacks: list | None = None,
 ) -> list[DemographicField]:
     """Generate policy-specific context fields using LLM.
 
@@ -128,14 +105,10 @@ async def generate_context_fields(
         topic: Consultation topic.
         questions: List of consultation questions (for context).
         n_fields: Target number of context fields to generate (3-5).
-        callbacks: LangChain callbacks for tracing.
 
     Returns:
         List of DemographicField objects with is_policy_context=True.
     """
-    llm = _get_context_llm(callbacks)
-    structured_llm = with_structured_output(llm, ContextFieldSet)
-
     # Format questions for context
     questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
 
@@ -157,8 +130,8 @@ Focus on characteristics that would genuinely affect how someone views this poli
 Avoid generic demographics (age, region, etc.) - those are handled separately."""
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=human_prompt),
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": human_prompt},
     ]
 
     # Retry loop for transient LLM errors
@@ -167,9 +140,20 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
 
     for attempt in range(MAX_RETRIES):
         try:
-            result = await structured_llm.ainvoke(messages)
+            result = (
+                (
+                    await client.beta.chat.completions.parse(
+                        model="gpt-5-mini",
+                        messages=messages,
+                        response_format=ContextFieldSet,
+                        reasoning_effort="medium",
+                    )
+                )
+                .choices[0]
+                .message.parsed
+            )
             break
-        except (ValidationError, Exception) as e:
+        except Exception as e:
             last_error = e
             error_type = type(e).__name__
 
@@ -221,27 +205,24 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
 
 
 async def regenerate_context_fields(
+    client: openai.AsyncAzureOpenAI,
     topic: str,
     questions: list[QuestionConfig],
     feedback: str,
     n_fields: int = 4,
-    callbacks: list | None = None,
 ) -> list[DemographicField]:
     """Regenerate context fields based on user feedback.
 
     Args:
+        client: Azure OpenAI client.
         topic: Consultation topic.
         questions: List of consultation questions.
         feedback: User's feedback on what to change.
         n_fields: Target number of context fields.
-        callbacks: LangChain callbacks for tracing.
 
     Returns:
         List of regenerated DemographicField objects.
     """
-    llm = _get_context_llm(callbacks)
-    structured_llm = with_structured_output(llm, ContextFieldSet)
-
     questions_text = "\n".join(f"{q.number}. {q.text}" for q in questions)
 
     human_prompt = f"""Regenerate policy-specific context questions for this UK government consultation,
@@ -261,8 +242,8 @@ Generate {n_fields} improved context questions that address the feedback.
 Focus on characteristics directly relevant to this policy."""
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
-        HumanMessage(content=human_prompt),
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": human_prompt},
     ]
 
     # Retry loop
@@ -271,9 +252,20 @@ Focus on characteristics directly relevant to this policy."""
 
     for attempt in range(MAX_RETRIES):
         try:
-            result = await structured_llm.ainvoke(messages)
+            result = (
+                (
+                    await client.beta.chat.completions.parse(
+                        model="gpt-5-mini",
+                        messages=messages,
+                        response_format=ContextFieldSet,
+                        reasoning_effort="medium",
+                    )
+                )
+                .choices[0]
+                .message.parsed
+            )
             break
-        except (ValidationError, Exception) as e:
+        except Exception as e:
             last_error = e
             error_type = type(e).__name__
 
