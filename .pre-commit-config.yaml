@@ -3,14 +3,14 @@
 repos:
 
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v6.0.0
     hooks:
       - id: check-added-large-files
         name: Check for files larger than 5 MB
         args: [ "--maxkb=5120" ]
 
   - repo: https://github.com/Yelp/detect-secrets
-    rev: v1.4.0
+    rev: v1.5.0
     hooks:
     -   id: detect-secrets
         exclude: (poetry.lock|.env.example|.env.test|^.github/workflows/|.cruft.json)
@@ -32,13 +32,13 @@ repos:
         entry: ':\d{12}:'
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.7
+    rev: v0.15.11
     hooks:
       - id: ruff
       - id: ruff-format
 
 
   - repo: https://github.com/kynan/nbstripout
-    rev: 0.7.1
+    rev: 0.9.1
     hooks:
       - id: nbstripout
