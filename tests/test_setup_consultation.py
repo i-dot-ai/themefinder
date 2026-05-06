@@ -224,21 +224,17 @@ def _responses(data: dict, n: int = 10) -> tuple[pd.DataFrame, dict[str, str]]:
 
 def test_validate_data_clean(capsys):
     """Happy path: well-formed data produces no issues."""
-    n = 10
+    n = 30
     df, headers = _responses(
         {
             "Response ID": list(range(n)),
             "Please tell us your views on this proposal": [
                 f"Unique response number {i} about the policy topic" for i in range(n)
             ],
-            "Which option best describes your view": [
-                "Agree",
-                "Disagree",
-                "Strongly agree",
-            ]
-            * 3
-            + ["Agree"],
-            "Region": ["North"] * 5 + ["South"] * 5,
+            "Which option best describes your view": (
+                ["Agree", "Disagree", "Strongly agree"] * (n // 3)
+            ),
+            "Region": ["North"] * (n // 2) + ["South"] * (n - n // 2),
         },
         n,
     )
