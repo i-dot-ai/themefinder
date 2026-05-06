@@ -325,12 +325,22 @@ def validate_data(
         issues.append(f"Q.U. references missing columns: {', '.join(missing_cols)}")
 
     # ── Column data type checks ─────────────────────────────────────────
-    # Multichoice columns should have few unique values and few distinct
-    # options after comma-splitting. Free-text columns should have high
-    # uniqueness. These checks catch misclassified question types.
-    MAX_EXPECTED_OPTIONS = 10
-    CLOSED_UNIQUENESS_THRESHOLD = 0.3
-    OPEN_UNIQUENESS_THRESHOLD = 0.3
+    # Open vs closed is decided purely by uniqueness ratio (n_unique /
+    # n_responses). Empirically (see analyse_open_closed_detector.py) a
+    # threshold of 0.2 separates the two classes well: closed columns sit
+    # well below it and free-text columns well above.
+    UNIQUENESS_RATIO_THRESHOLD = 0.2
+
+    def _uniqueness_ratio(col_id: str) -> tuple[int, int, float] | None:
+        """Return (n_unique, n_responses, ratio) for a column, or None if empty."""
+        if col_id not in responses_df.columns:
+            return None
+        series = responses_df[col_id].dropna().astype(str)
+        n_responses = len(series)
+        if n_responses == 0:
+            return None
+        n_unique = int(series.nunique())
+        return n_unique, n_responses, n_unique / n_responses
 
     def _check_looks_like_multichoice(
         col_id: str,
@@ -338,40 +348,22 @@ def validate_data(
         sheet_key: str,
         col_role: str,
     ) -> None:
-        """Warn if a column expected to be multichoice looks like free text."""
-        if col_id not in responses_df.columns:
+        """Warn if a closed column has a uniqueness ratio above the threshold."""
+        stats = _uniqueness_ratio(col_id)
+        if stats is None:
             return
-        series = responses_df[col_id].dropna().astype(str)
-        n_responses = len(series)
-        if n_responses == 0:
+        n_unique, n_responses, ratio = stats
+        if ratio <= UNIQUENESS_RATIO_THRESHOLD:
             return
         sheet_name = QU_SHEET_SPECS[sheet_key][0]
-
-        # Gather both signals, report as one warning
-        problems: list[str] = []
-
-        all_options: set[str] = set()
-        for cell in series:
-            all_options.update(item.strip() for item in cell.split(","))
-        if len(all_options) > MAX_EXPECTED_OPTIONS:
-            problems.append(
-                f"{len(all_options)} unique options after comma-split (expected ≤{MAX_EXPECTED_OPTIONS})"
-            )
-
-        n_unique = series.nunique()
-        ratio = n_unique / n_responses
-        if ratio > CLOSED_UNIQUENESS_THRESHOLD:
-            problems.append(
-                f"{n_unique}/{n_responses} responses are unique ({ratio:.0%}, expected ≤{CLOSED_UNIQUENESS_THRESHOLD:.0%})"
-            )
-
-        if problems:
-            msg = (
-                f'Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet "{sheet_name}" — '
-                f"looks like free text, not multichoice: {'; '.join(problems)}"
-            )
-            print(f"\n  ⚠ {msg}")
-            issues.append(msg)
+        msg = (
+            f'Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet "{sheet_name}" — '
+            f"looks like free text, not multichoice: "
+            f"{n_unique}/{n_responses} responses are unique "
+            f"({ratio:.0%}, expected ≤{UNIQUENESS_RATIO_THRESHOLD:.0%})"
+        )
+        print(f"\n  ⚠ {msg}")
+        issues.append(msg)
 
     def _check_looks_like_free_text(
         col_id: str,
@@ -379,25 +371,22 @@ def validate_data(
         sheet_key: str,
         col_role: str,
     ) -> None:
-        """Warn if a column expected to be free text looks like multichoice."""
-        if col_id not in responses_df.columns:
+        """Warn if an open column has a uniqueness ratio below the threshold."""
+        stats = _uniqueness_ratio(col_id)
+        if stats is None:
             return
-        series = responses_df[col_id].dropna().astype(str)
-        n_responses = len(series)
-        if n_responses == 0:
+        n_unique, n_responses, ratio = stats
+        if ratio >= UNIQUENESS_RATIO_THRESHOLD:
             return
         sheet_name = QU_SHEET_SPECS[sheet_key][0]
-        n_unique = series.nunique()
-        ratio = n_unique / n_responses
-        if ratio < OPEN_UNIQUENESS_THRESHOLD:
-            msg = (
-                f'Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet "{sheet_name}" — '
-                f"only {n_unique}/{n_responses} responses are unique ({ratio:.0%}) — "
-                f"expected >{OPEN_UNIQUENESS_THRESHOLD:.0%} for free text. "
-                f'Should this be on the "Multiple Choice" sheet instead?'
-            )
-            print(f"\n  ⚠ {msg}")
-            issues.append(msg)
+        msg = (
+            f'Column {col_id} (Q{q_num}, {col_role}) — on Q.U. sheet "{sheet_name}" — '
+            f"only {n_unique}/{n_responses} responses are unique ({ratio:.0%}) — "
+            f"expected >{UNIQUENESS_RATIO_THRESHOLD:.0%} for free text. "
+            f'Should this be on the "Multiple Choice" sheet instead?'
+        )
+        print(f"\n  ⚠ {msg}")
+        issues.append(msg)
 
     for sheet_key in ("closed", "hybrid", "open"):
         df = question_sheets.get(sheet_key)
@@ -636,7 +625,7 @@ def _clean_text_column(series: pd.Series) -> pd.Series:
     series = series.astype(str).str.encode("ascii", "ignore").str.decode("ascii")
     for bad_string in CHARACTERS_TO_REMOVE:
         series = series.apply(lambda x, bs=bad_string: x.replace(bs, " "))
-    return series
+    return series.str.strip()
 
 
 def create_question_inputs(
