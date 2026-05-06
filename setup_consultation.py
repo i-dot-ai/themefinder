@@ -636,7 +636,7 @@ def _clean_text_column(series: pd.Series) -> pd.Series:
     series = series.astype(str).str.encode("ascii", "ignore").str.decode("ascii")
     for bad_string in CHARACTERS_TO_REMOVE:
         series = series.apply(lambda x, bs=bad_string: x.replace(bs, " "))
-    return series
+    return series.str.strip()
 
 
 def create_question_inputs(
