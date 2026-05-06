@@ -541,14 +541,10 @@ def test_create_question_inputs_strips_response_text_whitespace(tmp_path):
             ],
         }
     )
-    questions = [
-        {"question_number": 1, "column_name": "C", "question_text": "Why?"}
-    ]
+    questions = [{"question_number": 1, "column_name": "C", "question_text": "Why?"}]
     create_question_inputs(df, questions, "open", tmp_path)
 
-    lines = (
-        (tmp_path / "question_part_1" / "responses.jsonl").read_text().splitlines()
-    )
+    lines = (tmp_path / "question_part_1" / "responses.jsonl").read_text().splitlines()
     rows = [json.loads(line) for line in lines]
     assert rows[0]["text"] == "leading spaces"
     assert rows[1]["text"] == "trailing spaces"
