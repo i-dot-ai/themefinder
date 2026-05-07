@@ -129,59 +129,6 @@ ThemeFinder's structured output approach makes it compatible with a wide range o
 - Mistral models (e.g., Mistral 7B, Mixtral)
 
 
-## Setting up a consultation
-
-To set up a new consultation, run:
-
-```bash
-make setup-consultation NAME=my_consultation
-```
-
-Or without a name (you'll be prompted):
-
-```bash
-make setup-consultation
-```
-
-This will:
-1. Create a folder under `./consultations/<name>/`
-2. Prompt you to copy in the consultation response data and template question understanding file
-3. Ask you to identify which file is which
-4. Process the data and generate the required input files under `./consultations/<name>/inputs/`
-5. Upload the files to S3 to `i-dot-ai-prod-consult-data/app_data/consultations/<name>/inputs/`
-
-#### Optional flags
-
-| Makefile variable | Description |
-|---|---|
-| `UNTIL=validate` | Stop after validation — no files are written and no upload is performed. Useful for a quick sanity-check. |
-| `UNTIL=build` | Validate and write local files, but skip uploading to S3. |
-| `DIR=<path>` | Path to an existing consultation directory (skips the interactive prompt to create one). |
-| `RESPONSES=<path>` | Path to the response data file (skips file-selection prompt). |
-| `QU=<path>` | Path to the question understanding Excel file (skips file-selection prompt). |
-
-By default, the pipeline runs all three stages: **validate → build → upload**.
-
-Examples:
-
-```bash
-# Full pipeline (validate + build + upload to S3)
-make setup-consultation NAME=my_consultation
-
-# Validate only
-make setup-consultation NAME=my_consultation UNTIL=validate
-
-# Build files locally without uploading with file paths specified
-make setup-consultation NAME=my_consultation \
-    RESPONSES=path/to/responses.xlsx \
-    QU=path/to/question_understanding.xlsx \
-    UNTIL=build
-
-```
-
-For further instructions on setting up the consultation in the app, see the [Confluence guide](https://incubatorforartificialintelligence.atlassian.net/wiki/spaces/Consult/pages/136445956/1.2+Set+up+the+consultation+in+the+app).
-
-
 ## Development
 
 This project uses [uv](https://docs.astral.sh/uv/) for dependency management.

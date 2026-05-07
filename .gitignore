@@ -98,6 +98,3 @@ evals/benchmark_results/
 benchmark_report_*.html
 
 consultations/
-
-# Pytest fixtures
-!tests/fixtures/setup_consultation/*
