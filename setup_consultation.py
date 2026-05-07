@@ -326,7 +326,7 @@ def validate_data(
 
     # ── Column data type checks ─────────────────────────────────────────
     # Open vs closed is decided purely by uniqueness ratio (n_unique /
-    # n_responses). Empirically (see analyse_open_closed_detector.py) a
+    # n_responses). Empirically  a
     # threshold of 0.2 separates the two classes well: closed columns sit
     # well below it and free-text columns well above.
     UNIQUENESS_RATIO_THRESHOLD = 0.2
