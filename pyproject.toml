@@ -32,6 +32,10 @@ dependencies = [
     "cryptography>=46.0.7",
     "tenacity>=8.0.0",
     "tiktoken>=0.5.0",
+    "urllib3==2.7.0",
+    "idna==3.15",
+    "requests==2.33.0",
+    "pygments==2.20.0",
 ]
 
 [project.optional-dependencies]
