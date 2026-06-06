@@ -22,7 +22,7 @@ dependencies = [
     "boto3>=1.29",
     "scikit-learn",
     "openpyxl>=3.1.5",
-    "pyarrow>=15.0.0",
+    "pyarrow==23.0.1",
     "toml>=0.10.2",
     "nest-asyncio>=1.6.0",
     "rich>=13.0.0",
@@ -32,6 +32,10 @@ dependencies = [
     "cryptography>=46.0.7",
     "tenacity>=8.0.0",
     "tiktoken>=0.5.0",
+    "urllib3==2.7.0",
+    "requests==2.33.0",
+    "idna==3.15",
+    "pygments==2.20.0",
 ]
 
 [project.optional-dependencies]
