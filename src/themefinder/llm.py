@@ -6,11 +6,14 @@ and an OpenAI implementation. Designed for easy extension to other providers.
 
 import asyncio
 import concurrent.futures
+import logging
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import openai
 from pydantic import BaseModel
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 @dataclass
