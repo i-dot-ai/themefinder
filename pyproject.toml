@@ -65,3 +65,10 @@ omit = ["setup_consultation.py"]
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
+
+[tool.uv]
+override-dependencies = [
+    "pandas==3.0.4 ; python_version >= '3.11'",
+    "numpy>=2.4.5 ; python_version >= '3.11'",
+    "pyarrow>=23.0.1 ; python_version >= '3.11'",
+]
