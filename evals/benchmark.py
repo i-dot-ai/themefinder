@@ -1,29 +1,23 @@
 #!/usr/bin/env python
 """Multi-model benchmark runner for ThemeFinder evaluations.
 
-Runs evaluations across Azure OpenAI and GCP Vertex AI models (Gemini + Claude)
-with configurable hyperparameters, tracks results in Langfuse, and generates
-summary tables.
+Runs evaluations across chat models discovered dynamically from the LLM
+gateway, with configurable hyperparameters, tracks results in Langfuse, and
+generates summary tables.
 
 Usage:
-    # All models (default)
-    uv run python benchmark.py --dataset housing_S --runs 3
+    # Every healthy chat model on the gateway
+    uv run python benchmark.py --all --dataset housing_S --runs 3
 
-    # Azure OpenAI models only
-    uv run python benchmark.py --provider azure --dataset housing_S
+    # One or more vendor families
+    uv run python benchmark.py --family gpt --dataset housing_S
+    uv run python benchmark.py --family gemini claude --dataset housing_S
 
-    # locai models only
-    uv run python benchmark.py --provider locai --dataset housing_S
-
-    # Vertex AI models only (Gemini + Claude)
-    uv run python benchmark.py --provider vertex --dataset bbc_mission_public_purposes
-
-    # Specific models across providers
-    uv run python benchmark.py --models gpt-4o gemini-2.5-flash claude-haiku-4.5
+    # Specific models by exact gateway name
+    uv run python benchmark.py --models gpt-4o-uk gemini-3.5-flash-uk
 
 Requires:
     - LLM_GATEWAY_URL and CONSULT_EVAL_LITELLM_API_KEY env vars
-    - Vertex: Not yet implemented (TODO)
 """
 
 import argparse
@@ -36,13 +30,13 @@ import time
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
 import dotenv
 import nest_asyncio
 import pandas as pd
+import utils_gateway
 from rich.console import Console
 from rich.table import Table
 from themefinder.llm import OpenAILLM
@@ -65,15 +59,6 @@ except ImportError:
 # Fix DNS resolution issues with gRPC 1.58.0+ (must be set before gRPC imports)
 # Switches from buggy C-ares resolver to native resolver
 os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
-
-
-class LLMProvider(str, Enum):
-    """Supported LLM providers."""
-
-    AZURE_OPENAI = "azure_openai"
-    VERTEX_GEMINI = "vertex_gemini"
-    VERTEX_CLAUDE = "vertex_claude"
-    LOCAI = "locai"
 
 
 import langfuse_utils  # noqa: E402
@@ -164,38 +149,25 @@ class BenchmarkLogFilter(logging.Filter):
 
 @dataclass
 class ModelConfig:
-    """Configuration for a single model variant.
+    """Configuration for a single model variant, resolved from the gateway.
 
-    Supports Azure OpenAI, GCP Vertex AI (Gemini), and Vertex AI (Claude) models.
+    `name` is the gateway's model_group name — used both for display and as
+    the `model=` value sent to the gateway, since dynamic discovery means
+    there's no separate internal alias to translate through anymore.
     """
 
-    name: str  # Display name for results
-    deployment: str  # Model ID (Azure deployment name or Vertex model ID)
-    provider: LLMProvider = LLMProvider.AZURE_OPENAI
-
-    # Azure-specific
-    reasoning_effort: str | None = None  # For gpt-5 models: low, medium, high
-
-    # Vertex AI-specific
-    project_id: str | None = None  # Falls back to GOOGLE_CLOUD_PROJECT env var
-    location: str = "global"  # Vertex AI region
-    thinking_budget: int | None = None  # For Gemini/Claude thinking tokens (e.g., 2048)
-
-    # Common
+    name: str
+    reasoning_effort: str | None = None  # low/medium/high, for reasoning-capable models
     temperature: float = 0.0
     timeout: int = 600  # 10 min default
 
     def create_llm(self) -> OpenAILLM:
         """Create an OpenAILLM instance via the LLM gateway."""
-        if self.provider in (LLMProvider.VERTEX_GEMINI, LLMProvider.VERTEX_CLAUDE):
-            raise NotImplementedError(
-                f"TODO: implement OpenAILLM adapter for {self.provider.value}"
-            )
         request_kwargs: dict[str, Any] = {}
         if not self.reasoning_effort:
             request_kwargs["temperature"] = self.temperature
         return OpenAILLM(
-            model=self.deployment,
+            model=self.name,
             request_kwargs=request_kwargs,
             base_url=os.getenv("LLM_GATEWAY_URL"),
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
@@ -207,89 +179,23 @@ class ModelConfig:
         """Tag for Langfuse identification."""
         if self.reasoning_effort:
             return f"{self.name}_{self.reasoning_effort}"
-        if self.thinking_budget:
-            return f"{self.name}_thinking{self.thinking_budget}"
         return self.name
 
 
-# All available model configurations by provider
-# Azure OpenAI models - use dated versions that support structured outputs
-AZURE_MODELS = [
-    ModelConfig(name="gpt-4o", deployment="gpt-4o-2024-08-06-sweden"),
-    ModelConfig(name="gpt-4.1", deployment="gpt-4.1-sweden-2025-03"),
-    ModelConfig(name="gpt-4.1-mini", deployment="gpt-4.1-mini"),
-    ModelConfig(name="gpt-5-nano", deployment="gpt-5-nano", reasoning_effort="low"),
-    ModelConfig(name="gpt-5-mini", deployment="gpt-5-mini", reasoning_effort="low"),
-]
+def _to_model_configs(
+    gateway_model: utils_gateway.GatewayModel, reasoning_efforts: list[str]
+) -> list[ModelConfig]:
+    """Expand one gateway model into one ModelConfig per requested effort level.
 
-# Vertex AI models (Gemini and Claude)
-# Requires: uv pip install -e ".[vertex]" and GOOGLE_CLOUD_PROJECT env var
-VERTEX_MODELS = [
-    # Gemini models - standard (no thinking)
-    ModelConfig(
-        name="gemini-2.5-flash",
-        deployment="gemini-2.5-flash",
-        provider=LLMProvider.VERTEX_GEMINI,
-    ),
-    ModelConfig(
-        name="gemini-2.5-flash-lite",
-        deployment="gemini-2.5-flash-lite",
-        provider=LLMProvider.VERTEX_GEMINI,
-    ),
-    ModelConfig(
-        name="gemini-3-flash-preview",
-        deployment="gemini-3-flash-preview",
-        provider=LLMProvider.VERTEX_GEMINI,
-    ),
-    # Gemini thinking models removed: thinking_budget conflicts with
-    # structured output in google-genai SDK, causing empty {} responses.
-    # See: https://github.com/googleapis/python-genai/issues/782
-    # ModelConfig(
-    #     name="gemini-2.5-pro",
-    #     deployment="gemini-2.5-pro",
-    #     provider=LLMProvider.VERTEX_GEMINI,
-    # ),
-    # Claude models via Vertex AI Model Garden - standard (no thinking)
-    ModelConfig(
-        name="claude-haiku-4.5",
-        deployment="claude-haiku-4-5@20251001",
-        provider=LLMProvider.VERTEX_CLAUDE,
-    ),
-    # Claude thinking model disabled: thinking_budget conflicts with
-    # tool_choice in ThemeFinder pipeline (structured output requires forced tool use).
-    # See: "Thinking may not be enabled when tool_choice forces tool use."
-    # ModelConfig(
-    #     name="claude-haiku-4.5-thinking",
-    #     deployment="claude-haiku-4-5@20251001",
-    #     provider=LLMProvider.VERTEX_CLAUDE,
-    #     thinking_budget=2048,
-    # ),
-    # ModelConfig(
-    #     name="claude-sonnet-4.5",
-    #     deployment="claude-sonnet-4-5@20250929",
-    #     provider=LLMProvider.VERTEX_CLAUDE,
-    # ),
-]
-
-# Locai models
-LOCAI_MODELS = [
-    ModelConfig(
-        name="locailabs/locai-l1-large-2011",
-        deployment="locailabs/locai-l1-large-2011",
-        provider=LLMProvider.LOCAI,
-    ),
-]
-
-# Combined model registry by provider
-MODEL_REGISTRY: dict[str, list[ModelConfig]] = {
-    "azure": AZURE_MODELS,
-    "vertex": VERTEX_MODELS,
-    "locai": LOCAI_MODELS,
-    "all": AZURE_MODELS + VERTEX_MODELS + LOCAI_MODELS,
-}
-
-# Default models (Azure) for backwards compatibility
-DEFAULT_MODELS = AZURE_MODELS
+    Only reasoning-capable models are affected — everything else always gets
+    exactly one config, regardless of --reasoning-effort.
+    """
+    if not gateway_model.supports_reasoning:
+        return [ModelConfig(name=gateway_model.name)]
+    return [
+        ModelConfig(name=gateway_model.name, reasoning_effort=effort)
+        for effort in reasoning_efforts
+    ]
 
 
 @dataclass
@@ -297,7 +203,7 @@ class BenchmarkConfig:
     """Configuration for a benchmark run."""
 
     dataset: str
-    models: list[ModelConfig] = field(default_factory=lambda: DEFAULT_MODELS)
+    models: list[ModelConfig]
     runs_per_model: int = 5
     evals: list[str] = field(
         default_factory=lambda: [
@@ -307,9 +213,7 @@ class BenchmarkConfig:
             "refinement",
         ]
     )
-    judge_model: str | None = (
-        None  # Azure deployment name for judge LLM (e.g. "gpt-4o-2024-08-06")
-    )
+    judge_model: str | None = None  # Gateway model name for judge LLM (e.g. "gpt-4o-uk")
 
 
 @dataclass
@@ -390,55 +294,53 @@ class BenchmarkRunner:
         )
         runs_per_model = self.config.runs_per_model * len(self.config.evals)
 
-        # Group models by deployment to avoid rate limit contention
-        deployment_groups: dict[str, list[ModelConfig]] = {}
+        # Group by name to avoid rate-limit contention: --reasoning-effort can
+        # produce multiple ModelConfigs sharing one gateway model (e.g. the
+        # same model at low/medium/high), and those share one underlying
+        # deployment, so they're run sequentially within a group rather than
+        # firing concurrent requests at the same rate-limited resource.
+        # Distinct models (different groups) still run fully in parallel.
+        name_groups: dict[str, list[ModelConfig]] = {}
         for model in self.config.models:
-            if model.deployment not in deployment_groups:
-                deployment_groups[model.deployment] = []
-            deployment_groups[model.deployment].append(model)
+            name_groups.setdefault(model.name, []).append(model)
 
         console.print(
             f"\n[bold cyan]Starting Benchmark: {self.benchmark_id}[/bold cyan]"
         )
         console.print(f"  Dataset: {self.config.dataset}")
         console.print(
-            f"  Models: {len(self.config.models)} across {len(deployment_groups)} deployments"
-        )
-        console.print(
-            "  Strategy: [bold]parallel by deployment, sequential within[/bold]"
+            f"  Models: {len(self.config.models)} across {len(name_groups)} distinct"
         )
         console.print(f"  Runs per model: {self.config.runs_per_model}")
         console.print(f"  Evals: {', '.join(self.config.evals)}")
         console.print(f"  Total runs: {total_runs} ({runs_per_model} per model)\n")
 
-        # Run deployment groups in parallel, models within each group sequentially
-        deployment_tasks = [
-            self._run_deployment_group(deployment, models)
-            for deployment, models in deployment_groups.items()
+        # Run distinct-model groups in parallel; variants within a group sequentially
+        group_tasks = [
+            self._run_model_group(name, models) for name, models in name_groups.items()
         ]
-        results = await asyncio.gather(*deployment_tasks, return_exceptions=True)
+        results = await asyncio.gather(*group_tasks, return_exceptions=True)
 
-        # Report any deployment-level failures
-        for deployment, result in zip(deployment_groups.keys(), results):
+        # Report any group-level failures
+        for name, result in zip(name_groups.keys(), results):
             if isinstance(result, Exception):
-                console.print(f"[bold red][{deployment}] FAILED: {result}[/bold red]")
+                console.print(f"[bold red][{name}] FAILED: {result}[/bold red]")
 
         return self.results
 
-    async def _run_deployment_group(
-        self, deployment: str, models: list[ModelConfig]
+    async def _run_model_group(
+        self, name: str, models: list[ModelConfig]
     ) -> list[RunResult]:
-        """Run all models for a deployment sequentially to avoid rate limit contention."""
-        console.print(
-            f"[dim][{deployment}] Starting {len(models)} model variant(s)[/dim]"
-        )
-        group_results = []
+        """Run all variants (e.g. reasoning-effort levels) of one model sequentially.
 
+        Sequential on purpose: variants share one underlying gateway
+        deployment, so running them concurrently would contend for that
+        deployment's rate limit instead of just this group's own pacing.
+        """
+        group_results = []
         for model_config in models:
             model_results = await self._run_model(model_config)
             group_results.extend(model_results)
-
-        console.print(f"[bold green][{deployment}] All variants complete![/bold green]")
         return group_results
 
     async def _run_model(self, model_config: ModelConfig) -> list[RunResult]:
@@ -565,7 +467,6 @@ class BenchmarkRunner:
                 "benchmark_id": self.benchmark_id,
                 "model": model_config.name,
                 "model_tag": model_config.tag,
-                "deployment": model_config.deployment,
                 "reasoning_effort": model_config.reasoning_effort,
                 "run_number": run_number,
                 "dataset": self.config.dataset,
@@ -699,11 +600,7 @@ class BenchmarkRunner:
             "evals": self.config.evals,
             "judge_model": self.config.judge_model,
             "models": [
-                {
-                    "name": m.name,
-                    "deployment": m.deployment,
-                    "reasoning_effort": m.reasoning_effort,
-                }
+                {"name": m.name, "reasoning_effort": m.reasoning_effort}
                 for m in self.config.models
             ],
         }
@@ -940,29 +837,78 @@ def print_cost_summary(cost_df: pd.DataFrame) -> None:
     console.print(table)
 
 
+def _apply_quick_preset(args: argparse.Namespace) -> None:
+    """Apply --quick's fully self-contained preset, overriding any other selector."""
+    if not args.quick:
+        return
+    args.dataset = "gambling_XS"
+    args.runs = 1
+    # TODO: hardcoded to replicate existing behaviour as-is. Discuss what we
+    # actually want --quick to run and make this configurable accordingly.
+    args.models = ["gpt-4.1-sweden-2025-03"]
+    args.family = None
+    args.all = False
+
+
+def _validate_selector_args(args: argparse.Namespace) -> str | None:
+    """Return an error message if not exactly one of --models/--family/--all was given."""
+    if sum([bool(args.models), bool(args.family), args.all]) != 1:
+        return "Exactly one of --models, --family, or --all is required."
+    return None
+
+
+def _resolve_selected_models(
+    args: argparse.Namespace, gateway_models: list[utils_gateway.GatewayModel]
+) -> tuple[list[utils_gateway.GatewayModel], list[str], list[utils_gateway.GatewayModel]]:
+    """Apply --models/--family/--all to an already-fetched gateway model list.
+
+    --models is an explicit request by exact name: the user named this model
+    deliberately, so an unhealthy match is still selected and just warned on
+    rather than silently dropped — surfacing the signal without overriding
+    their choice. --family/--all are broad, automatic selections where no
+    specific model was named, so excluding unhealthy models there is the
+    safer default (nothing explicit is being overridden by dropping them).
+
+    Returns (selected, missing, unhealthy) — plain data, caller decides how to
+    report it. `missing` is only ever populated for --models (unknown names).
+    `unhealthy` is the subset of `selected` still flagged unhealthy: always
+    empty for --family/--all (exclude_unhealthy already ran on that path), so
+    the caller doesn't need to know which selector mode produced `selected`
+    to know whether to warn — it just prints whatever's in the list.
+    """
+    if args.models:
+        selected, missing = utils_gateway.select_by_name(gateway_models, args.models)
+    else:
+        selected = utils_gateway.exclude_unhealthy(gateway_models)
+        if args.family:
+            selected = utils_gateway.filter_by_family(selected, args.family)
+        missing = []
+
+    unhealthy = [m for m in selected if m.health == "unhealthy"]
+    return selected, missing, unhealthy
+
+
 async def main():
     """Main entry point."""
     dotenv.load_dotenv()
 
     parser = argparse.ArgumentParser(
-        description="Run ThemeFinder benchmark across Azure and Vertex AI models",
+        description="Run ThemeFinder benchmark across gateway-discovered chat models",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Run all models (default)
-  uv run python benchmark.py --dataset housing_S --runs 3
+  # Every healthy chat model on the gateway
+  uv run python benchmark.py --all --dataset housing_S --runs 3
 
-  # Run Azure models only
-  uv run python benchmark.py --provider azure --dataset housing_S
+  # One or more vendor families
+  uv run python benchmark.py --family gpt --dataset housing_S
+  uv run python benchmark.py --family gemini claude --dataset housing_S
 
-  # Run Vertex AI models only (Gemini + Claude)
-  uv run python benchmark.py --provider vertex --dataset bbc_mission_public_purposes
-
-  # Run specific models by name
-  uv run python benchmark.py --models gpt-4o gemini-2.5-flash --runs 2
+  # Specific models by exact gateway name
+  uv run python benchmark.py --models gpt-4o-uk gemini-3.5-flash-uk --runs 2
 
   # Run only mapping evals
-  uv run python benchmark.py --evals mapping
+  uv run python benchmark.py --all --evals mapping
         """,
     )
     parser.add_argument(
@@ -983,71 +929,74 @@ Examples:
         help="Evaluations to run (default: all)",
     )
     parser.add_argument(
-        "--provider",
-        choices=["azure", "vertex", "locai", "all"],
-        default="all",
-        help="Provider to use: azure, vertex, locai, or all (default)",
-    )
-    parser.add_argument(
         "--models",
         nargs="+",
-        help="Specific model names/tags to run (overrides --provider)",
+        help="Exact gateway model name(s) to run",
     )
     parser.add_argument(
-        "--location",
-        default="global",
-        help="Vertex AI location (default: global)",
+        "--family",
+        nargs="+",
+        choices=utils_gateway.KNOWN_FAMILIES,
+        help="Vendor famil(y/ies) to run, e.g. --family gemini claude",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Run every healthy chat model discovered on the gateway",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        nargs="+",
+        choices=["low", "medium", "high"],
+        default=["low"],
+        help="Reasoning effort level(s) to run for reasoning-capable models "
+        "(default: low). No effect on models that don't support reasoning; "
+        "passing multiple levels runs each as a separate model variant.",
     )
     parser.add_argument(
         "--judge-model",
         default=None,
-        help="Azure deployment name for judge LLM (e.g. gpt-4o-2024-08-06). If set, judge evaluations use this model instead of the task model.",
+        help="Gateway model name for judge LLM (e.g. gpt-4o-uk). If set, judge evaluations use this model instead of the task model.",
     )
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Quick CI smoke test: gambling_XS dataset, 1 run, azure provider, gpt-4.1 only.",
+        help="Quick CI smoke test: gambling_XS dataset, 1 run, gpt-4.1-sweden-2025-03 only.",
     )
     args = parser.parse_args()
 
-    # Apply --quick preset (overrides other args)
-    if args.quick:
-        args.dataset = "gambling_XS"
-        args.runs = 1
-        args.provider = "azure"
-        args.models = ["gpt-4.1"]
+    _apply_quick_preset(args)
 
-    # Get models based on provider or specific model names
+    selector_error = _validate_selector_args(args)
+    if selector_error:
+        parser.error(selector_error)
+
+    # Dedupe --models so a copy-paste typo can't produce two variants of the
+    # same model running concurrently against each other.
     if args.models:
-        # Filter from all available models by name/tag
-        all_models = MODEL_REGISTRY["all"]
-        models = [
-            m for m in all_models if m.name in args.models or m.tag in args.models
-        ]
-        if not models:
-            available = sorted(set(m.name for m in all_models))
-            console.print(f"[red]No matching models. Available: {available}[/red]")
-            return
-    else:
-        # Use provider-based selection
-        models = MODEL_REGISTRY.get(args.provider, MODEL_REGISTRY["all"])
+        args.models = list(dict.fromkeys(args.models))
 
-    # Apply location override for Vertex models
-    if args.location != "global":
-        models = [
-            ModelConfig(
-                name=m.name,
-                deployment=m.deployment,
-                provider=m.provider,
-                reasoning_effort=m.reasoning_effort,
-                location=args.location,
-                temperature=m.temperature,
-                timeout=m.timeout,
-            )
-            if m.provider in (LLMProvider.VERTEX_GEMINI, LLMProvider.VERTEX_CLAUDE)
-            else m
-            for m in models
-        ]
+    gateway_models = await utils_gateway.discover_chat_models()
+    selected, missing, unhealthy = _resolve_selected_models(args, gateway_models)
+
+    if missing:
+        available = sorted(m.name for m in gateway_models)
+        console.print(f"[red]No matching models: {missing}. Available: {available}[/red]")
+        return
+
+    for gm in unhealthy:
+        console.print(
+            f"[yellow]Warning: {gm.name} is reported unhealthy by the gateway "
+            "— proceeding anyway[/yellow]"
+        )
+
+    if not selected:
+        console.print("[red]No models matched the given selector.[/red]")
+        return
+
+    models = [
+        mc for gm in selected for mc in _to_model_configs(gm, args.reasoning_effort)
+    ]
 
     config = BenchmarkConfig(
         dataset=args.dataset,
@@ -1060,12 +1009,8 @@ Examples:
     runner = BenchmarkRunner(config)
 
     # Print configuration summary
-    providers_used = sorted(set(m.provider.value for m in models))
     console.print("\n[bold cyan]ThemeFinder Benchmark[/bold cyan]")
-    console.print(f"  Provider(s): {', '.join(providers_used)}")
     console.print(f"  Models: {[m.name for m in models]}")
-    if any(m.provider != LLMProvider.AZURE_OPENAI for m in models):
-        console.print(f"  Vertex location: {args.location}")
     console.print()
 
     try:
