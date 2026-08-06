@@ -16,6 +16,7 @@ classifiers = [
 ]
 dependencies = [
     "openai>=1.0.0",
+    "httpx>=0.23.0",
     "pandas>=2.2.2",
     "python-dotenv>=1.0.1",
     "langfuse>=3.12.1",
