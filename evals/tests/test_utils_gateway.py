@@ -80,8 +80,61 @@ class TestDeriveFamily:
         assert utils_gateway.derive_family(name) == expected
 
 
+class TestFilterByFamily:
+    MODELS = [
+        utils_gateway.GatewayModel(name="gpt-4o", family="gpt", health="healthy"),
+        utils_gateway.GatewayModel(name="claude-haiku", family="claude", health="healthy"),
+        utils_gateway.GatewayModel(name="gemini-flash", family="gemini", health="healthy"),
+        utils_gateway.GatewayModel(name="bedrock-qwen3", family=None, health="healthy"),
+    ]
+
+    def test_single_family(self):
+        result = utils_gateway.filter_by_family(self.MODELS, ["claude"])
+        assert [m.name for m in result] == ["claude-haiku"]
+
+    def test_multiple_families(self):
+        result = utils_gateway.filter_by_family(self.MODELS, ["gemini", "claude"])
+        assert {m.name for m in result} == {"gemini-flash", "claude-haiku"}
+
+    def test_no_match_returns_empty(self):
+        assert utils_gateway.filter_by_family(self.MODELS, ["locai"]) == []
+
+
+class TestSelectByName:
+    MODELS = [
+        utils_gateway.GatewayModel(name="gpt-4o", family="gpt", health="healthy"),
+        utils_gateway.GatewayModel(name="claude-haiku", family="claude", health="unhealthy"),
+    ]
+
+    def test_all_found(self):
+        found, missing = utils_gateway.select_by_name(self.MODELS, ["gpt-4o", "claude-haiku"])
+        assert {m.name for m in found} == {"gpt-4o", "claude-haiku"}
+        assert missing == []
+
+    def test_some_missing(self):
+        found, missing = utils_gateway.select_by_name(self.MODELS, ["gpt-4o", "typo-model"])
+        assert [m.name for m in found] == ["gpt-4o"]
+        assert missing == ["typo-model"]
+
+    def test_found_model_keeps_its_health_status(self):
+        found, _ = utils_gateway.select_by_name(self.MODELS, ["claude-haiku"])
+        assert found[0].health == "unhealthy"
+
+
+class TestExcludeUnhealthy:
+    MODELS = [
+        utils_gateway.GatewayModel(name="gpt-4o", family="gpt", health="healthy"),
+        utils_gateway.GatewayModel(name="claude-haiku", family="claude", health="unhealthy"),
+        utils_gateway.GatewayModel(name="mystery-model", family=None, health="unknown"),
+    ]
+
+    def test_drops_unhealthy_keeps_healthy_and_unknown(self):
+        result = utils_gateway.exclude_unhealthy(self.MODELS)
+        assert {m.name for m in result} == {"gpt-4o", "mystery-model"}
+
+
 class TestDiscoverChatModels:
-    async def test_combines_and_filters(self, monkeypatch):
+    async def test_combines_and_resolves_unfiltered(self, monkeypatch):
         model_group_items = [
             {"model_group": "gpt-4o", "mode": "chat"},
             {"model_group": "claude-haiku", "mode": "chat"},
@@ -112,9 +165,10 @@ class TestDiscoverChatModels:
         result = await utils_gateway.discover_chat_models()
 
         by_name = {m.name: m for m in result}
-        assert set(by_name) == {"gpt-4o", "gemini-flash", "mystery-model"}
-        assert "claude-haiku" not in by_name  # unhealthy + fresh -> excluded
+        # unfiltered: non-chat excluded, but unhealthy/stale/unknown models all present
+        assert set(by_name) == {"gpt-4o", "claude-haiku", "gemini-flash", "mystery-model"}
         assert by_name["gpt-4o"].health == "healthy"
+        assert by_name["claude-haiku"].health == "unhealthy"
         assert by_name["gemini-flash"].health == "unknown"  # stale, not trusted
         assert by_name["mystery-model"].health == "unknown"  # no data at all
         assert by_name["gpt-4o"].family == "gpt"
