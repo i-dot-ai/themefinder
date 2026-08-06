@@ -21,12 +21,18 @@ STALE_AFTER = timedelta(hours=72)
 _FAMILY_SUBSTRINGS = ("claude", "gemini", "locai")
 _GPT_MARKERS = ("gpt", "o4-", "o1-", "o3-")
 
+# Every family derive_family() can return (besides None) — the single source
+# of truth for callers (e.g. benchmark.py's --family choices) that need to
+# validate against "every family we recognise" without duplicating the list.
+KNOWN_FAMILIES = (*_FAMILY_SUBSTRINGS, "gpt")
+
 
 @dataclass(frozen=True)
 class GatewayModel:
     name: str
     family: str | None
     health: str  # "healthy" | "unhealthy" | "unknown"
+    supports_reasoning: bool = False
 
 
 def derive_family(name: str) -> str | None:
@@ -90,9 +96,13 @@ def select_by_name(
     return found, missing
 
 
-def filter_chat_models(model_group_items: list[dict]) -> list[str]:
-    """Return model_group names that support chat completions."""
-    return [item["model_group"] for item in model_group_items if item.get("mode") == "chat"]
+def filter_chat_models(model_group_items: list[dict]) -> list[dict]:
+    """Return model_group entries that support chat completions.
+
+    Keeps the raw dicts, not just names, so callers can still read
+    per-model fields like `supports_reasoning`.
+    """
+    return [item for item in model_group_items if item.get("mode") == "chat"]
 
 
 def _parse_checked_at(value: str) -> datetime:
@@ -168,14 +178,15 @@ async def discover_chat_models() -> list[GatewayModel]:
             fetch_health_latest(client),
         )
 
-    chat_names = filter_chat_models(model_group_items)
+    chat_models = filter_chat_models(model_group_items)
     health_by_name = latest_health_by_model(health_checks)
 
     return [
         GatewayModel(
-            name=name,
-            family=derive_family(name),
-            health=health_by_name.get(name, "unknown"),
+            name=item["model_group"],
+            family=derive_family(item["model_group"]),
+            health=health_by_name.get(item["model_group"], "unknown"),
+            supports_reasoning=item["supports_reasoning"],
         )
-        for name in chat_names
+        for item in chat_models
     ]

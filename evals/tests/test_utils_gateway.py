@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import utils_gateway
+from conftest import make_gateway_model
 
 
 def _health(model_name, status, hours_ago, check_id=None, now=None):
@@ -15,11 +16,11 @@ def _health(model_name, status, hours_ago, check_id=None, now=None):
 class TestFilterChatModels:
     def test_keeps_only_chat_mode(self):
         items = [
-            {"model_group": "gpt-4o", "mode": "chat"},
+            {"model_group": "gpt-4o", "mode": "chat", "supports_reasoning": False},
             {"model_group": "dall-e-3", "mode": "image_generation"},
             {"model_group": "text-embedding-3", "mode": "embedding"},
         ]
-        assert utils_gateway.filter_chat_models(items) == ["gpt-4o"]
+        assert utils_gateway.filter_chat_models(items) == [items[0]]
 
 
 class TestLatestHealthByModel:
@@ -82,10 +83,10 @@ class TestDeriveFamily:
 
 class TestFilterByFamily:
     MODELS = [
-        utils_gateway.GatewayModel(name="gpt-4o", family="gpt", health="healthy"),
-        utils_gateway.GatewayModel(name="claude-haiku", family="claude", health="healthy"),
-        utils_gateway.GatewayModel(name="gemini-flash", family="gemini", health="healthy"),
-        utils_gateway.GatewayModel(name="bedrock-qwen3", family=None, health="healthy"),
+        make_gateway_model(name="gpt-4o", family="gpt"),
+        make_gateway_model(name="claude-haiku", family="claude"),
+        make_gateway_model(name="gemini-flash", family="gemini"),
+        make_gateway_model(name="bedrock-qwen3", family=None),
     ]
 
     def test_single_family(self):
@@ -102,8 +103,8 @@ class TestFilterByFamily:
 
 class TestSelectByName:
     MODELS = [
-        utils_gateway.GatewayModel(name="gpt-4o", family="gpt", health="healthy"),
-        utils_gateway.GatewayModel(name="claude-haiku", family="claude", health="unhealthy"),
+        make_gateway_model(name="gpt-4o", family="gpt"),
+        make_gateway_model(name="claude-haiku", family="claude", health="unhealthy"),
     ]
 
     def test_all_found(self):
@@ -123,9 +124,9 @@ class TestSelectByName:
 
 class TestExcludeUnhealthy:
     MODELS = [
-        utils_gateway.GatewayModel(name="gpt-4o", family="gpt", health="healthy"),
-        utils_gateway.GatewayModel(name="claude-haiku", family="claude", health="unhealthy"),
-        utils_gateway.GatewayModel(name="mystery-model", family=None, health="unknown"),
+        make_gateway_model(name="gpt-4o", family="gpt"),
+        make_gateway_model(name="claude-haiku", family="claude", health="unhealthy"),
+        make_gateway_model(name="mystery-model", family=None, health="unknown"),
     ]
 
     def test_drops_unhealthy_keeps_healthy_and_unknown(self):
@@ -136,10 +137,10 @@ class TestExcludeUnhealthy:
 class TestDiscoverChatModels:
     async def test_combines_and_resolves_unfiltered(self, monkeypatch):
         model_group_items = [
-            {"model_group": "gpt-4o", "mode": "chat"},
-            {"model_group": "claude-haiku", "mode": "chat"},
-            {"model_group": "gemini-flash", "mode": "chat"},
-            {"model_group": "mystery-model", "mode": "chat"},
+            {"model_group": "gpt-4o", "mode": "chat", "supports_reasoning": False},
+            {"model_group": "claude-haiku", "mode": "chat", "supports_reasoning": False},
+            {"model_group": "gemini-flash", "mode": "chat", "supports_reasoning": True},
+            {"model_group": "mystery-model", "mode": "chat", "supports_reasoning": False},
             {"model_group": "text-embedding-3", "mode": "embedding"},
         ]
         health_checks = dict(
@@ -174,3 +175,5 @@ class TestDiscoverChatModels:
         assert by_name["gpt-4o"].family == "gpt"
         assert by_name["gemini-flash"].family == "gemini"
         assert by_name["mystery-model"].family is None
+        assert by_name["gemini-flash"].supports_reasoning is True
+        assert by_name["gpt-4o"].supports_reasoning is False
