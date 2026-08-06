@@ -4,7 +4,7 @@ version = "0.8.2"
 description = "A topic modelling Python package designed for analysing one-to-many question-answer data eg free-text survey responses."
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.11,<3.13"
 authors = [
     {name = "i.AI", email = "packages@cabinetoffice.gov.uk"}
 ]
@@ -16,17 +16,17 @@ classifiers = [
 ]
 dependencies = [
     "openai>=1.0.0",
-    "pandas>=2.2.2",
+    "pandas>=3.0.4",
     "python-dotenv>=1.0.1",
     "langfuse>=3.12.1",
     "boto3>=1.29",
     "scikit-learn",
     "openpyxl>=3.1.5",
-    "pyarrow>=15.0.0",
+    "pyarrow>=23.0.1",
     "toml>=0.10.2",
     "nest-asyncio>=1.6.0",
     "rich>=13.0.0",
-    "numpy>=1.24.0",
+    "numpy>=2.4.5",
     "pydantic>=2.0.0",
     "protobuf==6.33.5",
     "cryptography>=46.0.7",
