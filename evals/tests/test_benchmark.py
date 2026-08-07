@@ -66,7 +66,11 @@ class TestApplyQuickPreset:
 
     def test_overrides_other_selectors_when_quick(self):
         args = _args(
-            models=["something"], family=["gpt"], quick=True, dataset="housing_S", runs=5
+            models=["something"],
+            family=["gpt"],
+            quick=True,
+            dataset="housing_S",
+            runs=5,
         )
         benchmark._apply_quick_preset(args)
         assert args.dataset == "gambling_XS"
@@ -97,7 +101,9 @@ class TestResolveSelectedModels:
 
     def test_models_selector_returns_found_and_missing(self):
         args = _args(models=["gpt-4o-uk", "typo-model"])
-        selected, missing, unhealthy = benchmark._resolve_selected_models(args, self.MODELS)
+        selected, missing, unhealthy = benchmark._resolve_selected_models(
+            args, self.MODELS
+        )
         assert [m.name for m in selected] == ["gpt-4o-uk"]
         assert missing == ["typo-model"]
         assert unhealthy == []
@@ -106,21 +112,27 @@ class TestResolveSelectedModels:
         # --models is explicit-by-name: unhealthy matches are still selected
         # (main() warns using `unhealthy`, doesn't silently drop them)
         args = _args(models=["claude-haiku"])
-        selected, missing, unhealthy = benchmark._resolve_selected_models(args, self.MODELS)
+        selected, missing, unhealthy = benchmark._resolve_selected_models(
+            args, self.MODELS
+        )
         assert [m.name for m in selected] == ["claude-haiku"]
         assert missing == []
         assert [m.name for m in unhealthy] == ["claude-haiku"]
 
     def test_family_selector_excludes_unhealthy(self):
         args = _args(family=["claude"])
-        selected, missing, unhealthy = benchmark._resolve_selected_models(args, self.MODELS)
+        selected, missing, unhealthy = benchmark._resolve_selected_models(
+            args, self.MODELS
+        )
         assert selected == []  # claude-haiku is unhealthy, dropped
         assert missing == []
         assert unhealthy == []
 
     def test_all_selector_excludes_unhealthy_and_ignores_family(self):
         args = _args(all_=True)
-        selected, missing, unhealthy = benchmark._resolve_selected_models(args, self.MODELS)
+        selected, missing, unhealthy = benchmark._resolve_selected_models(
+            args, self.MODELS
+        )
         assert {m.name for m in selected} == {"gpt-4o-uk", "gemini-flash"}
         assert missing == []
         assert unhealthy == []

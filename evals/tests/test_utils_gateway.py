@@ -10,7 +10,11 @@ def _health(model_name, status, hours_ago, check_id=None, now=None):
     now = now or datetime.now(timezone.utc)
     checked_at = (now - timedelta(hours=hours_ago)).isoformat()
     check_id = check_id or f"{model_name}-{hours_ago}-{status}"
-    return check_id, {"model_name": model_name, "status": status, "checked_at": checked_at}
+    return check_id, {
+        "model_name": model_name,
+        "status": status,
+        "checked_at": checked_at,
+    }
 
 
 class TestFilterChatModels:
@@ -45,8 +49,12 @@ class TestLatestHealthByModel:
     def test_most_recent_check_wins(self):
         checks = dict(
             [
-                _health("gpt-4o", "healthy", hours_ago=48, check_id="old", now=self.NOW),
-                _health("gpt-4o", "unhealthy", hours_ago=1, check_id="new", now=self.NOW),
+                _health(
+                    "gpt-4o", "healthy", hours_ago=48, check_id="old", now=self.NOW
+                ),
+                _health(
+                    "gpt-4o", "unhealthy", hours_ago=1, check_id="new", now=self.NOW
+                ),
             ]
         )
         assert utils_gateway.latest_health_by_model(checks, now=self.NOW) == {
@@ -56,8 +64,12 @@ class TestLatestHealthByModel:
     def test_most_recent_check_wins_regardless_of_dict_order(self):
         checks = dict(
             [
-                _health("gpt-4o", "unhealthy", hours_ago=1, check_id="new", now=self.NOW),
-                _health("gpt-4o", "healthy", hours_ago=48, check_id="old", now=self.NOW),
+                _health(
+                    "gpt-4o", "unhealthy", hours_ago=1, check_id="new", now=self.NOW
+                ),
+                _health(
+                    "gpt-4o", "healthy", hours_ago=48, check_id="old", now=self.NOW
+                ),
             ]
         )
         assert utils_gateway.latest_health_by_model(checks, now=self.NOW) == {
@@ -108,12 +120,16 @@ class TestSelectByName:
     ]
 
     def test_all_found(self):
-        found, missing = utils_gateway.select_by_name(self.MODELS, ["gpt-4o", "claude-haiku"])
+        found, missing = utils_gateway.select_by_name(
+            self.MODELS, ["gpt-4o", "claude-haiku"]
+        )
         assert {m.name for m in found} == {"gpt-4o", "claude-haiku"}
         assert missing == []
 
     def test_some_missing(self):
-        found, missing = utils_gateway.select_by_name(self.MODELS, ["gpt-4o", "typo-model"])
+        found, missing = utils_gateway.select_by_name(
+            self.MODELS, ["gpt-4o", "typo-model"]
+        )
         assert [m.name for m in found] == ["gpt-4o"]
         assert missing == ["typo-model"]
 
@@ -138,9 +154,17 @@ class TestDiscoverChatModels:
     async def test_combines_and_resolves_unfiltered(self, monkeypatch):
         model_group_items = [
             {"model_group": "gpt-4o", "mode": "chat", "supports_reasoning": False},
-            {"model_group": "claude-haiku", "mode": "chat", "supports_reasoning": False},
+            {
+                "model_group": "claude-haiku",
+                "mode": "chat",
+                "supports_reasoning": False,
+            },
             {"model_group": "gemini-flash", "mode": "chat", "supports_reasoning": True},
-            {"model_group": "mystery-model", "mode": "chat", "supports_reasoning": False},
+            {
+                "model_group": "mystery-model",
+                "mode": "chat",
+                "supports_reasoning": False,
+            },
             {"model_group": "text-embedding-3", "mode": "embedding"},
         ]
         health_checks = dict(
@@ -158,7 +182,9 @@ class TestDiscoverChatModels:
         async def fake_health_latest(client):
             return health_checks
 
-        monkeypatch.setattr(utils_gateway, "fetch_model_group_info", fake_model_group_info)
+        monkeypatch.setattr(
+            utils_gateway, "fetch_model_group_info", fake_model_group_info
+        )
         monkeypatch.setattr(utils_gateway, "fetch_health_latest", fake_health_latest)
         monkeypatch.setenv("LLM_GATEWAY_URL", "https://gateway.example.invalid")
         monkeypatch.setenv("CONSULT_EVAL_LITELLM_API_KEY", "test-key")
@@ -167,7 +193,12 @@ class TestDiscoverChatModels:
 
         by_name = {m.name: m for m in result}
         # unfiltered: non-chat excluded, but unhealthy/stale/unknown models all present
-        assert set(by_name) == {"gpt-4o", "claude-haiku", "gemini-flash", "mystery-model"}
+        assert set(by_name) == {
+            "gpt-4o",
+            "claude-haiku",
+            "gemini-flash",
+            "mystery-model",
+        }
         assert by_name["gpt-4o"].health == "healthy"
         assert by_name["claude-haiku"].health == "unhealthy"
         assert by_name["gemini-flash"].health == "unknown"  # stale, not trusted

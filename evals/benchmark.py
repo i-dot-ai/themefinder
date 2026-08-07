@@ -213,7 +213,9 @@ class BenchmarkConfig:
             "refinement",
         ]
     )
-    judge_model: str | None = None  # Gateway model name for judge LLM (e.g. "gpt-4o-uk")
+    judge_model: str | None = (
+        None  # Gateway model name for judge LLM (e.g. "gpt-4o-uk")
+    )
 
 
 @dataclass
@@ -859,7 +861,9 @@ def _validate_selector_args(args: argparse.Namespace) -> str | None:
 
 def _resolve_selected_models(
     args: argparse.Namespace, gateway_models: list[utils_gateway.GatewayModel]
-) -> tuple[list[utils_gateway.GatewayModel], list[str], list[utils_gateway.GatewayModel]]:
+) -> tuple[
+    list[utils_gateway.GatewayModel], list[str], list[utils_gateway.GatewayModel]
+]:
     """Apply --models/--family/--all to an already-fetched gateway model list.
 
     --models is an explicit request by exact name: the user named this model
@@ -981,7 +985,9 @@ Examples:
 
     if missing:
         available = sorted(m.name for m in gateway_models)
-        console.print(f"[red]No matching models: {missing}. Available: {available}[/red]")
+        console.print(
+            f"[red]No matching models: {missing}. Available: {available}[/red]"
+        )
         return
 
     for gm in unhealthy:
