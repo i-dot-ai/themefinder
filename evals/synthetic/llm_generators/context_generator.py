@@ -11,7 +11,7 @@ import logging
 import openai
 from pydantic import BaseModel, Field, ValidationError
 
-from synthetic.config import DemographicField, QuestionConfig
+from synthetic.config import DRAFTING_MODEL, DemographicField, QuestionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ for understanding perspectives on this policy."""
 
 
 async def generate_context_fields(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     questions: list[QuestionConfig],
     n_fields: int = 4,
@@ -143,7 +143,7 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
             result = (
                 (
                     await client.beta.chat.completions.parse(
-                        model="gpt-5-mini",
+                        model=DRAFTING_MODEL,
                         messages=messages,
                         response_format=ContextFieldSet,
                         reasoning_effort="medium",
@@ -205,7 +205,7 @@ Avoid generic demographics (age, region, etc.) - those are handled separately.""
 
 
 async def regenerate_context_fields(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     questions: list[QuestionConfig],
     feedback: str,
@@ -214,7 +214,7 @@ async def regenerate_context_fields(
     """Regenerate context fields based on user feedback.
 
     Args:
-        client: Azure OpenAI client.
+        client: OpenAI client (gateway-routed).
         topic: Consultation topic.
         questions: List of consultation questions.
         feedback: User's feedback on what to change.
@@ -255,7 +255,7 @@ Focus on characteristics directly relevant to this policy."""
             result = (
                 (
                     await client.beta.chat.completions.parse(
-                        model="gpt-5-mini",
+                        model=DRAFTING_MODEL,
                         messages=messages,
                         response_format=ContextFieldSet,
                         reasoning_effort="medium",

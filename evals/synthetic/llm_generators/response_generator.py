@@ -86,7 +86,7 @@ Generate authentic-sounding responses. Vary sentence structure and vocabulary.""
 
 
 async def generate_respondent_survey(
-    llm: tuple[openai.AsyncAzureOpenAI, str],
+    llm: tuple[openai.AsyncOpenAI, str],
     respondent: RespondentSpec,
     questions: list[QuestionConfig],
     themes_by_question: dict[int, list[dict]],
@@ -99,7 +99,7 @@ async def generate_respondent_survey(
     to maintain consistency in the respondent's viewpoint.
 
     Args:
-        llm: Tuple of (AsyncAzureOpenAI client, deployment name).
+        llm: Tuple of (AsyncOpenAI client, deployment name).
         respondent: Respondent specification with persona and base disposition.
         questions: List of question configurations in order.
         themes_by_question: Dict mapping question number to themes list.
@@ -232,7 +232,7 @@ async def generate_respondent_survey(
 
 
 async def generate_respondent_batch(
-    llm: tuple[openai.AsyncAzureOpenAI, str],
+    llm: tuple[openai.AsyncOpenAI, str],
     respondents: list[RespondentSpec],
     questions: list[QuestionConfig],
     themes_by_question: dict[int, list[dict]],
@@ -245,7 +245,7 @@ async def generate_respondent_batch(
     but multiple respondents are processed in parallel.
 
     Args:
-        llm: Tuple of (AsyncAzureOpenAI client, deployment name).
+        llm: Tuple of (AsyncOpenAI client, deployment name).
         respondents: List of respondent specifications.
         questions: List of question configurations in order.
         themes_by_question: Dict mapping question number to themes list.

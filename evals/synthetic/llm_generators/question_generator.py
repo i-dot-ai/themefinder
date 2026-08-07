@@ -7,6 +7,8 @@ principles and the Gunning Principles for fair consultation.
 import openai
 from pydantic import BaseModel, Field
 
+from synthetic.config import DRAFTING_MODEL
+
 
 class GeneratedQuestion(BaseModel):
     """A single generated consultation question."""
@@ -88,7 +90,7 @@ Generate questions that would realistically appear in a UK government consultati
 
 
 async def generate_questions(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     n_questions: int,
     existing_questions: list[str] | None = None,
@@ -152,7 +154,7 @@ For each question, provide:
     result = (
         (
             await client.beta.chat.completions.parse(
-                model="gpt-5-mini",
+                model=DRAFTING_MODEL,
                 messages=messages,
                 response_format=QuestionSet,
                 reasoning_effort="high",
@@ -165,7 +167,7 @@ For each question, provide:
 
 
 async def regenerate_single_question(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     rejected_question: str,
     feedback: str,
@@ -174,7 +176,7 @@ async def regenerate_single_question(
     """Regenerate a single question based on user feedback.
 
     Args:
-        client: Azure OpenAI client.
+        client: OpenAI client (gateway-routed).
         topic: The policy topic for the consultation.
         rejected_question: The question that was rejected.
         feedback: User's feedback on why it was rejected.
@@ -217,7 +219,7 @@ Generate ONE new question that:
     return (
         (
             await client.beta.chat.completions.parse(
-                model="gpt-5-mini",
+                model=DRAFTING_MODEL,
                 messages=messages,
                 response_format=GeneratedQuestion,
                 reasoning_effort="high",
@@ -237,14 +239,14 @@ class DatasetName(BaseModel):
 
 
 async def generate_dataset_name(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     questions: list[str],
 ) -> str:
     """Generate a short, descriptive dataset name from the consultation topic and questions.
 
     Args:
-        client: Azure OpenAI client.
+        client: OpenAI client (gateway-routed).
         topic: The consultation topic (can be long document).
         questions: List of approved question texts.
 
@@ -285,7 +287,7 @@ Generate ONE dataset name."""
     result = (
         (
             await client.beta.chat.completions.parse(
-                model="gpt-5-mini",
+                model=DRAFTING_MODEL,
                 messages=messages,
                 response_format=DatasetName,
                 reasoning_effort="high",

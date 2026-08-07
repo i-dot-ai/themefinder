@@ -40,14 +40,14 @@ class SyntheticDatasetGenerator:
     def __init__(
         self,
         config: GenerationConfig,
-        llm: tuple[openai.AsyncAzureOpenAI, str],
+        llm: tuple[openai.AsyncOpenAI, str],
         seed: int = 42,
     ) -> None:
         """Initialise generator with configuration.
 
         Args:
             config: Generation configuration.
-            llm: Tuple of (AsyncAzureOpenAI client, deployment name) for response generation.
+            llm: Tuple of (AsyncOpenAI client, deployment name) for response generation.
             seed: Random seed for reproducibility.
         """
         self.config = config

@@ -11,7 +11,7 @@ from collections.abc import Callable
 import openai
 from pydantic import BaseModel, Field, ValidationError
 
-from synthetic.config import DemographicField
+from synthetic.config import DRAFTING_MODEL, DemographicField
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +133,7 @@ def _generate_topic_ids(n: int) -> list[str]:
 
 
 async def generate_themes(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     question: str,
     demographic_fields: list[DemographicField],
@@ -191,7 +191,7 @@ async def generate_themes(
 
 
 async def _fan_out_theme_generation(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     topic: str,
     question: str,
     demographic_fields: list[DemographicField],
@@ -249,7 +249,7 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
                 result = (
                     (
                         await client.beta.chat.completions.parse(
-                            model="gpt-5-mini",
+                            model=DRAFTING_MODEL,
                             messages=messages,
                             response_format=ThemeSet,
                             reasoning_effort="medium",
@@ -313,7 +313,7 @@ Use sequential IDs: A, B, C, ... Z, AA, AB, ... for themes."""
 
 
 async def _consolidate_themes(
-    client: openai.AsyncAzureOpenAI,
+    client: openai.AsyncOpenAI,
     raw_themes: list[dict],
     topic: str,
     question: str,
@@ -365,7 +365,7 @@ Be CONSERVATIVE - when in doubt, keep themes separate. Diversity is valuable."""
             result = (
                 (
                     await client.beta.chat.completions.parse(
-                        model="gpt-5-mini",
+                        model=DRAFTING_MODEL,
                         messages=messages,
                         response_format=ThemeSet,
                         reasoning_effort="low",

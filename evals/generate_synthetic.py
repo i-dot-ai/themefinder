@@ -30,12 +30,13 @@ from synthetic.cli import (
     print_success,
     run_interactive_cli,
 )
+from synthetic.config import RESPONSE_GENERATION_MODEL
 from synthetic.generator import SyntheticDatasetGenerator
 
 # Optional Langfuse integration
 try:
     import langfuse_utils
-    from langfuse.openai import AsyncAzureOpenAI as _LangfuseAzureOpenAI
+    from langfuse.openai import AsyncOpenAI as _LangfuseOpenAI
 
     LANGFUSE_AVAILABLE = True
 except ImportError:
@@ -55,13 +56,10 @@ async def main() -> None:
 
     # Initialise LLM for response generation (gpt-5-nano with medium reasoning)
     # Medium reasoning ≈ o1 performance, 2x faster throughput than mini/low
-    _AzureClientClass = (
-        _LangfuseAzureOpenAI if LANGFUSE_AVAILABLE else openai.AsyncAzureOpenAI
-    )
-    client = _AzureClientClass(
-        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
-        api_key=os.getenv("AZURE_OPENAI_API_KEY"),
-        api_version=os.getenv("OPENAI_API_VERSION", "2024-12-01-preview"),
+    _OpenAIClientClass = _LangfuseOpenAI if LANGFUSE_AVAILABLE else openai.AsyncOpenAI
+    client = _OpenAIClientClass(
+        base_url=os.getenv("LLM_GATEWAY_URL"),
+        api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
         timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 
@@ -82,7 +80,7 @@ async def main() -> None:
     # Initialise generator
     generator = SyntheticDatasetGenerator(
         config=config,
-        llm=(client, "gpt-5-nano"),
+        llm=(client, RESPONSE_GENERATION_MODEL),
     )
 
     # Calculate total responses for summary

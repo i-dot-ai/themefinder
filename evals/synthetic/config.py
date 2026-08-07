@@ -5,6 +5,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Optional
 
+# Models stay hardcoded here rather than dynamically discovered (unlike
+# benchmark.py) — this tool always uses one fixed model per role, so there's
+# nothing to select. Centralised as named constants instead of duplicating
+# the literal strings across every generator module.
+DRAFTING_MODEL = "gpt-5-mini-sweden"  # question/context/theme generation
+RESPONSE_GENERATION_MODEL = "gpt-5-nano-sweden"  # bulk respondent response generation
+
 
 class NoiseLevel(Enum):
     """Noise injection intensity levels."""
