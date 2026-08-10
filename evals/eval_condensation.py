@@ -12,6 +12,7 @@ from datetime import datetime
 import dotenv
 import langfuse_utils
 import pandas as pd
+import utils_gateway
 from datasets import DatasetConfig, load_local_data
 from evaluators import calculate_redundancy_score, create_condensation_quality_evaluator
 from themefinder import theme_condensation
@@ -51,11 +52,12 @@ async def evaluate_condensation(
 
     # Use provided LLM or create new one
     if llm is None:
+        base_url, api_key = utils_gateway.gateway_credentials()
         llm = OpenAILLM(
             model=os.getenv("AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT"),
             request_kwargs={"temperature": 0},
-            base_url=os.getenv("LLM_GATEWAY_URL"),
-            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+            base_url=base_url,
+            api_key=api_key,
         )
 
     # Select judge LLM (falls back to task LLM if not provided)

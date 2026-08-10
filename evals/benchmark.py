@@ -165,11 +165,12 @@ class ModelConfig:
         request_kwargs: dict[str, Any] = {}
         if not self.reasoning_effort:
             request_kwargs["temperature"] = self.temperature
+        base_url, api_key = utils_gateway.gateway_credentials()
         return OpenAILLM(
             model=self.name,
             request_kwargs=request_kwargs,
-            base_url=os.getenv("LLM_GATEWAY_URL"),
-            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+            base_url=base_url,
+            api_key=api_key,
             timeout=self.timeout,
         )
 
@@ -485,11 +486,12 @@ class BenchmarkRunner:
         # Create dedicated judge LLM if configured (separates judge from task model)
         judge_llm = None
         if self.config.judge_model:
+            base_url, api_key = utils_gateway.gateway_credentials()
             judge_llm = OpenAILLM(
                 model=self.config.judge_model,
                 request_kwargs={"temperature": 0},
-                base_url=os.getenv("LLM_GATEWAY_URL"),
-                api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+                base_url=base_url,
+                api_key=api_key,
                 timeout=600,
             )
 

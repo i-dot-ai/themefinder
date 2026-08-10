@@ -24,6 +24,7 @@ import openai
 # Add parent to path for imports
 sys.path.insert(0, str(os.path.dirname(__file__)))
 
+import utils_gateway
 from synthetic.cli import (
     create_progress_bar,
     print_error,
@@ -57,9 +58,10 @@ async def main() -> None:
     # Initialise LLM for response generation (gpt-5-nano with medium reasoning)
     # Medium reasoning ≈ o1 performance, 2x faster throughput than mini/low
     _OpenAIClientClass = _LangfuseOpenAI if LANGFUSE_AVAILABLE else openai.AsyncOpenAI
+    base_url, api_key = utils_gateway.gateway_credentials()
     client = _OpenAIClientClass(
-        base_url=os.getenv("LLM_GATEWAY_URL"),
-        api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+        base_url=base_url,
+        api_key=api_key,
         timeout=600,  # 10 minute timeout to prevent indefinite hangs (reasoning can be slow)
     )
 

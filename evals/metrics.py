@@ -3,6 +3,7 @@ import os
 
 import numpy as np
 import pandas as pd
+import utils_gateway
 from sklearn import metrics, utils
 from sklearn.preprocessing import MultiLabelBinarizer
 from themefinder.llm import OpenAILLM
@@ -34,11 +35,12 @@ def calculate_generation_metrics(
             - Recall Average topic Representation: Mean representation score
     """
     if llm is None:
+        base_url, api_key = utils_gateway.gateway_credentials()
         llm = OpenAILLM(
             model=os.getenv("AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT"),
             request_kwargs={"temperature": 0},
-            base_url=os.getenv("LLM_GATEWAY_URL"),
-            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+            base_url=base_url,
+            api_key=api_key,
         )
     precision_response = llm.invoke(
         generation_eval_prompt(

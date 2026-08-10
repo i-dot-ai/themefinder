@@ -129,13 +129,19 @@ def latest_health_by_model(
     }
 
 
-def _gateway_client() -> httpx.AsyncClient:
+def gateway_credentials() -> tuple[str, str]:
+    """Read and validate the two required gateway env vars."""
     base_url = os.getenv("LLM_GATEWAY_URL")
     api_key = os.getenv("CONSULT_EVAL_LITELLM_API_KEY")
     if not base_url or not api_key:
         raise RuntimeError(
             "LLM_GATEWAY_URL and CONSULT_EVAL_LITELLM_API_KEY must be set"
         )
+    return base_url, api_key
+
+
+def _gateway_client() -> httpx.AsyncClient:
+    base_url, api_key = gateway_credentials()
     return httpx.AsyncClient(
         base_url=base_url.rstrip("/"),
         headers={"Authorization": f"Bearer {api_key}"},

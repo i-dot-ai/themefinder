@@ -1,9 +1,9 @@
 """Interactive CLI for synthetic consultation dataset generation."""
 
-import os
 from pathlib import Path
 
 import openai
+import utils_gateway
 from rich.box import DOUBLE, HEAVY, ROUNDED
 from rich.console import Console
 from rich.panel import Panel
@@ -198,9 +198,10 @@ async def run_interactive_cli() -> GenerationConfig:
     console.clear()
     console.print(BANNER)
 
+    base_url, api_key = utils_gateway.gateway_credentials()
     client = openai.AsyncOpenAI(
-        base_url=os.getenv("LLM_GATEWAY_URL"),
-        api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+        base_url=base_url,
+        api_key=api_key,
         timeout=600,
     )
 
