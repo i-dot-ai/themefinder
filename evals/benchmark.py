@@ -979,9 +979,7 @@ Examples:
     gateway_models = await utils_gateway.discover_chat_models()
 
     if args.models:
-        selected, missing, unhealthy = _select_named_models(
-            gateway_models, args.models
-        )
+        selected, missing, unhealthy = _select_named_models(gateway_models, args.models)
         if missing:
             available = sorted(m.name for m in gateway_models)
             console.print(
