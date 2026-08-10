@@ -859,37 +859,34 @@ def _validate_selector_args(args: argparse.Namespace) -> str | None:
     return None
 
 
-def _resolve_selected_models(
-    args: argparse.Namespace, gateway_models: list[utils_gateway.GatewayModel]
+def _select_named_models(
+    gateway_models: list[utils_gateway.GatewayModel], names: list[str]
 ) -> tuple[
     list[utils_gateway.GatewayModel], list[str], list[utils_gateway.GatewayModel]
 ]:
-    """Apply --models/--family/--all to an already-fetched gateway model list.
+    """--models: exact-name lookup. Unhealthy matches are still selected (the
+    user asked for them by name) — just flagged for a warning, not dropped.
 
-    --models is an explicit request by exact name: the user named this model
-    deliberately, so an unhealthy match is still selected and just warned on
-    rather than silently dropped — surfacing the signal without overriding
-    their choice. --family/--all are broad, automatic selections where no
-    specific model was named, so excluding unhealthy models there is the
-    safer default (nothing explicit is being overridden by dropping them).
-
-    Returns (selected, missing, unhealthy) — plain data, caller decides how to
-    report it. `missing` is only ever populated for --models (unknown names).
-    `unhealthy` is the subset of `selected` still flagged unhealthy: always
-    empty for --family/--all (exclude_unhealthy already ran on that path), so
-    the caller doesn't need to know which selector mode produced `selected`
-    to know whether to warn — it just prints whatever's in the list.
+    Returns (selected, missing, unhealthy).
     """
-    if args.models:
-        selected, missing = utils_gateway.select_by_name(gateway_models, args.models)
-    else:
-        selected = utils_gateway.exclude_unhealthy(gateway_models)
-        if args.family:
-            selected = utils_gateway.filter_by_family(selected, args.family)
-        missing = []
+    found, missing = utils_gateway.select_by_name(gateway_models, names)
+    _, unhealthy = utils_gateway.split_unhealthy(found)
+    return found, missing, unhealthy
 
-    unhealthy = [m for m in selected if m.health == "unhealthy"]
-    return selected, missing, unhealthy
+
+def _select_healthy_models(
+    gateway_models: list[utils_gateway.GatewayModel], families: list[str] | None
+) -> tuple[list[utils_gateway.GatewayModel], list[utils_gateway.GatewayModel]]:
+    """--family/--all: broad selection, unhealthy models dropped (not just warned).
+
+    Returns (selected, excluded).
+    """
+    candidates = (
+        utils_gateway.filter_by_family(gateway_models, families)
+        if families
+        else gateway_models
+    )
+    return utils_gateway.split_unhealthy(candidates)
 
 
 async def main():
@@ -981,20 +978,29 @@ Examples:
         args.models = list(dict.fromkeys(args.models))
 
     gateway_models = await utils_gateway.discover_chat_models()
-    selected, missing, unhealthy = _resolve_selected_models(args, gateway_models)
 
-    if missing:
-        available = sorted(m.name for m in gateway_models)
-        console.print(
-            f"[red]No matching models: {missing}. Available: {available}[/red]"
+    if args.models:
+        selected, missing, unhealthy = _select_named_models(
+            gateway_models, args.models
         )
-        return
-
-    for gm in unhealthy:
-        console.print(
-            f"[yellow]Warning: {gm.name} is reported unhealthy by the gateway "
-            "— proceeding anyway[/yellow]"
-        )
+        if missing:
+            available = sorted(m.name for m in gateway_models)
+            console.print(
+                f"[red]No matching models: {missing}. Available: {available}[/red]"
+            )
+            return
+        for gm in unhealthy:
+            console.print(
+                f"[yellow]Warning: {gm.name} is reported unhealthy by the gateway "
+                "— proceeding anyway[/yellow]"
+            )
+    else:
+        selected, excluded = _select_healthy_models(gateway_models, args.family)
+        if excluded:
+            console.print(
+                f"[dim]Excluded {len(excluded)} unhealthy model(s), not run: "
+                f"{[m.name for m in excluded]}[/dim]"
+            )
 
     if not selected:
         console.print("[red]No models matched the given selector.[/red]")
