@@ -152,8 +152,7 @@ class ModelConfig:
     """Configuration for a single model variant, resolved from the gateway.
 
     `name` is the gateway's model_group name — used both for display and as
-    the `model=` value sent to the gateway, since dynamic discovery means
-    there's no separate internal alias to translate through anymore.
+    the `model=` value sent to the gateway.
     """
 
     name: str

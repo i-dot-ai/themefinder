@@ -13,17 +13,14 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
-# Health checks run in irregular batches (observed: most within ~48h, a long
-# tail of abandoned models >7 days stale). 72h covers the normal cadence with
-# margin while still treating truly stale entries as unknown, not trusted.
+# Health checks are observed to run within ~48h; 72h gives margin before
+# treating a check as stale.
 STALE_AFTER = timedelta(hours=72)
 
 _FAMILY_SUBSTRINGS = ("claude", "gemini", "locai")
 _GPT_MARKERS = ("gpt", "o4-", "o1-", "o3-")
 
-# Every family derive_family() can return (besides None) — the single source
-# of truth for callers (e.g. benchmark.py's --family choices) that need to
-# validate against "every family we recognise" without duplicating the list.
+# Every family derive_family() can return (besides None).
 KNOWN_FAMILIES = (*_FAMILY_SUBSTRINGS, "gpt")
 
 
@@ -36,13 +33,7 @@ class GatewayModel:
 
 
 def derive_family(name: str) -> str | None:
-    """Bucket a model name into a known vendor family by substring match.
-
-    Only the recognised families (claude/gemini/locai/gpt) are classified.
-    Everything else returns None rather than a guessed catch-all bucket —
-    the leftover models span unrelated architectures/vendors, so grouping
-    them under one label would imply a relationship that isn't there.
-    """
+    """Bucket a model name into a known vendor family (claude/gemini/locai/gpt) by substring match."""
     lowered = name.lower()
     for family in _FAMILY_SUBSTRINGS:
         if family in lowered:
@@ -55,11 +46,7 @@ def derive_family(name: str) -> str | None:
 def filter_by_family(
     models: list[GatewayModel], families: list[str]
 ) -> list[GatewayModel]:
-    """Return models whose family matches any of the given families.
-
-    Takes a list so callers can compare multiple families in one run
-    (e.g. gemini vs. claude), not just select a single one.
-    """
+    """Return models whose family matches any of the given families."""
     family_set = set(families)
     return [m for m in models if m.family in family_set]
 
@@ -70,11 +57,7 @@ def split_unhealthy(
     """Split models into (kept, unhealthy) by most recent, non-stale health check.
 
     Models with no recent health data ("unknown") are kept — absence of
-    evidence isn't evidence of a problem. Mirrors select_by_name's
-    (found, missing) shape rather than dropping the excluded half silently:
-    callers differ on what to do with `unhealthy` (--models still runs
-    them with a warning; --family/--all drops them and reports it), so
-    both halves need to survive this function, not just the kept one.
+    evidence isn't evidence of a problem.
     """
     kept = []
     unhealthy = []
@@ -89,14 +72,7 @@ def split_unhealthy(
 def select_by_name(
     models: list[GatewayModel], names: list[str]
 ) -> tuple[list[GatewayModel], list[str]]:
-    """Split requested names into found models and names not on the gateway.
-
-    Unlike --family (a fixed, argparse-validated choice set), model names
-    come from whatever's currently on the gateway, so a typo can only be
-    caught by looking it up at runtime. Returns plain data — callers decide
-    how to report `missing` (error, warning, etc.), keeping that a CLI
-    concern rather than something this module prints itself.
-    """
+    """Split requested names into found models and names not on the gateway."""
     by_name = {m.name: m for m in models}
     found = []
     missing = []
@@ -182,9 +158,8 @@ async def fetch_health_latest(client: httpx.AsyncClient) -> dict[str, dict]:
 async def discover_chat_models() -> list[GatewayModel]:
     """Fetch every chat-capable gateway model with its family and health resolved.
 
-    Unfiltered by design — callers decide whether/how to narrow the list
-    (split_unhealthy, filter_by_family, or an exact-name lookup), since
-    that decision depends on the selection mode (--family/--all/--models).
+    Unfiltered by design — callers narrow the list themselves (split_unhealthy,
+    filter_by_family, or an exact-name lookup) based on how they want to select.
     """
     async with _gateway_client() as client:
         model_group_items, health_checks = await asyncio.gather(
