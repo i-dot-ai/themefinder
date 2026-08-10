@@ -64,16 +64,26 @@ def filter_by_family(
     return [m for m in models if m.family in family_set]
 
 
-def exclude_unhealthy(models: list[GatewayModel]) -> list[GatewayModel]:
-    """Drop models whose most recent, non-stale health check reports "unhealthy".
+def split_unhealthy(
+    models: list[GatewayModel],
+) -> tuple[list[GatewayModel], list[GatewayModel]]:
+    """Split models into (kept, unhealthy) by most recent, non-stale health check.
 
     Models with no recent health data ("unknown") are kept — absence of
-    evidence isn't evidence of a problem. Kept separate from discovery so
-    callers that want to see everything (e.g. explicit --models lookups,
-    where "confirmed unhealthy" and "unknown model name" need to stay
-    distinguishable) can skip this step.
+    evidence isn't evidence of a problem. Mirrors select_by_name's
+    (found, missing) shape rather than dropping the excluded half silently:
+    callers differ on what to do with `unhealthy` (--models still runs
+    them with a warning; --family/--all drops them and reports it), so
+    both halves need to survive this function, not just the kept one.
     """
-    return [m for m in models if m.health != "unhealthy"]
+    kept = []
+    unhealthy = []
+    for m in models:
+        if m.health == "unhealthy":
+            unhealthy.append(m)
+        else:
+            kept.append(m)
+    return kept, unhealthy
 
 
 def select_by_name(
@@ -173,7 +183,7 @@ async def discover_chat_models() -> list[GatewayModel]:
     """Fetch every chat-capable gateway model with its family and health resolved.
 
     Unfiltered by design — callers decide whether/how to narrow the list
-    (exclude_unhealthy, filter_by_family, or an exact-name lookup), since
+    (split_unhealthy, filter_by_family, or an exact-name lookup), since
     that decision depends on the selection mode (--family/--all/--models).
     """
     async with _gateway_client() as client:

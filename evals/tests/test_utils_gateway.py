@@ -138,16 +138,17 @@ class TestSelectByName:
         assert found[0].health == "unhealthy"
 
 
-class TestExcludeUnhealthy:
+class TestSplitUnhealthy:
     MODELS = [
         make_gateway_model(name="gpt-4o", family="gpt"),
         make_gateway_model(name="claude-haiku", family="claude", health="unhealthy"),
         make_gateway_model(name="mystery-model", family=None, health="unknown"),
     ]
 
-    def test_drops_unhealthy_keeps_healthy_and_unknown(self):
-        result = utils_gateway.exclude_unhealthy(self.MODELS)
-        assert {m.name for m in result} == {"gpt-4o", "mystery-model"}
+    def test_keeps_healthy_and_unknown_splits_out_unhealthy(self):
+        kept, unhealthy = utils_gateway.split_unhealthy(self.MODELS)
+        assert {m.name for m in kept} == {"gpt-4o", "mystery-model"}
+        assert [m.name for m in unhealthy] == ["claude-haiku"]
 
 
 class TestDiscoverChatModels:
