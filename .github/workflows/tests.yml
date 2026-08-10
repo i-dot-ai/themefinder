@@ -27,8 +27,14 @@ jobs:
 
       - name: Run tests with Pytest
         run: |
-          uv run coverage run -m pytest -v -s
+          uv run coverage run -m pytest tests/ -v -s
 
       - name: Generate coverage report
         run: |
           uv run coverage report -m --fail-under=95
+
+      # TODO: not counted towards coverage yet - fold into the gate above
+      # once evals/ is refactored and has more tests.
+      - name: Run evals unit tests
+        run: |
+          uv run pytest evals/tests/ -v
