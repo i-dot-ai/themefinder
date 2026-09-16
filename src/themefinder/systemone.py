@@ -41,6 +41,10 @@ from themefinder.themefinder_logging import logger
 
 DEFAULT_ASSIGNMENT_THRESHOLD = 0.5
 
+# SystemOne calls are small and fast; the model is built for high-throughput
+# parallel questioning, so a much higher concurrency than an LLM's is safe.
+DEFAULT_CONCURRENCY = 50
+
 # Retry policy for SystemOne calls, mirroring the LLM batch processor.
 RETRY_ATTEMPTS = 6
 RETRY_MIN_WAIT_SECONDS = 1
@@ -320,13 +324,65 @@ def _labels_from_choice(
     return labels, probabilities
 
 
+def _evidence_extractor(threshold: float):
+    """Build an extractor for the evidence-rich noul answer."""
+
+    def extract(result: Any) -> dict:
+        probability = result.nouls["evidence_rich"].noul
+        return {
+            "evidence_rich": "YES" if probability >= threshold else "NO",
+            "evidence_probability": probability,
+        }
+
+    return extract
+
+
+async def _run_per_response(
+    responses_df: pd.DataFrame,
+    client: SystemOne,
+    question: str,
+    questions: dict[str, Any],
+    extractors: list,
+    concurrency: int,
+    stage_name: str,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Ask one batched SystemOne question set per response, concurrently.
+
+    Each extractor turns the SystemOne result into a dict of output columns;
+    their outputs are merged into one row per response.
+    """
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def process_one(row: dict) -> dict | None:
+        state = {"question": question, "response": row["response"]}
+        async with semaphore:
+            try:
+                result = await _ask_with_retries(client, state, questions)
+            except Exception as e:
+                logger.warning(
+                    f"SystemOne {stage_name} failed for response "
+                    f"{row['response_id']}: {e}"
+                )
+                return None
+
+        output = {"response_id": row["response_id"]}
+        for extract in extractors:
+            output.update(extract(result))
+        return output
+
+    rows = responses_df.to_dict(orient="records")
+    results = await asyncio.gather(*[process_one(row) for row in rows])
+
+    return _merge_results(responses_df, rows, results)
+
+
 async def theme_mapping_systemone(
     responses_df: pd.DataFrame,
     client: SystemOne,
     question: str,
     refined_themes_df: pd.DataFrame,
     threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
-    concurrency: int = 10,
+    concurrency: int = DEFAULT_CONCURRENCY,
     question_type: str = "noul",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Map survey responses to refined themes using SystemOne questions.
@@ -362,14 +418,32 @@ async def theme_mapping_systemone(
         LLM stage's output) and a 'theme_probabilities' column with the full
         probability per theme.
     """
-    if question_type not in ("noul", "choice"):
-        raise ValueError(
-            f"question_type must be 'noul' or 'choice', got '{question_type}'"
-        )
+    questions, extractor = _mapping_questions_and_extractor(
+        refined_themes_df, question_type, threshold
+    )
     logger.info(
         f"Running SystemOne theme mapping ({question_type}) on "
         f"{len(responses_df)} responses using {len(refined_themes_df)} themes"
     )
+    return await _run_per_response(
+        responses_df,
+        client,
+        question,
+        questions,
+        extractors=[extractor],
+        concurrency=concurrency,
+        stage_name="mapping",
+    )
+
+
+def _mapping_questions_and_extractor(
+    refined_themes_df: pd.DataFrame, question_type: str, threshold: float
+) -> tuple[dict[str, Any], Any]:
+    """Build the mapping question set and its answer extractor."""
+    if question_type not in ("noul", "choice"):
+        raise ValueError(
+            f"question_type must be 'noul' or 'choice', got '{question_type}'"
+        )
     theme_texts = _theme_texts(refined_themes_df)
     if question_type == "choice":
         questions = _mapping_choice_question(theme_texts)
@@ -377,30 +451,12 @@ async def theme_mapping_systemone(
     else:
         questions = _mapping_questions(theme_texts)
         extract_labels = _labels_from_nouls
-    semaphore = asyncio.Semaphore(concurrency)
 
-    async def map_one(row: dict) -> dict | None:
-        state = {"question": question, "response": row["response"]}
-        async with semaphore:
-            try:
-                result = await _ask_with_retries(client, state, questions)
-            except Exception as e:
-                logger.warning(
-                    f"SystemOne mapping failed for response {row['response_id']}: {e}"
-                )
-                return None
-
+    def extract(result: Any) -> dict:
         labels, probabilities = extract_labels(result, theme_texts, threshold)
-        return {
-            "response_id": row["response_id"],
-            "labels": labels,
-            "theme_probabilities": probabilities,
-        }
+        return {"labels": labels, "theme_probabilities": probabilities}
 
-    rows = responses_df.to_dict(orient="records")
-    results = await asyncio.gather(*[map_one(row) for row in rows])
-
-    return _merge_results(responses_df, rows, results)
+    return questions, extract
 
 
 async def detail_detection_systemone(
@@ -408,7 +464,7 @@ async def detail_detection_systemone(
     client: SystemOne,
     question: str,
     threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
-    concurrency: int = 10,
+    concurrency: int = DEFAULT_CONCURRENCY,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Identify evidence-rich responses using a SystemOne noul question.
 
@@ -425,38 +481,75 @@ async def detail_detection_systemone(
         LLM stage's output) and an 'evidence_probability' column.
     """
     logger.info(f"Running SystemOne detail detection on {len(responses_df)} responses")
-    questions = {
-        "evidence_rich": _noul(
-            EVIDENCE_RICH_INSTRUCTIONS,
-            true_criteria=EVIDENCE_RICH_TRUE_CRITERIA,
-            false_criteria=EVIDENCE_RICH_FALSE_CRITERIA,
-        )
-    }
-    semaphore = asyncio.Semaphore(concurrency)
+    return await _run_per_response(
+        responses_df,
+        client,
+        question,
+        questions={"evidence_rich": _evidence_question()},
+        extractors=[_evidence_extractor(threshold)],
+        concurrency=concurrency,
+        stage_name="detail detection",
+    )
 
-    async def detect_one(row: dict) -> dict | None:
-        state = {"question": question, "response": row["response"]}
-        async with semaphore:
-            try:
-                result = await _ask_with_retries(client, state, questions)
-            except Exception as e:
-                logger.warning(
-                    f"SystemOne detail detection failed for response "
-                    f"{row['response_id']}: {e}"
-                )
-                return None
 
-        probability = result.nouls["evidence_rich"].noul
-        return {
-            "response_id": row["response_id"],
-            "evidence_rich": "YES" if probability >= threshold else "NO",
-            "evidence_probability": probability,
-        }
+def _evidence_question() -> Any:
+    return _noul(
+        EVIDENCE_RICH_INSTRUCTIONS,
+        true_criteria=EVIDENCE_RICH_TRUE_CRITERIA,
+        false_criteria=EVIDENCE_RICH_FALSE_CRITERIA,
+    )
 
-    rows = responses_df.to_dict(orient="records")
-    results = await asyncio.gather(*[detect_one(row) for row in rows])
 
-    return _merge_results(responses_df, rows, results)
+async def classify_responses_systemone(
+    responses_df: pd.DataFrame,
+    client: SystemOne,
+    question: str,
+    refined_themes_df: pd.DataFrame,
+    threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    question_type: str = "noul",
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Run theme mapping and detail detection in one SystemOne call per response.
+
+    SystemOne evaluates every question in a request against the same state in
+    parallel, so batching the theme questions and the evidence-rich question
+    together halves the number of requests (and avoids paying for the shared
+    state twice) compared with running the two stages separately. Answers are
+    identical to the separate stages.
+
+    Args:
+        responses_df: DataFrame with 'response_id' and 'response' columns.
+        client: SystemOne client wrapper.
+        question: The survey question.
+        refined_themes_df: DataFrame of refined themes with 'topic_id' and
+            'topic' (or 'topic_label' + 'topic_description') columns.
+        threshold: Minimum probability for assignments.
+        concurrency: Maximum number of simultaneous SystemOne calls.
+        question_type: "noul" or "choice" mapping strategy (see
+            :func:`theme_mapping_systemone`).
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows).
+        The results carry both stages' columns: 'labels', 'theme_probabilities',
+        'evidence_rich' and 'evidence_probability'.
+    """
+    questions, mapping_extractor = _mapping_questions_and_extractor(
+        refined_themes_df, question_type, threshold
+    )
+    questions = {**questions, "evidence_rich": _evidence_question()}
+    logger.info(
+        f"Running combined SystemOne classification ({question_type}) on "
+        f"{len(responses_df)} responses using {len(refined_themes_df)} themes"
+    )
+    return await _run_per_response(
+        responses_df,
+        client,
+        question,
+        questions,
+        extractors=[mapping_extractor, _evidence_extractor(threshold)],
+        concurrency=concurrency,
+        stage_name="classification",
+    )
 
 
 def _merge_results(
@@ -492,6 +585,7 @@ async def find_themes_hybrid(
     system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
     verbose: bool = True,
     concurrency: int = 10,
+    systemone_concurrency: int = DEFAULT_CONCURRENCY,
     threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
     mapping_question_type: str = "noul",
 ) -> dict[str, str | pd.DataFrame]:
@@ -499,7 +593,8 @@ async def find_themes_hybrid(
 
     The generative stages (theme generation, condensation, refinement) run on
     the LLM exactly as in :func:`themefinder.find_themes`; the classification
-    stages (theme mapping, detail detection) run on SystemOne.
+    stages (theme mapping, detail detection) run on SystemOne, batched into a
+    single call per response.
 
     Args:
         responses_df: DataFrame containing survey responses.
@@ -508,7 +603,8 @@ async def find_themes_hybrid(
         question: The survey question.
         system_prompt: System prompt guiding the LLM's behaviour.
         verbose: Whether to show information messages during processing.
-        concurrency: Number of concurrent API calls to make.
+        concurrency: Number of concurrent LLM calls to make.
+        systemone_concurrency: Number of concurrent SystemOne calls to make.
         threshold: Probability threshold for SystemOne assignments.
         mapping_question_type: "noul" or "choice" mapping strategy (see
             :func:`theme_mapping_systemone`).
@@ -540,22 +636,24 @@ async def find_themes_hybrid(
         concurrency=concurrency,
     )
 
-    mapping_df, mapping_unprocessables = await theme_mapping_systemone(
+    classified_df, mapping_unprocessables = await classify_responses_systemone(
         responses_df[["response_id", "response"]],
         systemone_client,
         question=question,
         refined_themes_df=refined_theme_df,
         threshold=threshold,
-        concurrency=concurrency,
+        concurrency=systemone_concurrency,
         question_type=mapping_question_type,
     )
-    detailed_df, _ = await detail_detection_systemone(
-        responses_df[["response_id", "response"]],
-        systemone_client,
-        question=question,
-        threshold=threshold,
-        concurrency=concurrency,
-    )
+    if classified_df.empty:
+        mapping_df = detailed_df = classified_df
+    else:
+        mapping_df = classified_df[
+            ["response_id", "response", "labels", "theme_probabilities"]
+        ]
+        detailed_df = classified_df[
+            ["response_id", "response", "evidence_rich", "evidence_probability"]
+        ]
 
     logger.info("Finished finding themes (hybrid SystemOne pipeline)")
     return {

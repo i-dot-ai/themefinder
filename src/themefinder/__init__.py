@@ -2,6 +2,7 @@ from .llm import LLM, LLMResponse, LLMUsage, OpenAILLM
 from .systemone import (
     SystemOne,
     SystemOneUsage,
+    classify_responses_systemone,
     detail_detection_systemone,
     find_themes_hybrid,
     theme_mapping_systemone,
@@ -29,6 +30,7 @@ __all__ = [
     "OpenAILLM",
     "SystemOne",
     "SystemOneUsage",
+    "classify_responses_systemone",
     "detail_detection_systemone",
     "find_themes",
     "find_themes_hybrid",

@@ -34,7 +34,7 @@ from pathlib import Path
 
 import dotenv
 import pandas as pd
-from sklearn.metrics import cohen_kappa_score
+from sklearn.metrics import cohen_kappa_score, roc_auc_score
 
 sys.path.insert(0, str(Path(__file__).parent))
 
@@ -44,6 +44,7 @@ from metrics import calculate_mapping_metrics  # noqa: E402
 from themefinder import (  # noqa: E402
     OpenAILLM,
     SystemOne,
+    classify_responses_systemone,
     detail_detection,
     detail_detection_systemone,
     theme_mapping,
@@ -163,7 +164,14 @@ def detail_accuracy_metrics(
         return {}
     accuracy = float((df["evidence_rich"] == df["expected"]).mean())
     kappa = float(cohen_kappa_score(df["expected"], df["evidence_rich"]))
-    return {"accuracy": accuracy, "cohen_kappa": kappa}
+    metrics = {"accuracy": accuracy, "cohen_kappa": kappa}
+    # AUC (threshold-free) shows whether probabilities rank responses
+    # correctly even when the 0.5 threshold classifies them all one way.
+    if "evidence_probability" in df.columns and df["expected"].nunique() > 1:
+        metrics["auc"] = float(
+            roc_auc_score((df["expected"] == "YES"), df["evidence_probability"])
+        )
+    return metrics
 
 
 async def run_llm_stages(
@@ -304,6 +312,54 @@ async def run_systemone_stages(
         )
     )
 
+    # The efficient production shape: both stages' questions batched into a
+    # single SystemOne call per response.
+    combined_mode = next(iter(thresholds_by_mode))
+    before = (client.usage.input_tokens, client.usage.output_tokens)
+    start = time.perf_counter()
+    combined_df, unprocessable = await classify_responses_systemone(
+        responses_df=responses_df[["response_id", "response"]],
+        client=client,
+        question=question,
+        refined_themes_df=topics_df[["topic_id", "topic"]],
+        threshold=thresholds_by_mode[combined_mode],
+        concurrency=concurrency,
+        question_type=combined_mode,
+    )
+    seconds = time.perf_counter() - start
+    if not unprocessable.empty:
+        print(
+            f"  Warning: {len(unprocessable)} responses unprocessable "
+            f"(SystemOne combined)"
+        )
+    input_tokens = client.usage.input_tokens - before[0]
+    output_tokens = client.usage.output_tokens - before[1]
+    combined_metrics = {
+        **{
+            f"map_{key}": value
+            for key, value in mapping_accuracy_metrics(
+                combined_df, expected_mapping
+            ).items()
+        },
+        **{
+            f"detail_{key}": value
+            for key, value in detail_accuracy_metrics(
+                combined_df, expected_detail
+            ).items()
+        },
+    }
+    runs.append(
+        StageRun(
+            backend=f"systemone-combined[{combined_mode}]",
+            stage="mapping+detail",
+            seconds=seconds,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cost_usd=cost_usd(input_tokens, output_tokens, prices),
+            metrics=combined_metrics,
+        )
+    )
+
     return runs, mapping_dfs, detail_df
 
 
@@ -379,7 +435,15 @@ async def main() -> None:
         default=0.25,
         help="Assignment threshold for choice-based mapping (distribution sums to 1)",
     )
-    parser.add_argument("--concurrency", type=int, default=10)
+    parser.add_argument(
+        "--concurrency", type=int, default=10, help="Concurrent LLM calls"
+    )
+    parser.add_argument(
+        "--systemone-concurrency",
+        type=int,
+        default=50,
+        help="Concurrent SystemOne calls (cheap, fast requests: go high)",
+    )
     parser.add_argument(
         "--skip-llm", action="store_true", help="Only run the SystemOne stages"
     )
@@ -492,7 +556,7 @@ async def main() -> None:
                 expected_mapping,
                 expected_detail,
                 thresholds_by_mode,
-                args.concurrency,
+                args.systemone_concurrency,
             )
             runs.extend(systemone_runs)
 

@@ -13,6 +13,7 @@ from themefinder.systemone import (
     MAPPING_CHOICE_KEY,
     THEME_QUESTION_PREFIX,
     SystemOne,
+    classify_responses_systemone,
     detail_detection_systemone,
     theme_mapping_systemone,
 )
@@ -290,6 +291,43 @@ async def test_detail_detection_classifies_by_threshold(responses_df):
     classifications = dict(zip(result["response_id"], result["evidence_rich"]))
     assert classifications == {1: "YES", 2: "NO"}
     assert result["evidence_probability"].tolist() == [0.8, 0.3]
+
+
+async def test_combined_classification_uses_one_call_per_response(
+    themes_df, responses_df
+):
+    transport = FakeTransport(
+        {
+            "ban them all": {
+                f"{THEME_QUESTION_PREFIX}A": 0.9,
+                "evidence_rich": 0.8,
+            },
+            "think of the funding": {
+                f"{THEME_QUESTION_PREFIX}B": 0.7,
+                "evidence_rich": 0.2,
+            },
+        }
+    )
+    client = SystemOne(transport=transport)
+
+    result, unprocessable = await classify_responses_systemone(
+        responses_df, client, question="Q?", refined_themes_df=themes_df
+    )
+
+    assert unprocessable.empty
+    # Both stages answered from a single call per response
+    assert len(transport.calls) == len(responses_df)
+    _, questions = transport.calls[0]
+    assert set(questions) == {
+        f"{THEME_QUESTION_PREFIX}A",
+        f"{THEME_QUESTION_PREFIX}B",
+        GIVES_REASON_KEY,
+        "evidence_rich",
+    }
+    labels = dict(zip(result["response_id"], result["labels"]))
+    assert labels == {1: ["A"], 2: ["B"]}
+    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
+    assert classifications == {1: "YES", 2: "NO"}
 
 
 async def test_client_accumulates_token_usage(themes_df, responses_df):
