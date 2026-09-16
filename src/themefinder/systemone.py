@@ -1,19 +1,32 @@
-"""SystemOne (TypeSafe jev) implementations of themefinder's classification stages.
+"""SystemOne (TypeSafe jev) implementation of themefinder's classification stages.
 
-The jev SystemOne model answers typed questions (noul = yes/no probability,
-choice, score) about a piece of state. It is not generative, so only the
-classification-shaped stages of the themefinder pipeline transfer:
+The jev SystemOne model answers typed yes/no ("noul") questions about a piece
+of state, returning calibrated probabilities. It is not generative, so only
+the classification-shaped stages of the themefinder pipeline transfer: theme
+mapping ("does this response express this topic?") and detail detection ("is
+this response evidence-rich?"). The generative stages (theme generation,
+condensation, refinement) remain on the LLM; :func:`find_themes_hybrid`
+combines both.
 
-- theme mapping: one noul question per theme, batched into a single call per
-  response ("does this response express this topic?")
-- detail detection: one noul question per response ("is this response
-  evidence-rich?")
+Requests are shaped for efficiency, following TypeSafe's guidance that the
+state dominates each request and that questions in one request are evaluated
+independently and in parallel:
 
-The generative stages (theme generation, condensation, refinement) remain on
-the LLM; ``find_themes_hybrid`` combines both.
+- both stages' questions are asked in the same request, and
+- a batch of responses shares each request: the state carries the question
+  and a list of responses, and every question names the response_id it is
+  about.
 
-Every answer comes back with a calibrated probability, so callers can tune the
-assignment threshold or route low-confidence answers to human review.
+Benchmarked against the local gambling_XS ground truth
+(evals/compare_systemone.py), this shape matched or beat the per-response and
+choice-question alternatives on F1 while making a twentieth of the requests,
+so the alternatives were removed.
+
+Thresholds: theme probabilities are well spread, so the default assignment
+threshold is 0.5. Evidence-rich probabilities cluster near zero (the rubric
+is strict) while ranking responses accurately, so the default detail
+threshold is 0.05 — tuned on one 100-response question part; sanity-check it
+per consultation rather than trusting it universally.
 """
 
 import asyncio
@@ -40,10 +53,15 @@ from themefinder.tasks import (
 from themefinder.themefinder_logging import logger
 
 DEFAULT_ASSIGNMENT_THRESHOLD = 0.5
+DEFAULT_DETAIL_THRESHOLD = 0.05
 
 # SystemOne calls are small and fast; the model is built for high-throughput
 # parallel questioning, so a much higher concurrency than an LLM's is safe.
 DEFAULT_CONCURRENCY = 50
+
+# Responses per request. Each response in the batch carries its own question
+# set, so requests grow linearly with this; 20 mirrors the LLM stages.
+DEFAULT_BATCH_SIZE = 20
 
 # Retry policy for SystemOne calls, mirroring the LLM batch processor.
 RETRY_ATTEMPTS = 6
@@ -52,17 +70,13 @@ RETRY_MAX_WAIT_SECONDS = 20
 
 THEME_QUESTION_PREFIX = "theme_"
 GIVES_REASON_KEY = "gives_reason"
+EVIDENCE_KEY = "evidence_rich"
 FALLBACK_OTHER = "Other"
 FALLBACK_NO_REASON = "No Reason Given"
 
-# Question instructions are a preamble (locating the response in the state)
-# plus a body (the actual judgement). The batched preamble lets many
-# responses share one request: the state carries a list of responses and each
-# question names the response_id it is about.
-SINGLE_RESPONSE_PREAMBLE = (
-    "The state contains a consultation question and one free-text response to it. "
-)
-BATCHED_RESPONSE_PREAMBLE = (
+# Every question opens with this preamble so its judgement targets exactly
+# one response within the shared state.
+RESPONSE_PREAMBLE = (
     "The state contains a consultation question and a list of responses, each "
     "with a response_id. Consider only the response whose response_id is "
     "{response_id}, ignoring all other responses. "
@@ -73,23 +87,6 @@ THEME_MAPPING_BODY = (
     "use the same wording as the topic; it is a match if it expresses a similar "
     "sentiment or point of view. Topic: {topic}"
 )
-
-MAPPING_CHOICE_KEY = "themes"
-CHOICE_MAPPING_BODY = (
-    "Which topic does the response most clearly express? A response matches a topic "
-    "if it expresses a similar sentiment or point of view; exact wording is not "
-    "required."
-)
-FALLBACK_CRITERIA = {
-    "Other": (
-        "The response gives a substantive opinion or reason, but none of the "
-        "listed topics apply."
-    ),
-    "No Reason Given": (
-        "The response gives no substantive reason or opinion in answer to the "
-        "question (it is empty, off-topic or a refusal to answer)."
-    ),
-}
 
 GIVES_REASON_BODY = (
     "Does the response give any substantive opinion, reason or argument in answer "
@@ -188,9 +185,7 @@ def _theme_texts(refined_themes_df: pd.DataFrame) -> dict[str, str]:
     otherwise combines ``topic_label`` and ``topic_description``.
     """
     if "topic" in refined_themes_df.columns:
-        return dict(
-            zip(refined_themes_df["topic_id"], refined_themes_df["topic"])
-        )
+        return dict(zip(refined_themes_df["topic_id"], refined_themes_df["topic"]))
     return {
         row["topic_id"]: f"{row['topic_label']}: {row['topic_description']}"
         for _, row in refined_themes_df.iterrows()
@@ -220,43 +215,6 @@ def _noul(
             criteria={"true": true_criteria, "false": false_criteria},
         )
     return Noul(instructions=instructions)
-
-
-def _mapping_questions(
-    theme_texts: dict[str, str],
-    preamble: str = SINGLE_RESPONSE_PREAMBLE,
-    prefix: str = "",
-) -> dict[str, Any]:
-    """Build the batched noul question set for mapping one response to themes."""
-    questions = {
-        f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}": _noul(
-            preamble + THEME_MAPPING_BODY.format(topic=topic_text)
-        )
-        for topic_id, topic_text in theme_texts.items()
-    }
-    questions[f"{prefix}{GIVES_REASON_KEY}"] = _noul(preamble + GIVES_REASON_BODY)
-    return questions
-
-
-def _mapping_choice_question(
-    theme_texts: dict[str, str],
-    preamble: str = SINGLE_RESPONSE_PREAMBLE,
-    prefix: str = "",
-) -> dict[str, Any]:
-    """Build a single choice question over all themes plus fallback options."""
-    try:
-        from typesafe_sdk import Choice
-    except ImportError as e:
-        raise ImportError(
-            "The 'typesafe-sdk' package is required for SystemOne stages. "
-            "Install it with the 'systemone' extra: pip install 'themefinder[systemone]'"
-        ) from e
-    return {
-        f"{prefix}{MAPPING_CHOICE_KEY}": Choice(
-            instructions=preamble + CHOICE_MAPPING_BODY,
-            criteria={**theme_texts, **FALLBACK_CRITERIA},
-        )
-    }
 
 
 def _is_retryable(exception: BaseException) -> bool:
@@ -299,10 +257,34 @@ async def _ask_with_retries(
     return await retrying(client.ask, state=state, questions=questions)
 
 
-def _labels_from_nouls(
-    result: Any, theme_texts: dict[str, str], threshold: float, prefix: str = ""
-) -> tuple[list[str], dict[str, float]]:
-    """Extract labels and probabilities from a batched-noul mapping answer."""
+def _response_questions(response_id: Any, theme_texts: dict[str, str]) -> dict[str, Any]:
+    """Build one response's question set: per-theme nouls, fallback, evidence."""
+    prefix = f"r{response_id}_"
+    preamble = RESPONSE_PREAMBLE.format(response_id=response_id)
+    questions = {
+        f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}": _noul(
+            preamble + THEME_MAPPING_BODY.format(topic=topic_text)
+        )
+        for topic_id, topic_text in theme_texts.items()
+    }
+    questions[f"{prefix}{GIVES_REASON_KEY}"] = _noul(preamble + GIVES_REASON_BODY)
+    questions[f"{prefix}{EVIDENCE_KEY}"] = _noul(
+        preamble + EVIDENCE_RICH_BODY,
+        true_criteria=EVIDENCE_RICH_TRUE_CRITERIA,
+        false_criteria=EVIDENCE_RICH_FALSE_CRITERIA,
+    )
+    return questions
+
+
+def _extract_response_output(
+    result: Any,
+    response_id: Any,
+    theme_texts: dict[str, str],
+    threshold: float,
+    detail_threshold: float,
+) -> dict:
+    """Turn one response's SystemOne answers into an output row."""
+    prefix = f"r{response_id}_"
     probabilities = {
         topic_id: result.nouls[f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}"].noul
         for topic_id in theme_texts
@@ -315,372 +297,15 @@ def _labels_from_nouls(
     if not labels:
         gives_reason = result.nouls[f"{prefix}{GIVES_REASON_KEY}"].noul
         labels = [FALLBACK_OTHER if gives_reason >= threshold else FALLBACK_NO_REASON]
-    return labels, probabilities
 
-
-def _labels_from_choice(
-    result: Any, theme_texts: dict[str, str], threshold: float, prefix: str = ""
-) -> tuple[list[str], dict[str, float]]:
-    """Extract labels and probabilities from a single-choice mapping answer.
-
-    The choice's probability distribution spans all themes plus the fallback
-    options and sums to one, so a response expressing several themes splits its
-    probability mass between them. Every theme at or above the threshold is
-    assigned; when none reaches it, the model's top choice is used (which may
-    be a fallback option).
-    """
-    answer = result.choices[f"{prefix}{MAPPING_CHOICE_KEY}"]
-    probabilities = dict(answer.probabilities)
-    labels = [
-        topic_id
-        for topic_id, probability in probabilities.items()
-        if topic_id in theme_texts and probability >= threshold
-    ]
-    if not labels:
-        labels = [answer.choice]
-    return labels, probabilities
-
-
-def _evidence_extractor(threshold: float, prefix: str = ""):
-    """Build an extractor for the evidence-rich noul answer."""
-
-    def extract(result: Any) -> dict:
-        probability = result.nouls[f"{prefix}evidence_rich"].noul
-        return {
-            "evidence_rich": "YES" if probability >= threshold else "NO",
-            "evidence_probability": probability,
-        }
-
-    return extract
-
-
-async def _run_per_response(
-    responses_df: pd.DataFrame,
-    client: SystemOne,
-    question: str,
-    questions: dict[str, Any],
-    extractors: list,
-    concurrency: int,
-    stage_name: str,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Ask one batched SystemOne question set per response, concurrently.
-
-    Each extractor turns the SystemOne result into a dict of output columns;
-    their outputs are merged into one row per response.
-    """
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def process_one(row: dict) -> dict | None:
-        state = {"question": question, "response": row["response"]}
-        async with semaphore:
-            try:
-                result = await _ask_with_retries(client, state, questions)
-            except Exception as e:
-                logger.warning(
-                    f"SystemOne {stage_name} failed for response "
-                    f"{row['response_id']}: {e}"
-                )
-                return None
-
-        output = {"response_id": row["response_id"]}
-        for extract in extractors:
-            output.update(extract(result))
-        return output
-
-    rows = responses_df.to_dict(orient="records")
-    results = await asyncio.gather(*[process_one(row) for row in rows])
-
-    return _merge_results(responses_df, rows, results)
-
-
-async def theme_mapping_systemone(
-    responses_df: pd.DataFrame,
-    client: SystemOne,
-    question: str,
-    refined_themes_df: pd.DataFrame,
-    threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
-    concurrency: int = DEFAULT_CONCURRENCY,
-    question_type: str = "noul",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Map survey responses to refined themes using SystemOne questions.
-
-    Two question strategies are supported, one SystemOne call per response
-    either way:
-
-    - "noul" (default): one yes/no question per theme plus a fallback
-      question, batched into the call. Each theme gets an independent
-      calibrated probability, so multi-theme responses are handled naturally.
-      Themes at or above the threshold are assigned; when none is, the
-      response is labelled "Other" (or "No Reason Given" when it does not
-      appear to answer the question at all).
-    - "choice": a single choice question whose options are the themes plus
-      the fallback options. The answer is a probability distribution over the
-      options; themes at or above the threshold are assigned, falling back to
-      the model's top choice. Because the distribution sums to one, a lower
-      threshold (e.g. 0.25) is appropriate in this mode.
-
-    Args:
-        responses_df: DataFrame with 'response_id' and 'response' columns.
-        client: SystemOne client wrapper.
-        question: The survey question.
-        refined_themes_df: DataFrame of refined themes with 'topic_id' and
-            'topic' (or 'topic_label' + 'topic_description') columns.
-        threshold: Minimum probability for a theme to be assigned.
-        concurrency: Maximum number of simultaneous SystemOne calls.
-        question_type: "noul" or "choice" (see above).
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows).
-        The results include a 'labels' column (list of topic_ids, matching the
-        LLM stage's output) and a 'theme_probabilities' column with the full
-        probability per theme.
-    """
-    questions, extractor = _mapping_questions_and_extractor(
-        refined_themes_df, question_type, threshold
-    )
-    logger.info(
-        f"Running SystemOne theme mapping ({question_type}) on "
-        f"{len(responses_df)} responses using {len(refined_themes_df)} themes"
-    )
-    return await _run_per_response(
-        responses_df,
-        client,
-        question,
-        questions,
-        extractors=[extractor],
-        concurrency=concurrency,
-        stage_name="mapping",
-    )
-
-
-def _mapping_questions_and_extractor(
-    refined_themes_df: pd.DataFrame,
-    question_type: str,
-    threshold: float,
-    preamble: str = SINGLE_RESPONSE_PREAMBLE,
-    prefix: str = "",
-) -> tuple[dict[str, Any], Any]:
-    """Build the mapping question set and its answer extractor."""
-    if question_type not in ("noul", "choice"):
-        raise ValueError(
-            f"question_type must be 'noul' or 'choice', got '{question_type}'"
-        )
-    theme_texts = _theme_texts(refined_themes_df)
-    if question_type == "choice":
-        questions = _mapping_choice_question(theme_texts, preamble, prefix)
-        extract_labels = _labels_from_choice
-    else:
-        questions = _mapping_questions(theme_texts, preamble, prefix)
-        extract_labels = _labels_from_nouls
-
-    def extract(result: Any) -> dict:
-        labels, probabilities = extract_labels(result, theme_texts, threshold, prefix)
-        return {"labels": labels, "theme_probabilities": probabilities}
-
-    return questions, extract
-
-
-async def detail_detection_systemone(
-    responses_df: pd.DataFrame,
-    client: SystemOne,
-    question: str,
-    threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
-    concurrency: int = DEFAULT_CONCURRENCY,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Identify evidence-rich responses using a SystemOne noul question.
-
-    Args:
-        responses_df: DataFrame with 'response_id' and 'response' columns.
-        client: SystemOne client wrapper.
-        question: The survey question.
-        threshold: Minimum probability to classify a response as evidence-rich.
-        concurrency: Maximum number of simultaneous SystemOne calls.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows).
-        The results include an 'evidence_rich' column ("YES"/"NO", matching the
-        LLM stage's output) and an 'evidence_probability' column.
-    """
-    logger.info(f"Running SystemOne detail detection on {len(responses_df)} responses")
-    return await _run_per_response(
-        responses_df,
-        client,
-        question,
-        questions={"evidence_rich": _evidence_question()},
-        extractors=[_evidence_extractor(threshold)],
-        concurrency=concurrency,
-        stage_name="detail detection",
-    )
-
-
-def _evidence_question(preamble: str = SINGLE_RESPONSE_PREAMBLE) -> Any:
-    return _noul(
-        preamble + EVIDENCE_RICH_BODY,
-        true_criteria=EVIDENCE_RICH_TRUE_CRITERIA,
-        false_criteria=EVIDENCE_RICH_FALSE_CRITERIA,
-    )
-
-
-async def classify_responses_systemone(
-    responses_df: pd.DataFrame,
-    client: SystemOne,
-    question: str,
-    refined_themes_df: pd.DataFrame,
-    threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
-    concurrency: int = DEFAULT_CONCURRENCY,
-    question_type: str = "noul",
-    batch_size: int | None = None,
-    detail_threshold: float | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run theme mapping and detail detection in one SystemOne call per response.
-
-    SystemOne evaluates every question in a request against the same state in
-    parallel, so batching the theme questions and the evidence-rich question
-    together halves the number of requests (and avoids paying for the shared
-    state twice) compared with running the two stages separately. Answers are
-    identical to the separate stages.
-
-    With ``batch_size`` set, several responses share each request: the state
-    carries a list of responses and every question names the response it is
-    about (keys become ``r<response_id>_...``). This reduces round trips
-    further at the risk of a small quality cost, since each judgement must
-    first locate its response within the larger state.
-
-    Args:
-        responses_df: DataFrame with 'response_id' and 'response' columns.
-        client: SystemOne client wrapper.
-        question: The survey question.
-        refined_themes_df: DataFrame of refined themes with 'topic_id' and
-            'topic' (or 'topic_label' + 'topic_description') columns.
-        threshold: Minimum probability for assignments.
-        concurrency: Maximum number of simultaneous SystemOne calls.
-        question_type: "noul" or "choice" mapping strategy (see
-            :func:`theme_mapping_systemone`).
-        batch_size: Number of responses to share one request; None (default)
-            sends one request per response.
-        detail_threshold: Separate probability threshold for the evidence-rich
-            classification; defaults to ``threshold``.
-
-    Returns:
-        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows).
-        The results carry both stages' columns: 'labels', 'theme_probabilities',
-        'evidence_rich' and 'evidence_probability'.
-    """
-    logger.info(
-        f"Running combined SystemOne classification ({question_type}"
-        f"{f', batch size {batch_size}' if batch_size else ''}) on "
-        f"{len(responses_df)} responses using {len(refined_themes_df)} themes"
-    )
-    if detail_threshold is None:
-        detail_threshold = threshold
-    if batch_size and batch_size > 1:
-        return await _classify_batched(
-            responses_df,
-            client,
-            question,
-            refined_themes_df,
-            threshold,
-            concurrency,
-            question_type,
-            batch_size,
-            detail_threshold,
-        )
-
-    questions, mapping_extractor = _mapping_questions_and_extractor(
-        refined_themes_df, question_type, threshold
-    )
-    questions = {**questions, "evidence_rich": _evidence_question()}
-    return await _run_per_response(
-        responses_df,
-        client,
-        question,
-        questions,
-        extractors=[mapping_extractor, _evidence_extractor(detail_threshold)],
-        concurrency=concurrency,
-        stage_name="classification",
-    )
-
-
-async def _classify_batched(
-    responses_df: pd.DataFrame,
-    client: SystemOne,
-    question: str,
-    refined_themes_df: pd.DataFrame,
-    threshold: float,
-    concurrency: int,
-    question_type: str,
-    batch_size: int,
-    detail_threshold: float,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Classify several responses per SystemOne request.
-
-    The state holds the question and a list of responses; each response gets
-    its own key-prefixed question set referencing its response_id.
-    """
-    semaphore = asyncio.Semaphore(concurrency)
-
-    def build_questions_and_extractors(
-        rows: list[dict],
-    ) -> tuple[dict[str, Any], dict[int, list]]:
-        questions: dict[str, Any] = {}
-        extractors_by_id: dict[int, list] = {}
-        for row in rows:
-            response_id = row["response_id"]
-            prefix = f"r{response_id}_"
-            preamble = BATCHED_RESPONSE_PREAMBLE.format(response_id=response_id)
-            mapping_questions, mapping_extractor = _mapping_questions_and_extractor(
-                refined_themes_df, question_type, threshold, preamble, prefix
-            )
-            questions.update(mapping_questions)
-            questions[f"{prefix}evidence_rich"] = _evidence_question(preamble)
-            extractors_by_id[response_id] = [
-                mapping_extractor,
-                _evidence_extractor(detail_threshold, prefix),
-            ]
-        return questions, extractors_by_id
-
-    async def process_chunk(chunk: pd.DataFrame) -> tuple[list[dict], list[dict | None]]:
-        rows = chunk.to_dict(orient="records")
-        state = {
-            "question": question,
-            "responses": [
-                {"response_id": row["response_id"], "response": row["response"]}
-                for row in rows
-            ],
-        }
-        questions, extractors_by_id = build_questions_and_extractors(rows)
-        try:
-            result = await _ask_with_retries(client, state, questions)
-        except Exception as e:
-            logger.warning(
-                f"SystemOne batched classification failed for responses "
-                f"{[row['response_id'] for row in rows]}: {e}"
-            )
-            return rows, [None] * len(rows)
-
-        outputs: list[dict | None] = []
-        for row in rows:
-            output = {"response_id": row["response_id"]}
-            for extract in extractors_by_id[row["response_id"]]:
-                output.update(extract(result))
-            outputs.append(output)
-        return rows, outputs
-
-    async def process_chunk_limited(chunk: pd.DataFrame):
-        async with semaphore:
-            return await process_chunk(chunk)
-
-    chunks = [
-        responses_df.iloc[i : i + batch_size]
-        for i in range(0, len(responses_df), batch_size)
-    ]
-    chunk_results = await asyncio.gather(
-        *[process_chunk_limited(chunk) for chunk in chunks]
-    )
-
-    all_rows = [row for rows, _ in chunk_results for row in rows]
-    all_outputs = [output for _, outputs in chunk_results for output in outputs]
-    return _merge_results(responses_df, all_rows, all_outputs)
+    evidence_probability = result.nouls[f"{prefix}{EVIDENCE_KEY}"].noul
+    return {
+        "response_id": response_id,
+        "labels": labels,
+        "theme_probabilities": probabilities,
+        "evidence_rich": "YES" if evidence_probability >= detail_threshold else "NO",
+        "evidence_probability": evidence_probability,
+    }
 
 
 def _merge_results(
@@ -691,9 +316,7 @@ def _merge_results(
     """Merge per-response results back onto the input, splitting out failures."""
     processed = [result for result in results if result is not None]
     failed_ids = [
-        row["response_id"]
-        for row, result in zip(rows, results)
-        if result is None
+        row["response_id"] for row, result in zip(rows, results) if result is None
     ]
     unprocessable_df = responses_df[
         responses_df["response_id"].isin(failed_ids)
@@ -708,6 +331,95 @@ def _merge_results(
     return processed_df, unprocessable_df
 
 
+async def classify_responses_systemone(
+    responses_df: pd.DataFrame,
+    client: SystemOne,
+    question: str,
+    refined_themes_df: pd.DataFrame,
+    threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
+    detail_threshold: float = DEFAULT_DETAIL_THRESHOLD,
+    concurrency: int = DEFAULT_CONCURRENCY,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Map responses to themes and detect evidence-rich responses via SystemOne.
+
+    Responses are processed in batches: each request's state carries the
+    question and a list of responses, and every response gets its own set of
+    per-theme yes/no questions plus a fallback question and an evidence-rich
+    question, all answered in that one request. Themes whose probability meets
+    the threshold are assigned; when none does, the response is labelled
+    "Other" (or "No Reason Given" when it does not appear to answer the
+    question at all).
+
+    Args:
+        responses_df: DataFrame with 'response_id' and 'response' columns.
+        client: SystemOne client wrapper.
+        question: The survey question.
+        refined_themes_df: DataFrame of refined themes with 'topic_id' and
+            'topic' (or 'topic_label' + 'topic_description') columns.
+        threshold: Minimum probability for a theme to be assigned.
+        detail_threshold: Minimum probability to classify a response as
+            evidence-rich. Evidence probabilities cluster low, hence the
+            separate, lower default.
+        concurrency: Maximum number of simultaneous SystemOne calls.
+        batch_size: Number of responses sharing each request.
+
+    Returns:
+        tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows).
+        Results carry 'labels' and 'evidence_rich' (matching the LLM stages'
+        outputs) plus 'theme_probabilities' and 'evidence_probability'.
+    """
+    logger.info(
+        f"Running SystemOne classification on {len(responses_df)} responses "
+        f"using {len(refined_themes_df)} themes (batch size {batch_size})"
+    )
+    theme_texts = _theme_texts(refined_themes_df)
+    semaphore = asyncio.Semaphore(concurrency)
+
+    async def process_chunk(
+        chunk: pd.DataFrame,
+    ) -> tuple[list[dict], list[dict | None]]:
+        rows = chunk.to_dict(orient="records")
+        state = {
+            "question": question,
+            "responses": [
+                {"response_id": row["response_id"], "response": row["response"]}
+                for row in rows
+            ],
+        }
+        questions: dict[str, Any] = {}
+        for row in rows:
+            questions.update(_response_questions(row["response_id"], theme_texts))
+
+        async with semaphore:
+            try:
+                result = await _ask_with_retries(client, state, questions)
+            except Exception as e:
+                logger.warning(
+                    f"SystemOne classification failed for responses "
+                    f"{[row['response_id'] for row in rows]}: {e}"
+                )
+                return rows, [None] * len(rows)
+
+        outputs = [
+            _extract_response_output(
+                result, row["response_id"], theme_texts, threshold, detail_threshold
+            )
+            for row in rows
+        ]
+        return rows, outputs
+
+    chunks = [
+        responses_df.iloc[i : i + batch_size]
+        for i in range(0, len(responses_df), batch_size)
+    ]
+    chunk_results = await asyncio.gather(*[process_chunk(chunk) for chunk in chunks])
+
+    all_rows = [row for rows, _ in chunk_results for row in rows]
+    all_outputs = [output for _, outputs in chunk_results for output in outputs]
+    return _merge_results(responses_df, all_rows, all_outputs)
+
+
 async def find_themes_hybrid(
     responses_df: pd.DataFrame,
     llm: LLM,
@@ -718,14 +430,15 @@ async def find_themes_hybrid(
     concurrency: int = 10,
     systemone_concurrency: int = DEFAULT_CONCURRENCY,
     threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
-    mapping_question_type: str = "noul",
+    detail_threshold: float = DEFAULT_DETAIL_THRESHOLD,
+    batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> dict[str, str | pd.DataFrame]:
     """Run the theme analysis pipeline with SystemOne classification stages.
 
     The generative stages (theme generation, condensation, refinement) run on
     the LLM exactly as in :func:`themefinder.find_themes`; the classification
-    stages (theme mapping, detail detection) run on SystemOne, batched into a
-    single call per response.
+    stages (theme mapping, detail detection) run on SystemOne in one batched
+    request per group of responses.
 
     Args:
         responses_df: DataFrame containing survey responses.
@@ -736,9 +449,9 @@ async def find_themes_hybrid(
         verbose: Whether to show information messages during processing.
         concurrency: Number of concurrent LLM calls to make.
         systemone_concurrency: Number of concurrent SystemOne calls to make.
-        threshold: Probability threshold for SystemOne assignments.
-        mapping_question_type: "noul" or "choice" mapping strategy (see
-            :func:`theme_mapping_systemone`).
+        threshold: Probability threshold for theme assignment.
+        detail_threshold: Probability threshold for evidence-rich classification.
+        batch_size: Number of responses sharing each SystemOne request.
 
     Returns:
         Dictionary with the same shape as :func:`themefinder.find_themes`.
@@ -767,14 +480,15 @@ async def find_themes_hybrid(
         concurrency=concurrency,
     )
 
-    classified_df, mapping_unprocessables = await classify_responses_systemone(
+    classified_df, unprocessables = await classify_responses_systemone(
         responses_df[["response_id", "response"]],
         systemone_client,
         question=question,
         refined_themes_df=refined_theme_df,
         threshold=threshold,
+        detail_threshold=detail_threshold,
         concurrency=systemone_concurrency,
-        question_type=mapping_question_type,
+        batch_size=batch_size,
     )
     if classified_df.empty:
         mapping_df = detailed_df = classified_df
@@ -792,5 +506,5 @@ async def find_themes_hybrid(
         "themes": refined_theme_df,
         "mapping": mapping_df,
         "detailed_responses": detailed_df,
-        "unprocessables": mapping_unprocessables,
+        "unprocessables": unprocessables,
     }

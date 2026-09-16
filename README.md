@@ -112,7 +112,7 @@ The file `src/themefinder.core.py` contains the function `find_themes` which run
 
 ## SystemOne (jev) classification stages — experimental
 
-The classification-shaped stages of the pipeline (theme mapping and detail detection) have alternative implementations backed by [TypeSafe's jev SystemOne model](https://docs.typesafe.ai/), which answers typed yes/no ("noul") and multiple-choice questions with calibrated probabilities instead of generating text. The generative stages (theme generation, condensation and refinement) still run on an LLM.
+The classification-shaped stages of the pipeline (theme mapping and detail detection) have an alternative implementation backed by [TypeSafe's jev SystemOne model](https://docs.typesafe.ai/), which answers typed yes/no ("noul") questions with calibrated probabilities instead of generating text. Both stages are batched into a single SystemOne request per group of responses. The generative stages (theme generation, condensation and refinement) still run on an LLM.
 
 Install the extra and set your API key:
 
@@ -128,7 +128,7 @@ systemone_client = SystemOne.from_env()
 result = await find_themes_hybrid(responses_df, llm, systemone_client, question)
 ```
 
-`theme_mapping_systemone` and `detail_detection_systemone` can also be called individually, and mapping supports two question strategies (`question_type="noul"` or `"choice"`). To compare the regular LLM pipeline against SystemOne on speed, cost and accuracy, run:
+`classify_responses_systemone` runs the classification stages on their own, returning theme labels and evidence-rich flags with per-answer probabilities. The evidence-rich threshold defaults to 0.05 (jev's probabilities for that strict rubric cluster low); it was tuned on a small ground-truth set, so sanity-check it per consultation. To compare the regular LLM pipeline against SystemOne on speed, cost and accuracy, run:
 
 ```sh
 uv run python evals/compare_systemone.py --dataset gambling_XS

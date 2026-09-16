@@ -1,4 +1,4 @@
-"""Tests for the SystemOne (TypeSafe jev) pipeline stages."""
+"""Tests for the SystemOne (TypeSafe jev) classification stage."""
 
 from dataclasses import dataclass, field
 
@@ -7,15 +7,13 @@ import pytest
 
 from themefinder import systemone
 from themefinder.systemone import (
+    EVIDENCE_KEY,
     FALLBACK_NO_REASON,
     FALLBACK_OTHER,
     GIVES_REASON_KEY,
-    MAPPING_CHOICE_KEY,
     THEME_QUESTION_PREFIX,
     SystemOne,
     classify_responses_systemone,
-    detail_detection_systemone,
-    theme_mapping_systemone,
 )
 
 
@@ -37,18 +35,21 @@ class FakeResponse:
 
 
 class FakeTransport:
-    """Returns canned noul probabilities keyed on the response text."""
+    """Answers noul questions from a canned {question_key: probability} map.
 
-    def __init__(self, probabilities_by_response: dict[str, dict[str, float]]):
-        self.probabilities_by_response = probabilities_by_response
+    Question keys are prefixed per response, e.g. "r1_theme_A" or
+    "r2_evidence_rich"; unlisted keys answer 0.0.
+    """
+
+    def __init__(self, probabilities_by_key: dict[str, float]):
+        self.probabilities_by_key = probabilities_by_key
         self.calls = []
 
     async def system_one(self, state, questions):
         self.calls.append((state, questions))
-        probabilities = self.probabilities_by_response[state["response"]]
         return FakeResponse(
             nouls={
-                key: FakeNoulAnswer(noul=probabilities.get(key, 0.0))
+                key: FakeNoulAnswer(noul=self.probabilities_by_key.get(key, 0.0))
                 for key in questions
             }
         )
@@ -57,39 +58,6 @@ class FakeTransport:
 class FailingTransport:
     async def system_one(self, state, questions):
         raise RuntimeError("SystemOne unavailable")
-
-
-@dataclass
-class FakeChoiceAnswer:
-    choice: str
-    probabilities: dict[str, float]
-    confidence: float = 0.9
-
-
-@dataclass
-class FakeChoiceResponse:
-    choices: dict[str, FakeChoiceAnswer]
-    usage: FakeUsage = field(default_factory=FakeUsage)
-
-
-class FakeChoiceTransport:
-    """Returns a canned choice distribution keyed on the response text."""
-
-    def __init__(self, distributions_by_response: dict[str, dict[str, float]]):
-        self.distributions_by_response = distributions_by_response
-        self.calls = []
-
-    async def system_one(self, state, questions):
-        self.calls.append((state, questions))
-        probabilities = self.distributions_by_response[state["response"]]
-        top_choice = max(probabilities, key=probabilities.get)
-        return FakeChoiceResponse(
-            choices={
-                MAPPING_CHOICE_KEY: FakeChoiceAnswer(
-                    choice=top_choice, probabilities=probabilities
-                )
-            }
-        )
 
 
 @pytest.fixture(autouse=True)
@@ -122,63 +90,82 @@ def responses_df():
     )
 
 
-async def test_maps_responses_to_themes_above_threshold(themes_df, responses_df):
+async def test_classifies_both_stages_in_one_batched_call(themes_df, responses_df):
     transport = FakeTransport(
         {
-            "ban them all": {f"{THEME_QUESTION_PREFIX}A": 0.9, f"{THEME_QUESTION_PREFIX}B": 0.2},
-            "think of the funding": {
-                f"{THEME_QUESTION_PREFIX}A": 0.6,
-                f"{THEME_QUESTION_PREFIX}B": 0.8,
-            },
+            f"r1_{THEME_QUESTION_PREFIX}A": 0.9,
+            f"r1_{EVIDENCE_KEY}": 0.8,
+            f"r2_{THEME_QUESTION_PREFIX}A": 0.6,
+            f"r2_{THEME_QUESTION_PREFIX}B": 0.7,
+            f"r2_{EVIDENCE_KEY}": 0.01,
         }
     )
     client = SystemOne(transport=transport)
 
-    result, unprocessable = await theme_mapping_systemone(
-        responses_df, client, question="Should ads be banned?", refined_themes_df=themes_df
-    )
-
-    assert unprocessable.empty
-    labels = dict(zip(result["response_id"], result["labels"]))
-    assert labels[1] == ["A"]
-    assert labels[2] == ["A", "B"]
-    assert result["theme_probabilities"].iloc[0] == {"A": 0.9, "B": 0.2}
-
-
-async def test_batches_all_theme_questions_into_one_call_per_response(
-    themes_df, responses_df
-):
-    transport = FakeTransport(
-        {
-            "ban them all": {f"{THEME_QUESTION_PREFIX}A": 0.9},
-            "think of the funding": {f"{THEME_QUESTION_PREFIX}B": 0.9},
-        }
-    )
-    client = SystemOne(transport=transport)
-
-    await theme_mapping_systemone(
+    result, unprocessable = await classify_responses_systemone(
         responses_df, client, question="Q?", refined_themes_df=themes_df
     )
 
-    assert len(transport.calls) == len(responses_df)
-    _, questions = transport.calls[0]
+    assert unprocessable.empty
+    # One request covered every response and both stages
+    assert len(transport.calls) == 1
+    state, questions = transport.calls[0]
+    assert [r["response_id"] for r in state["responses"]] == [1, 2]
     assert set(questions) == {
-        f"{THEME_QUESTION_PREFIX}A",
-        f"{THEME_QUESTION_PREFIX}B",
-        GIVES_REASON_KEY,
+        f"r{rid}_{suffix}"
+        for rid in (1, 2)
+        for suffix in (
+            f"{THEME_QUESTION_PREFIX}A",
+            f"{THEME_QUESTION_PREFIX}B",
+            GIVES_REASON_KEY,
+            EVIDENCE_KEY,
+        )
     }
+    labels = dict(zip(result["response_id"], result["labels"]))
+    assert labels == {1: ["A"], 2: ["A", "B"]}
+    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
+    assert classifications == {1: "YES", 2: "NO"}
+    assert result["theme_probabilities"].iloc[0] == {"A": 0.9, "B": 0.0}
+    assert result["evidence_probability"].tolist() == [0.8, 0.01]
 
 
-async def test_falls_back_to_other_when_no_theme_matches_but_reason_given(
-    themes_df,
-):
-    responses = pd.DataFrame({"response_id": [1], "response": "unrelated opinion"})
-    transport = FakeTransport(
-        {"unrelated opinion": {GIVES_REASON_KEY: 0.9}},
-    )
+async def test_each_question_names_its_response(themes_df, responses_df):
+    transport = FakeTransport({})
     client = SystemOne(transport=transport)
 
-    result, _ = await theme_mapping_systemone(
+    await classify_responses_systemone(
+        responses_df, client, question="Q?", refined_themes_df=themes_df
+    )
+
+    _, questions = transport.calls[0]
+    assert "response_id is 1" in questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
+    assert "response_id is 2" in questions[f"r2_{THEME_QUESTION_PREFIX}A"].instructions
+    assert "Ban support" in questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
+
+
+async def test_batch_size_splits_responses_across_requests(themes_df, responses_df):
+    transport = FakeTransport({})
+    client = SystemOne(transport=transport)
+
+    await classify_responses_systemone(
+        responses_df,
+        client,
+        question="Q?",
+        refined_themes_df=themes_df,
+        batch_size=1,
+    )
+
+    assert len(transport.calls) == 2
+    for (state, _), expected_id in zip(transport.calls, [1, 2]):
+        assert [r["response_id"] for r in state["responses"]] == [expected_id]
+
+
+async def test_falls_back_to_other_when_no_theme_matches_but_reason_given(themes_df):
+    responses = pd.DataFrame({"response_id": [1], "response": "unrelated opinion"})
+    transport = FakeTransport({f"r1_{GIVES_REASON_KEY}": 0.9})
+    client = SystemOne(transport=transport)
+
+    result, _ = await classify_responses_systemone(
         responses, client, question="Q?", refined_themes_df=themes_df
     )
 
@@ -187,20 +174,43 @@ async def test_falls_back_to_other_when_no_theme_matches_but_reason_given(
 
 async def test_falls_back_to_no_reason_given_for_non_answers(themes_df):
     responses = pd.DataFrame({"response_id": [1], "response": "n/a"})
-    transport = FakeTransport({"n/a": {GIVES_REASON_KEY: 0.1}})
+    transport = FakeTransport({f"r1_{GIVES_REASON_KEY}": 0.1})
     client = SystemOne(transport=transport)
 
-    result, _ = await theme_mapping_systemone(
+    result, _ = await classify_responses_systemone(
         responses, client, question="Q?", refined_themes_df=themes_df
     )
 
     assert result["labels"].iloc[0] == [FALLBACK_NO_REASON]
 
 
-async def test_failed_responses_are_returned_as_unprocessable(themes_df, responses_df):
+async def test_detail_threshold_is_separate_from_mapping_threshold(
+    themes_df, responses_df
+):
+    # Evidence probabilities cluster low; 0.06 is rich at the 0.05 default
+    # even though it is far below the 0.5 mapping threshold.
+    transport = FakeTransport(
+        {
+            f"r1_{THEME_QUESTION_PREFIX}A": 0.9,
+            f"r1_{EVIDENCE_KEY}": 0.06,
+            f"r2_{THEME_QUESTION_PREFIX}B": 0.9,
+            f"r2_{EVIDENCE_KEY}": 0.04,
+        }
+    )
+    client = SystemOne(transport=transport)
+
+    result, _ = await classify_responses_systemone(
+        responses_df, client, question="Q?", refined_themes_df=themes_df
+    )
+
+    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
+    assert classifications == {1: "YES", 2: "NO"}
+
+
+async def test_failed_batches_are_returned_as_unprocessable(themes_df, responses_df):
     client = SystemOne(transport=FailingTransport())
 
-    result, unprocessable = await theme_mapping_systemone(
+    result, unprocessable = await classify_responses_systemone(
         responses_df, client, question="Q?", refined_themes_df=themes_df
     )
 
@@ -208,192 +218,16 @@ async def test_failed_responses_are_returned_as_unprocessable(themes_df, respons
     assert list(unprocessable["response_id"]) == [1, 2]
 
 
-async def test_choice_mapping_assigns_themes_from_distribution(
-    themes_df, responses_df
-):
-    transport = FakeChoiceTransport(
-        {
-            "ban them all": {"A": 0.7, "B": 0.1, "Other": 0.1, "No Reason Given": 0.1},
-            "think of the funding": {
-                "A": 0.35,
-                "B": 0.45,
-                "Other": 0.1,
-                "No Reason Given": 0.1,
-            },
-        }
-    )
-    client = SystemOne(transport=transport)
-
-    result, unprocessable = await theme_mapping_systemone(
-        responses_df,
-        client,
-        question="Q?",
-        refined_themes_df=themes_df,
-        threshold=0.25,
-        question_type="choice",
-    )
-
-    assert unprocessable.empty
-    labels = dict(zip(result["response_id"], result["labels"]))
-    assert labels[1] == ["A"]
-    assert labels[2] == ["A", "B"]
-    _, questions = transport.calls[0]
-    criteria = questions[MAPPING_CHOICE_KEY].criteria
-    assert set(criteria) == {"A", "B", "Other", "No Reason Given"}
-
-
-async def test_choice_mapping_falls_back_to_top_choice(themes_df):
-    responses = pd.DataFrame({"response_id": [1], "response": "n/a"})
-    transport = FakeChoiceTransport(
-        {"n/a": {"A": 0.1, "B": 0.1, "Other": 0.2, "No Reason Given": 0.6}}
-    )
-    client = SystemOne(transport=transport)
-
-    result, _ = await theme_mapping_systemone(
-        responses,
-        client,
-        question="Q?",
-        refined_themes_df=themes_df,
-        threshold=0.25,
-        question_type="choice",
-    )
-
-    assert result["labels"].iloc[0] == [FALLBACK_NO_REASON]
-
-
-async def test_rejects_unknown_mapping_question_type(themes_df, responses_df):
-    client = SystemOne(transport=FailingTransport())
-
-    with pytest.raises(ValueError, match="question_type"):
-        await theme_mapping_systemone(
-            responses_df,
-            client,
-            question="Q?",
-            refined_themes_df=themes_df,
-            question_type="score",
-        )
-
-
-async def test_detail_detection_classifies_by_threshold(responses_df):
-    transport = FakeTransport(
-        {
-            "ban them all": {"evidence_rich": 0.8},
-            "think of the funding": {"evidence_rich": 0.3},
-        }
-    )
-    client = SystemOne(transport=transport)
-
-    result, unprocessable = await detail_detection_systemone(
-        responses_df, client, question="Q?"
-    )
-
-    assert unprocessable.empty
-    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
-    assert classifications == {1: "YES", 2: "NO"}
-    assert result["evidence_probability"].tolist() == [0.8, 0.3]
-
-
-async def test_combined_classification_uses_one_call_per_response(
-    themes_df, responses_df
-):
-    transport = FakeTransport(
-        {
-            "ban them all": {
-                f"{THEME_QUESTION_PREFIX}A": 0.9,
-                "evidence_rich": 0.8,
-            },
-            "think of the funding": {
-                f"{THEME_QUESTION_PREFIX}B": 0.7,
-                "evidence_rich": 0.2,
-            },
-        }
-    )
-    client = SystemOne(transport=transport)
-
-    result, unprocessable = await classify_responses_systemone(
-        responses_df, client, question="Q?", refined_themes_df=themes_df
-    )
-
-    assert unprocessable.empty
-    # Both stages answered from a single call per response
-    assert len(transport.calls) == len(responses_df)
-    _, questions = transport.calls[0]
-    assert set(questions) == {
-        f"{THEME_QUESTION_PREFIX}A",
-        f"{THEME_QUESTION_PREFIX}B",
-        GIVES_REASON_KEY,
-        "evidence_rich",
-    }
-    labels = dict(zip(result["response_id"], result["labels"]))
-    assert labels == {1: ["A"], 2: ["B"]}
-    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
-    assert classifications == {1: "YES", 2: "NO"}
-
-
-async def test_batched_classification_shares_one_call_across_responses(
-    themes_df, responses_df
-):
-    transport = FakeTransport(
-        {
-            # Batched mode sends a list state; FakeTransport keys on response
-            # text, so use a transport that answers by question key instead.
-        }
-    )
-
-    class FakeBatchedTransport:
-        def __init__(self):
-            self.calls = []
-            self.answers = {
-                "r1_theme_A": 0.9,
-                "r1_evidence_rich": 0.8,
-                "r2_theme_B": 0.7,
-                "r2_evidence_rich": 0.1,
-            }
-
-        async def system_one(self, state, questions):
-            self.calls.append((state, questions))
-            return FakeResponse(
-                nouls={
-                    key: FakeNoulAnswer(noul=self.answers.get(key, 0.0))
-                    for key in questions
-                }
-            )
-
-    transport = FakeBatchedTransport()
-    client = SystemOne(transport=transport)
-
-    result, unprocessable = await classify_responses_systemone(
-        responses_df,
-        client,
-        question="Q?",
-        refined_themes_df=themes_df,
-        batch_size=2,
-    )
-
-    assert unprocessable.empty
-    # Both responses were classified in a single request
-    assert len(transport.calls) == 1
-    state, questions = transport.calls[0]
-    assert [r["response_id"] for r in state["responses"]] == [1, 2]
-    assert "r1_theme_A" in questions
-    assert "response_id is 1" in questions["r1_theme_A"].instructions
-    labels = dict(zip(result["response_id"], result["labels"]))
-    assert labels == {1: ["A"], 2: ["B"]}
-    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
-    assert classifications == {1: "YES", 2: "NO"}
-
-
 async def test_client_accumulates_token_usage(themes_df, responses_df):
-    transport = FakeTransport(
-        {
-            "ban them all": {f"{THEME_QUESTION_PREFIX}A": 0.9},
-            "think of the funding": {f"{THEME_QUESTION_PREFIX}B": 0.9},
-        }
-    )
+    transport = FakeTransport({})
     client = SystemOne(transport=transport)
 
-    await theme_mapping_systemone(
-        responses_df, client, question="Q?", refined_themes_df=themes_df
+    await classify_responses_systemone(
+        responses_df,
+        client,
+        question="Q?",
+        refined_themes_df=themes_df,
+        batch_size=1,
     )
 
     assert client.usage.requests == 2
@@ -410,17 +244,16 @@ async def test_uses_label_and_description_when_no_combined_topic_column():
         }
     )
     responses = pd.DataFrame({"response_id": [1], "response": "ban them all"})
-    transport = FakeTransport(
-        {"ban them all": {f"{THEME_QUESTION_PREFIX}A": 0.9}}
-    )
+    transport = FakeTransport({f"r1_{THEME_QUESTION_PREFIX}A": 0.9})
     client = SystemOne(transport=transport)
 
-    result, _ = await theme_mapping_systemone(
+    result, _ = await classify_responses_systemone(
         responses, client, question="Q?", refined_themes_df=themes
     )
 
     assert result["labels"].iloc[0] == ["A"]
     _, questions = transport.calls[0]
-    assert "ban support: Supports a ban." in questions[
-        f"{THEME_QUESTION_PREFIX}A"
-    ].instructions
+    assert (
+        "ban support: Supports a ban."
+        in questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
+    )

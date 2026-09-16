@@ -1,15 +1,15 @@
 """Compare the LLM pipeline against SystemOne (jev) on classification stages.
 
-Runs theme mapping and detail detection twice on the same eval dataset — once
-through the regular LLM stages and once through the SystemOne implementations —
-and reports speed, token usage, cost, accuracy against ground truth, and
-agreement between the two.
+Runs theme mapping and detail detection through the regular LLM stages, and
+through the SystemOne implementation (both stages batched into one request
+per group of responses), and reports speed, token usage, cost, accuracy
+against ground truth, and agreement between the two.
 
 Ground truth comes from the local eval datasets (e.g. evals/data/gambling_XS),
 the same data the existing mapping eval uses.
 
 Usage:
-    uv run python evals/compare_systemone.py --dataset gambling_XS
+    uv run python evals/compare_systemone.py --llm-model gpt-4o-mini
     uv run python evals/compare_systemone.py --skip-llm          # SystemOne only
     uv run python evals/compare_systemone.py --limit 10          # subsample
 
@@ -46,9 +46,13 @@ from themefinder import (  # noqa: E402
     SystemOne,
     classify_responses_systemone,
     detail_detection,
-    detail_detection_systemone,
     theme_mapping,
-    theme_mapping_systemone,
+)
+from themefinder.systemone import (  # noqa: E402
+    DEFAULT_ASSIGNMENT_THRESHOLD,
+    DEFAULT_BATCH_SIZE,
+    DEFAULT_CONCURRENCY,
+    DEFAULT_DETAIL_THRESHOLD,
 )
 
 # USD per 1M tokens. jev pricing from docs.typesafe.ai (jev-1.12, September 2026):
@@ -119,9 +123,7 @@ def mapping_accuracy_metrics(
         return {}
     metrics = calculate_mapping_metrics(df, column_one="expected", column_two="labels")
     return {
-        key: value
-        for key, value in metrics.items()
-        if isinstance(value, (int, float))
+        key: value for key, value in metrics.items() if isinstance(value, (int, float))
     }
 
 
@@ -145,15 +147,11 @@ def mapping_agreement(llm_df: pd.DataFrame, systemone_df: pd.DataFrame) -> dict:
         merged, column_one="labels_llm", column_two="labels_systemone"
     )
     return {
-        key: value
-        for key, value in metrics.items()
-        if isinstance(value, (int, float))
+        key: value for key, value in metrics.items() if isinstance(value, (int, float))
     }
 
 
-def detail_accuracy_metrics(
-    result_df: pd.DataFrame, expected: dict[int, str]
-) -> dict:
+def detail_accuracy_metrics(result_df: pd.DataFrame, expected: dict[int, str]) -> dict:
     """Score predicted evidence_rich labels against the expected labels."""
     if not expected or result_df.empty or "response_id" not in result_df.columns:
         return {}
@@ -166,7 +164,7 @@ def detail_accuracy_metrics(
     kappa = float(cohen_kappa_score(df["expected"], df["evidence_rich"]))
     metrics = {"accuracy": accuracy, "cohen_kappa": kappa}
     # AUC (threshold-free) shows whether probabilities rank responses
-    # correctly even when the 0.5 threshold classifies them all one way.
+    # correctly even when the threshold classifies them all one way.
     if "evidence_probability" in df.columns and df["expected"].nunique() > 1:
         expected_yes = df["expected"] == "YES"
         probabilities = df["evidence_probability"]
@@ -192,7 +190,7 @@ async def run_llm_stages(
     expected_mapping: dict[str, list[str]],
     expected_detail: dict[int, str],
     concurrency: int,
-) -> tuple[list[StageRun], pd.DataFrame, pd.DataFrame]:
+) -> tuple[list[StageRun], pd.DataFrame]:
     """Run mapping and detail detection through the LLM, measuring as we go."""
     prices = llm_prices()
     runs = []
@@ -246,177 +244,67 @@ async def run_llm_stages(
         )
     )
 
-    return runs, mapping_df, detail_df
+    return runs, mapping_df
 
 
-async def run_systemone_stages(
+async def run_systemone_stage(
     client: SystemOne,
     responses_df: pd.DataFrame,
     question: str,
     topics_df: pd.DataFrame,
     expected_mapping: dict[str, list[str]],
     expected_detail: dict[int, str],
-    thresholds_by_mode: dict[str, float],
+    threshold: float,
+    detail_threshold: float,
     concurrency: int,
     batch_size: int,
-    detail_threshold: float,
-) -> tuple[list[StageRun], dict[str, pd.DataFrame], pd.DataFrame]:
-    """Run mapping (per question mode) and detail detection through SystemOne."""
-    prices = (JEV_INPUT_PRICE_PER_M, JEV_OUTPUT_PRICE_PER_M)
-    runs = []
-    mapping_dfs: dict[str, pd.DataFrame] = {}
-
-    for mode, threshold in thresholds_by_mode.items():
-        before = (client.usage.input_tokens, client.usage.output_tokens)
-        start = time.perf_counter()
-        mapping_df, unprocessable = await theme_mapping_systemone(
-            responses_df=responses_df[["response_id", "response"]],
-            client=client,
-            question=question,
-            refined_themes_df=topics_df[["topic_id", "topic"]],
-            threshold=threshold,
-            concurrency=concurrency,
-            question_type=mode,
-        )
-        seconds = time.perf_counter() - start
-        if not unprocessable.empty:
-            print(
-                f"  Warning: {len(unprocessable)} responses unprocessable "
-                f"(SystemOne {mode} mapping)"
-            )
-        input_tokens = client.usage.input_tokens - before[0]
-        output_tokens = client.usage.output_tokens - before[1]
-        mapping_dfs[mode] = mapping_df
-        runs.append(
-            StageRun(
-                backend=f"systemone[{mode}]",
-                stage="mapping",
-                seconds=seconds,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cost_usd=cost_usd(input_tokens, output_tokens, prices),
-                metrics=mapping_accuracy_metrics(mapping_df, expected_mapping),
-            )
-        )
-
-    threshold = detail_threshold
+) -> tuple[StageRun, pd.DataFrame]:
+    """Run the combined SystemOne classification, measuring as we go."""
     before = (client.usage.input_tokens, client.usage.output_tokens)
     start = time.perf_counter()
-    detail_df, _ = await detail_detection_systemone(
-        responses_df=responses_df[["response_id", "response"]],
-        client=client,
-        question=question,
-        threshold=threshold,
-        concurrency=concurrency,
-    )
-    seconds = time.perf_counter() - start
-    input_tokens = client.usage.input_tokens - before[0]
-    output_tokens = client.usage.output_tokens - before[1]
-    runs.append(
-        StageRun(
-            backend="systemone",
-            stage="detail_detection",
-            seconds=seconds,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost_usd(input_tokens, output_tokens, prices),
-            metrics=detail_accuracy_metrics(detail_df, expected_detail),
-        )
-    )
-
-    # The efficient production shape: both stages' questions batched into a
-    # single SystemOne call per response.
-    combined_mode = next(iter(thresholds_by_mode))
-    before = (client.usage.input_tokens, client.usage.output_tokens)
-    start = time.perf_counter()
-    combined_df, unprocessable = await classify_responses_systemone(
+    classified_df, unprocessable = await classify_responses_systemone(
         responses_df=responses_df[["response_id", "response"]],
         client=client,
         question=question,
         refined_themes_df=topics_df[["topic_id", "topic"]],
-        threshold=thresholds_by_mode[combined_mode],
-        concurrency=concurrency,
-        question_type=combined_mode,
+        threshold=threshold,
         detail_threshold=detail_threshold,
+        concurrency=concurrency,
+        batch_size=batch_size,
     )
     seconds = time.perf_counter() - start
     if not unprocessable.empty:
-        print(
-            f"  Warning: {len(unprocessable)} responses unprocessable "
-            f"(SystemOne combined)"
-        )
+        print(f"  Warning: {len(unprocessable)} responses unprocessable (SystemOne)")
     input_tokens = client.usage.input_tokens - before[0]
     output_tokens = client.usage.output_tokens - before[1]
 
-    def both_stage_metrics(df: pd.DataFrame) -> dict:
-        return {
-            **{
-                f"map_{key}": value
-                for key, value in mapping_accuracy_metrics(
-                    df, expected_mapping
-                ).items()
-            },
-            **{
-                f"detail_{key}": value
-                for key, value in detail_accuracy_metrics(
-                    df, expected_detail
-                ).items()
-            },
-        }
-
-    runs.append(
-        StageRun(
-            backend=f"systemone-combined[{combined_mode}]",
-            stage="mapping+detail",
-            seconds=seconds,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
-            cost_usd=cost_usd(input_tokens, output_tokens, prices),
-            metrics=both_stage_metrics(combined_df),
-        )
+    metrics = {
+        **{
+            f"map_{key}": value
+            for key, value in mapping_accuracy_metrics(
+                classified_df, expected_mapping
+            ).items()
+        },
+        **{
+            f"detail_{key}": value
+            for key, value in detail_accuracy_metrics(
+                classified_df, expected_detail
+            ).items()
+        },
+    }
+    run = StageRun(
+        backend="systemone",
+        stage="mapping+detail",
+        seconds=seconds,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cost_usd=cost_usd(input_tokens, output_tokens, (JEV_INPUT_PRICE_PER_M, JEV_OUTPUT_PRICE_PER_M)),
+        metrics=metrics,
     )
-
-    # Batched: several responses share each request via a list-shaped state.
-    if batch_size > 1:
-        before = (client.usage.input_tokens, client.usage.output_tokens)
-        start = time.perf_counter()
-        batched_df, unprocessable = await classify_responses_systemone(
-            responses_df=responses_df[["response_id", "response"]],
-            client=client,
-            question=question,
-            refined_themes_df=topics_df[["topic_id", "topic"]],
-            threshold=thresholds_by_mode[combined_mode],
-            concurrency=concurrency,
-            question_type=combined_mode,
-            batch_size=batch_size,
-            detail_threshold=detail_threshold,
-        )
-        seconds = time.perf_counter() - start
-        if not unprocessable.empty:
-            print(
-                f"  Warning: {len(unprocessable)} responses unprocessable "
-                f"(SystemOne batched)"
-            )
-        input_tokens = client.usage.input_tokens - before[0]
-        output_tokens = client.usage.output_tokens - before[1]
-        runs.append(
-            StageRun(
-                backend=f"systemone-batch{batch_size}[{combined_mode}]",
-                stage="mapping+detail",
-                seconds=seconds,
-                input_tokens=input_tokens,
-                output_tokens=output_tokens,
-                cost_usd=cost_usd(input_tokens, output_tokens, prices),
-                metrics=both_stage_metrics(batched_df),
-            )
-        )
-
-    return runs, mapping_dfs, detail_df
+    return run, classified_df
 
 
-def print_summary(
-    question_part: str, runs: list[StageRun], agreements: dict[str, dict]
-) -> None:
+def print_summary(question_part: str, runs: list[StageRun], agreement: dict) -> None:
     from rich.console import Console
     from rich.table import Table
 
@@ -434,9 +322,7 @@ def print_summary(
         table.add_column(column)
 
     for run in runs:
-        quality = ", ".join(
-            f"{key}={value:.3f}" for key, value in run.metrics.items()
-        )
+        quality = ", ".join(f"{key}={value:.3f}" for key, value in run.metrics.items())
         table.add_row(
             run.stage,
             run.backend,
@@ -448,11 +334,11 @@ def print_summary(
         )
     console.print(table)
 
-    for mode, agreement in agreements.items():
+    if agreement:
         agreement_summary = ", ".join(
             f"{key}={value:.3f}" for key, value in agreement.items()
         )
-        console.print(f"LLM vs systemone[{mode}] mapping agreement: {agreement_summary}")
+        console.print(f"LLM vs SystemOne mapping agreement: {agreement_summary}")
 
 
 async def main() -> None:
@@ -469,22 +355,19 @@ async def main() -> None:
         "--limit", type=int, default=None, help="Subsample to N responses"
     )
     parser.add_argument(
-        "--mapping-mode",
-        choices=["noul", "choice", "both"],
-        default="both",
-        help="SystemOne mapping question strategy to evaluate",
+        "--mapping-threshold",
+        type=float,
+        default=DEFAULT_ASSIGNMENT_THRESHOLD,
+        help="Probability threshold for theme assignment",
     )
     parser.add_argument(
-        "--noul-threshold",
+        "--detail-threshold",
         type=float,
-        default=0.5,
-        help="Assignment threshold for noul-based mapping and detail detection",
-    )
-    parser.add_argument(
-        "--choice-threshold",
-        type=float,
-        default=0.25,
-        help="Assignment threshold for choice-based mapping (distribution sums to 1)",
+        default=DEFAULT_DETAIL_THRESHOLD,
+        help=(
+            "Probability threshold for evidence-rich classification. Tune "
+            "using the best_threshold diagnostic in the results."
+        ),
     )
     parser.add_argument(
         "--concurrency", type=int, default=10, help="Concurrent LLM calls"
@@ -492,30 +375,17 @@ async def main() -> None:
     parser.add_argument(
         "--systemone-concurrency",
         type=int,
-        default=50,
-        help="Concurrent SystemOne calls (cheap, fast requests: go high)",
-    )
-    parser.add_argument(
-        "--detail-threshold",
-        type=float,
-        default=None,
-        help=(
-            "Probability threshold for evidence-rich classification "
-            "(default: --noul-threshold). Tune using the best_threshold "
-            "diagnostic in the results."
-        ),
+        default=DEFAULT_CONCURRENCY,
+        help="Concurrent SystemOne calls",
     )
     parser.add_argument(
         "--systemone-batch-size",
         type=int,
-        default=20,
-        help=(
-            "Responses per request in the batched SystemOne run "
-            "(0 or 1 disables that run)"
-        ),
+        default=DEFAULT_BATCH_SIZE,
+        help="Responses per SystemOne request",
     )
     parser.add_argument(
-        "--skip-llm", action="store_true", help="Only run the SystemOne stages"
+        "--skip-llm", action="store_true", help="Only run the SystemOne stage"
     )
     parser.add_argument(
         "--skip-systemone", action="store_true", help="Only run the LLM stages"
@@ -575,17 +445,11 @@ async def main() -> None:
     if not args.skip_systemone:
         systemone_client = SystemOne.from_env(model=args.model)
 
-    mapping_modes = (
-        ["noul", "choice"] if args.mapping_mode == "both" else [args.mapping_mode]
-    )
-    thresholds_by_mode = {
-        mode: args.noul_threshold if mode == "noul" else args.choice_threshold
-        for mode in mapping_modes
-    }
-
     all_results = {
         "dataset": args.dataset,
-        "thresholds": thresholds_by_mode,
+        "mapping_threshold": args.mapping_threshold,
+        "detail_threshold": args.detail_threshold,
+        "batch_size": args.systemone_batch_size,
         "timestamp": datetime.now().isoformat(),
         "question_parts": {},
     }
@@ -602,11 +466,10 @@ async def main() -> None:
         expected_detail = load_detail_ground_truth(config, question_part)
 
         runs: list[StageRun] = []
-        llm_mapping_df = None
-        systemone_mapping_dfs: dict[str, pd.DataFrame] = {}
+        llm_mapping_df = systemone_df = None
 
         if llm is not None:
-            llm_runs, llm_mapping_df, _ = await run_llm_stages(
+            llm_runs, llm_mapping_df = await run_llm_stages(
                 llm,
                 responses_df,
                 question,
@@ -618,34 +481,29 @@ async def main() -> None:
             runs.extend(llm_runs)
 
         if systemone_client is not None:
-            systemone_runs, systemone_mapping_dfs, _ = await run_systemone_stages(
+            systemone_run, systemone_df = await run_systemone_stage(
                 systemone_client,
                 responses_df,
                 question,
                 topics_df,
                 expected_mapping,
                 expected_detail,
-                thresholds_by_mode,
+                args.mapping_threshold,
+                args.detail_threshold,
                 args.systemone_concurrency,
                 args.systemone_batch_size,
-                args.detail_threshold
-                if args.detail_threshold is not None
-                else args.noul_threshold,
             )
-            runs.extend(systemone_runs)
+            runs.append(systemone_run)
 
-        agreements = {}
-        if llm_mapping_df is not None:
-            for mode, systemone_mapping_df in systemone_mapping_dfs.items():
-                agreements[mode] = mapping_agreement(
-                    llm_mapping_df, systemone_mapping_df
-                )
+        agreement = {}
+        if llm_mapping_df is not None and systemone_df is not None:
+            agreement = mapping_agreement(llm_mapping_df, systemone_df)
 
-        print_summary(question_part, runs, agreements)
+        print_summary(question_part, runs, agreement)
         all_results["question_parts"][question_part] = {
             "n_responses": len(responses_df),
             "runs": [run.as_dict() for run in runs],
-            "mapping_agreement": agreements,
+            "mapping_agreement": agreement,
         }
 
     results_dir = Path(__file__).parent / "results"

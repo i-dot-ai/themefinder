@@ -3,9 +3,7 @@ from .systemone import (
     SystemOne,
     SystemOneUsage,
     classify_responses_systemone,
-    detail_detection_systemone,
     find_themes_hybrid,
-    theme_mapping_systemone,
 )
 from .tasks import (
     detail_detection,
@@ -31,10 +29,8 @@ __all__ = [
     "SystemOne",
     "SystemOneUsage",
     "classify_responses_systemone",
-    "detail_detection_systemone",
     "find_themes",
     "find_themes_hybrid",
-    "theme_mapping_systemone",
     "theme_clustering",
     "theme_condensation",
     "theme_generation",
