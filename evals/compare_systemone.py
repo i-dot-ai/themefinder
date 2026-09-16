@@ -109,9 +109,13 @@ def mapping_accuracy_metrics(
     result_df: pd.DataFrame, expected: dict[str, list[str]]
 ) -> dict:
     """Score predicted theme labels against the expected mapping."""
+    if result_df.empty or "response_id" not in result_df.columns:
+        return {}
     df = result_df.copy()
     df["expected"] = df["response_id"].astype(str).map(expected)
     df = df[df["expected"].notna()]
+    if df.empty:
+        return {}
     metrics = calculate_mapping_metrics(df, column_one="expected", column_two="labels")
     return {
         key: value
@@ -122,11 +126,20 @@ def mapping_accuracy_metrics(
 
 def mapping_agreement(llm_df: pd.DataFrame, systemone_df: pd.DataFrame) -> dict:
     """Score the two backends' theme labels against each other."""
+    if (
+        llm_df.empty
+        or systemone_df.empty
+        or "response_id" not in llm_df.columns
+        or "response_id" not in systemone_df.columns
+    ):
+        return {}
     merged = llm_df[["response_id", "labels"]].merge(
         systemone_df[["response_id", "labels"]],
         on="response_id",
         suffixes=("_llm", "_systemone"),
     )
+    if merged.empty:
+        return {}
     metrics = calculate_mapping_metrics(
         merged, column_one="labels_llm", column_two="labels_systemone"
     )
@@ -141,7 +154,7 @@ def detail_accuracy_metrics(
     result_df: pd.DataFrame, expected: dict[int, str]
 ) -> dict:
     """Score predicted evidence_rich labels against the expected labels."""
-    if not expected:
+    if not expected or result_df.empty or "response_id" not in result_df.columns:
         return {}
     df = result_df.copy()
     df["expected"] = df["response_id"].astype(int).map(expected)
@@ -376,6 +389,14 @@ async def main() -> None:
     parser.add_argument(
         "--model", default=None, help="SystemOne model override (default jev-latest)"
     )
+    parser.add_argument(
+        "--llm-model",
+        default=os.getenv("AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT"),
+        help=(
+            "OpenAI model/deployment name for the LLM stages "
+            "(default: AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT env var)"
+        ),
+    )
     args = parser.parse_args()
 
     config = DatasetConfig(dataset=args.dataset, stage="mapping")
@@ -389,8 +410,13 @@ async def main() -> None:
 
     llm = None
     if not args.skip_llm:
+        if not args.llm_model:
+            sys.exit(
+                "No LLM model configured: pass --llm-model or set the "
+                "AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT env var (or use --skip-llm)."
+            )
         llm = OpenAILLM(
-            model=os.getenv("AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT"),
+            model=args.llm_model,
             request_kwargs={"temperature": 0},
             base_url=os.getenv("LLM_GATEWAY_URL"),
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
