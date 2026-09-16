@@ -25,6 +25,7 @@ import pandas as pd
 from tenacity import (
     AsyncRetrying,
     before_sleep_log,
+    retry_if_exception,
     stop_after_attempt,
     wait_random_exponential,
 )
@@ -92,11 +93,14 @@ EVIDENCE_RICH_INSTRUCTIONS = (
     "with contextual information such as roles, locations or timelines."
 )
 
-EVIDENCE_RICH_CRITERIA = (
-    "Yes means the response would provide useful input to someone drafting policy, "
-    "beyond what is already commonly known or expected. No means the response uses "
-    "vague language with no supporting detail, restates commonly known points, or "
-    "shares anecdotes without sufficient context or a clear takeaway."
+EVIDENCE_RICH_TRUE_CRITERIA = (
+    "The response would provide useful input to someone drafting policy, beyond "
+    "what is already commonly known or expected."
+)
+EVIDENCE_RICH_FALSE_CRITERIA = (
+    "The response uses vague language with no supporting detail, restates commonly "
+    "known points, or shares anecdotes without sufficient context or a clear "
+    "takeaway."
 )
 
 
@@ -180,8 +184,16 @@ def _theme_texts(refined_themes_df: pd.DataFrame) -> dict[str, str]:
     }
 
 
-def _noul(instructions: str, criteria: str | None = None) -> Any:
-    """Build a noul (yes/no) SystemOne question."""
+def _noul(
+    instructions: str,
+    true_criteria: str | None = None,
+    false_criteria: str | None = None,
+) -> Any:
+    """Build a noul (yes/no) SystemOne question.
+
+    The optional criteria describe the yes and no outcomes, in the
+    ``NoulCriteria`` shape the API expects ({"true": ..., "false": ...}).
+    """
     try:
         from typesafe_sdk import Noul
     except ImportError as e:
@@ -189,8 +201,11 @@ def _noul(instructions: str, criteria: str | None = None) -> Any:
             "The 'typesafe-sdk' package is required for SystemOne stages. "
             "Install it with the 'systemone' extra: pip install 'themefinder[systemone]'"
         ) from e
-    if criteria:
-        return Noul(instructions=instructions, criteria=criteria)
+    if true_criteria or false_criteria:
+        return Noul(
+            instructions=instructions,
+            criteria={"true": true_criteria, "false": false_criteria},
+        )
     return Noul(instructions=instructions)
 
 
@@ -223,6 +238,30 @@ def _mapping_choice_question(theme_texts: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _is_retryable(exception: BaseException) -> bool:
+    """Deterministic client errors (4xx validation, auth) will never succeed."""
+    try:
+        from typesafe_sdk import (
+            TypeSafeAuthenticationError,
+            TypeSafeBadRequestError,
+            TypeSafeNotFoundError,
+            TypeSafePermissionDeniedError,
+            TypeSafeUnprocessableEntityError,
+        )
+    except ImportError:
+        return True
+    return not isinstance(
+        exception,
+        (
+            TypeSafeAuthenticationError,
+            TypeSafeBadRequestError,
+            TypeSafeNotFoundError,
+            TypeSafePermissionDeniedError,
+            TypeSafeUnprocessableEntityError,
+        ),
+    )
+
+
 async def _ask_with_retries(
     client: SystemOne, state: Any, questions: dict[str, Any]
 ) -> Any:
@@ -232,6 +271,7 @@ async def _ask_with_retries(
             min=RETRY_MIN_WAIT_SECONDS, max=RETRY_MAX_WAIT_SECONDS
         ),
         stop=stop_after_attempt(RETRY_ATTEMPTS),
+        retry=retry_if_exception(_is_retryable),
         before_sleep=before_sleep_log(logger, logging.ERROR),
         reraise=True,
     )
@@ -386,7 +426,11 @@ async def detail_detection_systemone(
     """
     logger.info(f"Running SystemOne detail detection on {len(responses_df)} responses")
     questions = {
-        "evidence_rich": _noul(EVIDENCE_RICH_INSTRUCTIONS, EVIDENCE_RICH_CRITERIA)
+        "evidence_rich": _noul(
+            EVIDENCE_RICH_INSTRUCTIONS,
+            true_criteria=EVIDENCE_RICH_TRUE_CRITERIA,
+            false_criteria=EVIDENCE_RICH_FALSE_CRITERIA,
+        )
     }
     semaphore = asyncio.Semaphore(concurrency)
 
