@@ -110,6 +110,31 @@ The file `src/themefinder.core.py` contains the function `find_themes` which run
 **For more detail - see the docs: [https://i-dot-ai.github.io/themefinder/](https://i-dot-ai.github.io/themefinder/).**
 
 
+## SystemOne (jev) classification stages — experimental
+
+The classification-shaped stages of the pipeline (theme mapping and detail detection) have alternative implementations backed by [TypeSafe's jev SystemOne model](https://docs.typesafe.ai/), which answers typed yes/no ("noul") and multiple-choice questions with calibrated probabilities instead of generating text. The generative stages (theme generation, condensation and refinement) still run on an LLM.
+
+Install the extra and set your API key:
+
+```sh
+pip install 'themefinder[systemone]'
+export TYPESAFE_API_KEY=...
+```
+
+```python
+from themefinder import SystemOne, find_themes_hybrid
+
+systemone_client = SystemOne.from_env()
+result = await find_themes_hybrid(responses_df, llm, systemone_client, question)
+```
+
+`theme_mapping_systemone` and `detail_detection_systemone` can also be called individually, and mapping supports two question strategies (`question_type="noul"` or `"choice"`). To compare the regular LLM pipeline against SystemOne on speed, cost and accuracy, run:
+
+```sh
+uv run python evals/compare_systemone.py --dataset gambling_XS
+```
+
+
 ## Model Compatibility
 
 ThemeFinder's structured output approach makes it compatible with a wide range of language models from various providers. This list is non-exhaustive, and other models may also work effectively:

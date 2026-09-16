@@ -6,7 +6,7 @@ and an OpenAI implementation. Designed for easy extension to other providers.
 
 import asyncio
 import concurrent.futures
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 import openai
@@ -18,6 +18,15 @@ class LLMResponse:
     """Wraps an LLM call result."""
 
     parsed: BaseModel | str
+
+
+@dataclass
+class LLMUsage:
+    """Accumulated token usage across LLM calls."""
+
+    input_tokens: int = 0
+    output_tokens: int = 0
+    requests: int = 0
 
 
 @runtime_checkable
@@ -45,6 +54,13 @@ class OpenAILLM:
         self.model = model
         self.request_kwargs = request_kwargs or {}
         self.client = openai.AsyncOpenAI(**client_kwargs)
+        self.usage = LLMUsage()
+
+    def _record_usage(self, response) -> None:
+        self.usage.requests += 1
+        if getattr(response, "usage", None):
+            self.usage.input_tokens += response.usage.prompt_tokens or 0
+            self.usage.output_tokens += response.usage.completion_tokens or 0
 
     async def ainvoke(
         self, prompt: str, output_model: type[BaseModel] | None = None
@@ -57,9 +73,11 @@ class OpenAILLM:
         if output_model:
             kwargs["response_format"] = output_model
             response = await self.client.chat.completions.parse(**kwargs)
+            self._record_usage(response)
             return LLMResponse(parsed=response.choices[0].message.parsed)
         else:
             response = await self.client.chat.completions.create(**kwargs)
+            self._record_usage(response)
             return LLMResponse(parsed=response.choices[0].message.content)
 
     def invoke(
