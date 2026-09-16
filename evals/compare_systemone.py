@@ -28,17 +28,21 @@ import json
 import os
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
 import dotenv
 import pandas as pd
-from sklearn.metrics import cohen_kappa_score, roc_auc_score
+from sklearn.metrics import cohen_kappa_score, roc_auc_score, roc_curve
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from datasets import DatasetConfig, load_local_mapping_data  # noqa: E402
+from datasets import (  # noqa: E402
+    DatasetConfig,
+    load_detail_ground_truth,
+    load_local_mapping_data,
+)
 from metrics import calculate_mapping_metrics  # noqa: E402
 
 from themefinder import (  # noqa: E402
@@ -55,10 +59,11 @@ from themefinder.systemone import (  # noqa: E402
     DEFAULT_DETAIL_THRESHOLD,
 )
 
-# USD per 1M tokens. jev pricing from docs.typesafe.ai (jev-1.12, September 2026):
-# input $0.042/1M, output free. LLM default assumes GPT-4.1; override via env.
-JEV_INPUT_PRICE_PER_M = 0.042
-JEV_OUTPUT_PRICE_PER_M = 0.0
+# USD per 1M tokens, overridable via env. jev pricing from docs.typesafe.ai
+# (jev-1.12, September 2026): input $0.042/1M, output free. LLM default
+# assumes GPT-4.1 — override when benchmarking a different model.
+JEV_INPUT_PRICE_PER_M = float(os.getenv("JEV_INPUT_PRICE_PER_M", 0.042))
+JEV_OUTPUT_PRICE_PER_M = float(os.getenv("JEV_OUTPUT_PRICE_PER_M", 0.0))
 DEFAULT_LLM_INPUT_PRICE_PER_M = 2.00
 DEFAULT_LLM_OUTPUT_PRICE_PER_M = 8.00
 
@@ -77,13 +82,9 @@ class StageRun:
 
     def as_dict(self) -> dict:
         return {
-            "backend": self.backend,
-            "stage": self.stage,
+            **asdict(self),
             "seconds": round(self.seconds, 2),
-            "input_tokens": self.input_tokens,
-            "output_tokens": self.output_tokens,
             "cost_usd": round(self.cost_usd, 6),
-            "metrics": self.metrics,
         }
 
 
@@ -99,15 +100,10 @@ def cost_usd(input_tokens: int, output_tokens: int, prices: tuple[float, float])
     return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
 
 
-def load_detail_ground_truth(config: DatasetConfig, question_part: str) -> dict[int, str]:
-    """Load expected evidence_rich labels ({response_id: "YES"/"NO"})."""
-    outputs_dir = config.local_path / "outputs" / "mapping"
-    date_dirs = sorted(outputs_dir.iterdir(), reverse=True)
-    detail_path = date_dirs[0] / question_part / "detail_detection.jsonl"
-    if not detail_path.exists():
-        return {}
-    df = pd.read_json(detail_path, lines=True)
-    return dict(zip(df["response_id"].astype(int), df["evidence_rich"]))
+def _numeric_metrics(metrics: dict) -> dict:
+    return {
+        key: value for key, value in metrics.items() if isinstance(value, (int, float))
+    }
 
 
 def mapping_accuracy_metrics(
@@ -121,10 +117,9 @@ def mapping_accuracy_metrics(
     df = df[df["expected"].notna()]
     if df.empty:
         return {}
-    metrics = calculate_mapping_metrics(df, column_one="expected", column_two="labels")
-    return {
-        key: value for key, value in metrics.items() if isinstance(value, (int, float))
-    }
+    return _numeric_metrics(
+        calculate_mapping_metrics(df, column_one="expected", column_two="labels")
+    )
 
 
 def mapping_agreement(llm_df: pd.DataFrame, systemone_df: pd.DataFrame) -> dict:
@@ -143,12 +138,11 @@ def mapping_agreement(llm_df: pd.DataFrame, systemone_df: pd.DataFrame) -> dict:
     )
     if merged.empty:
         return {}
-    metrics = calculate_mapping_metrics(
-        merged, column_one="labels_llm", column_two="labels_systemone"
+    return _numeric_metrics(
+        calculate_mapping_metrics(
+            merged, column_one="labels_llm", column_two="labels_systemone"
+        )
     )
-    return {
-        key: value for key, value in metrics.items() if isinstance(value, (int, float))
-    }
 
 
 def detail_accuracy_metrics(result_df: pd.DataFrame, expected: dict[int, str]) -> dict:
@@ -170,16 +164,33 @@ def detail_accuracy_metrics(result_df: pd.DataFrame, expected: dict[int, str]) -
         probabilities = df["evidence_probability"]
         metrics["auc"] = float(roc_auc_score(expected_yes, probabilities))
         # Diagnostic threshold sweep: where should the cut-off actually sit?
-        best_threshold, best_accuracy = max(
-            (
-                (candidate, float((expected_yes == (probabilities >= candidate)).mean()))
-                for candidate in sorted(probabilities.unique())
-            ),
-            key=lambda pair: pair[1],
+        # roc_curve gives cumulative TP/FP rates per candidate threshold, from
+        # which accuracy at each threshold follows in one pass.
+        false_positive_rate, true_positive_rate, thresholds = roc_curve(
+            expected_yes, probabilities
         )
-        metrics["best_threshold"] = float(best_threshold)
-        metrics["best_thr_accuracy"] = best_accuracy
+        n_yes = int(expected_yes.sum())
+        n_no = len(expected_yes) - n_yes
+        accuracies = (
+            true_positive_rate * n_yes + (1 - false_positive_rate) * n_no
+        ) / len(expected_yes)
+        best = accuracies.argmax()
+        metrics["best_threshold"] = float(thresholds[best])
+        metrics["best_thr_accuracy"] = float(accuracies[best])
     return metrics
+
+
+async def _measure(usage, coroutine):
+    """Await a stage, returning (result, seconds, input/output token deltas)."""
+    input_before, output_before = usage.input_tokens, usage.output_tokens
+    start = time.perf_counter()
+    result = await coroutine
+    return (
+        result,
+        time.perf_counter() - start,
+        usage.input_tokens - input_before,
+        usage.output_tokens - output_before,
+    )
 
 
 async def run_llm_stages(
@@ -193,23 +204,20 @@ async def run_llm_stages(
 ) -> tuple[list[StageRun], pd.DataFrame]:
     """Run mapping and detail detection through the LLM, measuring as we go."""
     prices = llm_prices()
-    runs = []
 
-    before = (llm.usage.input_tokens, llm.usage.output_tokens)
-    start = time.perf_counter()
-    mapping_df, unprocessable = await theme_mapping(
-        responses_df=responses_df[["response_id", "response"]],
-        llm=llm,
-        question=question,
-        refined_themes_df=topics_df[["topic_id", "topic"]],
-        concurrency=concurrency,
+    (mapping_df, unprocessable), seconds, input_tokens, output_tokens = await _measure(
+        llm.usage,
+        theme_mapping(
+            responses_df=responses_df[["response_id", "response"]],
+            llm=llm,
+            question=question,
+            refined_themes_df=topics_df[["topic_id", "topic"]],
+            concurrency=concurrency,
+        ),
     )
-    seconds = time.perf_counter() - start
     if not unprocessable.empty:
         print(f"  Warning: {len(unprocessable)} responses unprocessable (LLM mapping)")
-    input_tokens = llm.usage.input_tokens - before[0]
-    output_tokens = llm.usage.output_tokens - before[1]
-    runs.append(
+    runs = [
         StageRun(
             backend="llm",
             stage="mapping",
@@ -217,21 +225,24 @@ async def run_llm_stages(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd(input_tokens, output_tokens, prices),
-            metrics=mapping_accuracy_metrics(mapping_df, expected_mapping),
+            metrics={
+                f"map_{key}": value
+                for key, value in mapping_accuracy_metrics(
+                    mapping_df, expected_mapping
+                ).items()
+            },
         )
-    )
+    ]
 
-    before = (llm.usage.input_tokens, llm.usage.output_tokens)
-    start = time.perf_counter()
-    detail_df, _ = await detail_detection(
-        responses_df=responses_df[["response_id", "response"]],
-        llm=llm,
-        question=question,
-        concurrency=concurrency,
+    (detail_df, _), seconds, input_tokens, output_tokens = await _measure(
+        llm.usage,
+        detail_detection(
+            responses_df=responses_df[["response_id", "response"]],
+            llm=llm,
+            question=question,
+            concurrency=concurrency,
+        ),
     )
-    seconds = time.perf_counter() - start
-    input_tokens = llm.usage.input_tokens - before[0]
-    output_tokens = llm.usage.output_tokens - before[1]
     runs.append(
         StageRun(
             backend="llm",
@@ -240,7 +251,12 @@ async def run_llm_stages(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd(input_tokens, output_tokens, prices),
-            metrics=detail_accuracy_metrics(detail_df, expected_detail),
+            metrics={
+                f"detail_{key}": value
+                for key, value in detail_accuracy_metrics(
+                    detail_df, expected_detail
+                ).items()
+            },
         )
     )
 
@@ -260,23 +276,26 @@ async def run_systemone_stage(
     batch_size: int,
 ) -> tuple[StageRun, pd.DataFrame]:
     """Run the combined SystemOne classification, measuring as we go."""
-    before = (client.usage.input_tokens, client.usage.output_tokens)
-    start = time.perf_counter()
-    classified_df, unprocessable = await classify_responses_systemone(
-        responses_df=responses_df[["response_id", "response"]],
-        client=client,
-        question=question,
-        refined_themes_df=topics_df[["topic_id", "topic"]],
-        threshold=threshold,
-        detail_threshold=detail_threshold,
-        concurrency=concurrency,
-        batch_size=batch_size,
+    (
+        (classified_df, unprocessable),
+        seconds,
+        input_tokens,
+        output_tokens,
+    ) = await _measure(
+        client.usage,
+        classify_responses_systemone(
+            responses_df=responses_df[["response_id", "response"]],
+            client=client,
+            question=question,
+            refined_themes_df=topics_df[["topic_id", "topic"]],
+            threshold=threshold,
+            detail_threshold=detail_threshold,
+            concurrency=concurrency,
+            batch_size=batch_size,
+        ),
     )
-    seconds = time.perf_counter() - start
     if not unprocessable.empty:
         print(f"  Warning: {len(unprocessable)} responses unprocessable (SystemOne)")
-    input_tokens = client.usage.input_tokens - before[0]
-    output_tokens = client.usage.output_tokens - before[1]
 
     metrics = {
         **{
@@ -298,7 +317,9 @@ async def run_systemone_stage(
         seconds=seconds,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        cost_usd=cost_usd(input_tokens, output_tokens, (JEV_INPUT_PRICE_PER_M, JEV_OUTPUT_PRICE_PER_M)),
+        cost_usd=cost_usd(
+            input_tokens, output_tokens, (JEV_INPUT_PRICE_PER_M, JEV_OUTPUT_PRICE_PER_M)
+        ),
         metrics=metrics,
     )
     return run, classified_df
@@ -321,20 +342,25 @@ COMPARISON_ROWS = [
 ]
 
 # Headline metrics drawn as bar charts underneath the table.
-CHART_ROWS = [
-    ("Time (s)", "seconds", "lower", "{:.1f}"),
-    ("Cost (USD)", "cost_usd", "lower", "${:.4f}"),
-    ("Mapping F1", "map_f1_score", "higher", "{:.3f}"),
-    ("Mapping accuracy", "map_accuracy_score", "higher", "{:.3f}"),
-    ("Evidence accuracy", "detail_accuracy", "higher", "{:.3f}"),
-]
+CHART_KEYS = {
+    "seconds",
+    "cost_usd",
+    "map_f1_score",
+    "map_accuracy_score",
+    "detail_accuracy",
+}
+CHART_ROWS = [row for row in COMPARISON_ROWS if row[1] in CHART_KEYS]
 
 BAR_WIDTH = 28
 BACKEND_COLOURS = {"llm": "cyan", "systemone": "magenta"}
 
 
 def _aggregate(runs: list[StageRun]) -> dict:
-    """Collapse one backend's stage runs into a single comparable value set."""
+    """Collapse one backend's stage runs into a single comparable value set.
+
+    Stage metrics are already namespaced (map_/detail_) by their producers,
+    so aggregation is a plain sum-and-merge.
+    """
     values = {
         "seconds": sum(run.seconds for run in runs),
         "input_tokens": sum(run.input_tokens for run in runs),
@@ -342,13 +368,7 @@ def _aggregate(runs: list[StageRun]) -> dict:
         "cost_usd": sum(run.cost_usd for run in runs),
     }
     for run in runs:
-        if run.stage == "mapping":
-            values.update({f"map_{key}": v for key, v in run.metrics.items()})
-        elif run.stage == "detail_detection":
-            values.update({f"detail_{key}": v for key, v in run.metrics.items()})
-        else:
-            # SystemOne's combined run already prefixes its metrics.
-            values.update(run.metrics)
+        values.update(run.metrics)
     return values
 
 

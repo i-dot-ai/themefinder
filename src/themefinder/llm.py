@@ -6,7 +6,7 @@ and an OpenAI implementation. Designed for easy extension to other providers.
 
 import asyncio
 import concurrent.futures
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
 import openai
@@ -21,12 +21,22 @@ class LLMResponse:
 
 
 @dataclass
-class LLMUsage:
-    """Accumulated token usage across LLM calls."""
+class Usage:
+    """Accumulated token usage across API calls."""
 
     input_tokens: int = 0
     output_tokens: int = 0
     requests: int = 0
+
+    def record(self, input_tokens: int | None, output_tokens: int | None) -> None:
+        """Add one request's token counts."""
+        self.requests += 1
+        self.input_tokens += input_tokens or 0
+        self.output_tokens += output_tokens or 0
+
+
+# Backwards-compatible name used by the LLM client.
+LLMUsage = Usage
 
 
 @runtime_checkable
@@ -63,9 +73,9 @@ class OpenAILLM:
         self.usage = LLMUsage()
 
     def _record_usage(self, response) -> None:
-        self.usage.requests += 1
         usage = getattr(response, "usage", None)
         if usage is None:
+            self.usage.record(0, 0)
             return
         # Chat Completions reports prompt/completion tokens; Responses
         # reports input/output tokens.
@@ -75,8 +85,7 @@ class OpenAILLM:
         output_tokens = getattr(usage, "output_tokens", None)
         if output_tokens is None:
             output_tokens = getattr(usage, "completion_tokens", 0)
-        self.usage.input_tokens += input_tokens or 0
-        self.usage.output_tokens += output_tokens or 0
+        self.usage.record(input_tokens, output_tokens)
 
     async def ainvoke(
         self, prompt: str, output_model: type[BaseModel] | None = None

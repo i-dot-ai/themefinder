@@ -117,6 +117,15 @@ def _load_question(
     return question_text
 
 
+def _latest_outputs_dir(config: DatasetConfig) -> Path:
+    """Return the most recent dated outputs directory for a dataset."""
+    outputs_dir = config.local_path / "outputs" / "mapping"
+    date_dirs = sorted(outputs_dir.iterdir(), reverse=True)
+    if not date_dirs:
+        raise FileNotFoundError(f"No output dates found in {outputs_dir}")
+    return date_dirs[0]
+
+
 def _load_themes(
     config: DatasetConfig, question_part: str = "question_part_1"
 ) -> list[dict]:
@@ -129,13 +138,7 @@ def _load_themes(
     Returns:
         List of theme dicts with topic_id, topic_label, topic_description
     """
-    # Find the most recent output date
-    outputs_dir = config.local_path / "outputs" / "mapping"
-    date_dirs = sorted(outputs_dir.iterdir(), reverse=True)
-    if not date_dirs:
-        raise FileNotFoundError(f"No output dates found in {outputs_dir}")
-
-    themes_path = date_dirs[0] / question_part / "themes.json"
+    themes_path = _latest_outputs_dir(config) / question_part / "themes.json"
     with open(themes_path) as f:
         return json.load(f)
 
@@ -152,15 +155,31 @@ def _load_mapping(
     Returns:
         Dict mapping response_id to list of topic_ids (labels)
     """
-    outputs_dir = config.local_path / "outputs" / "mapping"
-    date_dirs = sorted(outputs_dir.iterdir(), reverse=True)
-    if not date_dirs:
-        raise FileNotFoundError(f"No output dates found in {outputs_dir}")
-
-    mapping_path = date_dirs[0] / question_part / "mapping.jsonl"
+    mapping_path = _latest_outputs_dir(config) / question_part / "mapping.jsonl"
     df = pd.read_json(mapping_path, lines=True)
 
     return dict(zip(df["response_id"].astype(str), df["labels"]))
+
+
+def load_detail_ground_truth(
+    config: DatasetConfig, question_part: str = "question_part_1"
+) -> dict[int, str]:
+    """Load expected evidence_rich labels.
+
+    Args:
+        config: Dataset configuration
+        question_part: Which question part to load
+
+    Returns:
+        Dict mapping response_id to "YES"/"NO"; empty if no ground truth exists.
+    """
+    detail_path = (
+        _latest_outputs_dir(config) / question_part / "detail_detection.jsonl"
+    )
+    if not detail_path.exists():
+        return {}
+    df = pd.read_json(detail_path, lines=True)
+    return dict(zip(df["response_id"].astype(int), df["evidence_rich"]))
 
 
 def _get_question_parts(config: DatasetConfig) -> list[str]:

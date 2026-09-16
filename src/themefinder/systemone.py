@@ -32,7 +32,7 @@ per consultation rather than trusting it universally.
 import asyncio
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Protocol
 
 import pandas as pd
 from tenacity import (
@@ -43,14 +43,40 @@ from tenacity import (
     wait_random_exponential,
 )
 
-from themefinder.llm import LLM
+from themefinder.llm import LLM, Usage
 from themefinder.prompts import CONSULTATION_SYSTEM_PROMPT
-from themefinder.tasks import (
-    theme_condensation,
-    theme_generation,
-    theme_refinement,
-)
+from themefinder.tasks import generate_refined_themes
 from themefinder.themefinder_logging import logger
+
+try:
+    import typesafe_sdk
+except ImportError:
+    typesafe_sdk = None
+
+
+def _require_typesafe_sdk():
+    """Return the typesafe_sdk module, or fail with install instructions."""
+    if typesafe_sdk is None:
+        raise ImportError(
+            "The 'typesafe-sdk' package is required for SystemOne stages. "
+            "Install it with the 'systemone' extra: pip install 'themefinder[systemone]'"
+        )
+    return typesafe_sdk
+
+
+# Deterministic client errors (4xx validation, auth) will never succeed, so
+# they are excluded from retries. Empty when the SDK is absent (test fakes).
+_NON_RETRYABLE_ERRORS: tuple[type[BaseException], ...] = (
+    (
+        typesafe_sdk.TypeSafeAuthenticationError,
+        typesafe_sdk.TypeSafeBadRequestError,
+        typesafe_sdk.TypeSafeNotFoundError,
+        typesafe_sdk.TypeSafePermissionDeniedError,
+        typesafe_sdk.TypeSafeUnprocessableEntityError,
+    )
+    if typesafe_sdk is not None
+    else ()
+)
 
 DEFAULT_ASSIGNMENT_THRESHOLD = 0.5
 DEFAULT_DETAIL_THRESHOLD = 0.05
@@ -114,23 +140,10 @@ EVIDENCE_RICH_FALSE_CRITERIA = (
 )
 
 
-@dataclass
-class SystemOneUsage:
-    """Accumulated token usage across SystemOne calls."""
-
-    input_tokens: int = 0
-    output_tokens: int = 0
-    requests: int = 0
-
-    def record(self, usage: Any) -> None:
-        """Add the usage from a single SystemOne response."""
-        self.requests += 1
-        if usage is not None:
-            self.input_tokens += getattr(usage, "input_tokens", 0) or 0
-            self.output_tokens += getattr(usage, "output_tokens", 0) or 0
+# SystemOne and the LLM client share one usage type.
+SystemOneUsage = Usage
 
 
-@runtime_checkable
 class SystemOneTransport(Protocol):
     """Anything with an async ``system_one(state=..., questions=...)`` method.
 
@@ -150,7 +163,7 @@ class SystemOne:
     """
 
     transport: SystemOneTransport
-    usage: SystemOneUsage = field(default_factory=SystemOneUsage)
+    usage: Usage = field(default_factory=Usage)
 
     @classmethod
     def from_env(cls, model: str | None = None, **client_kwargs) -> "SystemOne":
@@ -160,21 +173,18 @@ class SystemOne:
             model: Optional model override (defaults to the SDK default, jev-latest).
             **client_kwargs: Passed through to ``AsyncTypeSafeClient``.
         """
-        try:
-            from typesafe_sdk import AsyncTypeSafeClient
-        except ImportError as e:
-            raise ImportError(
-                "The 'typesafe-sdk' package is required for SystemOne stages. "
-                "Install it with the 'systemone' extra: pip install 'themefinder[systemone]'"
-            ) from e
+        sdk = _require_typesafe_sdk()
         if model is not None:
             client_kwargs["model"] = model
-        return cls(transport=AsyncTypeSafeClient(**client_kwargs))
+        return cls(transport=sdk.AsyncTypeSafeClient(**client_kwargs))
 
     async def ask(self, state: Any, questions: dict[str, Any]) -> Any:
         """Send one SystemOne request and record its token usage."""
         result = await self.transport.system_one(state=state, questions=questions)
-        self.usage.record(getattr(result, "usage", None))
+        usage = getattr(result, "usage", None)
+        self.usage.record(
+            getattr(usage, "input_tokens", 0), getattr(usage, "output_tokens", 0)
+        )
         return result
 
 
@@ -202,43 +212,17 @@ def _noul(
     The optional criteria describe the yes and no outcomes, in the
     ``NoulCriteria`` shape the API expects ({"true": ..., "false": ...}).
     """
-    try:
-        from typesafe_sdk import Noul
-    except ImportError as e:
-        raise ImportError(
-            "The 'typesafe-sdk' package is required for SystemOne stages. "
-            "Install it with the 'systemone' extra: pip install 'themefinder[systemone]'"
-        ) from e
+    sdk = _require_typesafe_sdk()
     if true_criteria or false_criteria:
-        return Noul(
+        return sdk.Noul(
             instructions=instructions,
             criteria={"true": true_criteria, "false": false_criteria},
         )
-    return Noul(instructions=instructions)
+    return sdk.Noul(instructions=instructions)
 
 
 def _is_retryable(exception: BaseException) -> bool:
-    """Deterministic client errors (4xx validation, auth) will never succeed."""
-    try:
-        from typesafe_sdk import (
-            TypeSafeAuthenticationError,
-            TypeSafeBadRequestError,
-            TypeSafeNotFoundError,
-            TypeSafePermissionDeniedError,
-            TypeSafeUnprocessableEntityError,
-        )
-    except ImportError:
-        return True
-    return not isinstance(
-        exception,
-        (
-            TypeSafeAuthenticationError,
-            TypeSafeBadRequestError,
-            TypeSafeNotFoundError,
-            TypeSafePermissionDeniedError,
-            TypeSafeUnprocessableEntityError,
-        ),
-    )
+    return not isinstance(exception, _NON_RETRYABLE_ERRORS)
 
 
 async def _ask_with_retries(
@@ -257,15 +241,21 @@ async def _ask_with_retries(
     return await retrying(client.ask, state=state, questions=questions)
 
 
-def _response_questions(response_id: Any, theme_texts: dict[str, str]) -> dict[str, Any]:
+def _theme_bodies(theme_texts: dict[str, str]) -> dict[str, str]:
+    """Pre-format the per-theme question bodies, shared by every response."""
+    return {
+        topic_id: THEME_MAPPING_BODY.format(topic=topic_text)
+        for topic_id, topic_text in theme_texts.items()
+    }
+
+
+def _response_questions(response_id: Any, theme_bodies: dict[str, str]) -> dict[str, Any]:
     """Build one response's question set: per-theme nouls, fallback, evidence."""
     prefix = f"r{response_id}_"
     preamble = RESPONSE_PREAMBLE.format(response_id=response_id)
     questions = {
-        f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}": _noul(
-            preamble + THEME_MAPPING_BODY.format(topic=topic_text)
-        )
-        for topic_id, topic_text in theme_texts.items()
+        f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}": _noul(preamble + body)
+        for topic_id, body in theme_bodies.items()
     }
     questions[f"{prefix}{GIVES_REASON_KEY}"] = _noul(preamble + GIVES_REASON_BODY)
     questions[f"{prefix}{EVIDENCE_KEY}"] = _noul(
@@ -306,29 +296,6 @@ def _extract_response_output(
         "evidence_rich": "YES" if evidence_probability >= detail_threshold else "NO",
         "evidence_probability": evidence_probability,
     }
-
-
-def _merge_results(
-    responses_df: pd.DataFrame,
-    rows: list[dict],
-    results: list[dict | None],
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Merge per-response results back onto the input, splitting out failures."""
-    processed = [result for result in results if result is not None]
-    failed_ids = [
-        row["response_id"] for row, result in zip(rows, results) if result is None
-    ]
-    unprocessable_df = responses_df[
-        responses_df["response_id"].isin(failed_ids)
-    ].reset_index(drop=True)
-
-    if not processed:
-        return pd.DataFrame(), unprocessable_df
-
-    processed_df = responses_df.merge(
-        pd.DataFrame(processed), how="inner", on="response_id"
-    )
-    return processed_df, unprocessable_df
 
 
 async def classify_responses_systemone(
@@ -374,11 +341,10 @@ async def classify_responses_systemone(
         f"using {len(refined_themes_df)} themes (batch size {batch_size})"
     )
     theme_texts = _theme_texts(refined_themes_df)
+    theme_bodies = _theme_bodies(theme_texts)
     semaphore = asyncio.Semaphore(concurrency)
 
-    async def process_chunk(
-        chunk: pd.DataFrame,
-    ) -> tuple[list[dict], list[dict | None]]:
+    async def process_chunk(chunk: pd.DataFrame) -> list[dict]:
         rows = chunk.to_dict(orient="records")
         state = {
             "question": question,
@@ -389,7 +355,7 @@ async def classify_responses_systemone(
         }
         questions: dict[str, Any] = {}
         for row in rows:
-            questions.update(_response_questions(row["response_id"], theme_texts))
+            questions.update(_response_questions(row["response_id"], theme_bodies))
 
         async with semaphore:
             try:
@@ -399,25 +365,31 @@ async def classify_responses_systemone(
                     f"SystemOne classification failed for responses "
                     f"{[row['response_id'] for row in rows]}: {e}"
                 )
-                return rows, [None] * len(rows)
+                return []
 
-        outputs = [
+        return [
             _extract_response_output(
                 result, row["response_id"], theme_texts, threshold, detail_threshold
             )
             for row in rows
         ]
-        return rows, outputs
 
     chunks = [
         responses_df.iloc[i : i + batch_size]
         for i in range(0, len(responses_df), batch_size)
     ]
-    chunk_results = await asyncio.gather(*[process_chunk(chunk) for chunk in chunks])
+    chunk_outputs = await asyncio.gather(*[process_chunk(chunk) for chunk in chunks])
+    outputs = [output for chunk in chunk_outputs for output in chunk]
 
-    all_rows = [row for rows, _ in chunk_results for row in rows]
-    all_outputs = [output for _, outputs in chunk_results for output in outputs]
-    return _merge_results(responses_df, all_rows, all_outputs)
+    if not outputs:
+        return pd.DataFrame(), responses_df.reset_index(drop=True)
+    processed_df = responses_df.merge(
+        pd.DataFrame(outputs), how="inner", on="response_id"
+    )
+    unprocessable_df = responses_df[
+        ~responses_df["response_id"].isin(processed_df["response_id"])
+    ].reset_index(drop=True)
+    return processed_df, unprocessable_df
 
 
 async def find_themes_hybrid(
@@ -458,22 +430,8 @@ async def find_themes_hybrid(
     """
     logger.setLevel(logging.INFO if verbose else logging.CRITICAL)
 
-    theme_df, _ = await theme_generation(
+    refined_theme_df = await generate_refined_themes(
         responses_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-        concurrency=concurrency,
-    )
-    condensed_theme_df, _ = await theme_condensation(
-        theme_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-        concurrency=concurrency,
-    )
-    refined_theme_df, _ = await theme_refinement(
-        condensed_theme_df,
         llm,
         question=question,
         system_prompt=system_prompt,
