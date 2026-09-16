@@ -397,6 +397,15 @@ async def main() -> None:
             "(default: AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT env var)"
         ),
     )
+    parser.add_argument(
+        "--llm-api",
+        choices=["chat", "responses"],
+        default=None,
+        help=(
+            "OpenAI API to use for the LLM stages. Default: 'responses' for "
+            "gpt-5* models (which are Responses-API only), otherwise 'chat'."
+        ),
+    )
     args = parser.parse_args()
 
     config = DatasetConfig(dataset=args.dataset, stage="mapping")
@@ -415,9 +424,16 @@ async def main() -> None:
                 "No LLM model configured: pass --llm-model or set the "
                 "AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT env var (or use --skip-llm)."
             )
+        is_gpt5_family = args.llm_model.startswith("gpt-5")
+        use_responses_api = (
+            args.llm_api == "responses" if args.llm_api else is_gpt5_family
+        )
+        # gpt-5 family models reject explicit temperature settings.
+        request_kwargs = {} if is_gpt5_family else {"temperature": 0}
         llm = OpenAILLM(
             model=args.llm_model,
-            request_kwargs={"temperature": 0},
+            request_kwargs=request_kwargs,
+            use_responses_api=use_responses_api,
             base_url=os.getenv("LLM_GATEWAY_URL"),
             api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
         )
