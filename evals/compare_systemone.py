@@ -168,9 +168,19 @@ def detail_accuracy_metrics(
     # AUC (threshold-free) shows whether probabilities rank responses
     # correctly even when the 0.5 threshold classifies them all one way.
     if "evidence_probability" in df.columns and df["expected"].nunique() > 1:
-        metrics["auc"] = float(
-            roc_auc_score((df["expected"] == "YES"), df["evidence_probability"])
+        expected_yes = df["expected"] == "YES"
+        probabilities = df["evidence_probability"]
+        metrics["auc"] = float(roc_auc_score(expected_yes, probabilities))
+        # Diagnostic threshold sweep: where should the cut-off actually sit?
+        best_threshold, best_accuracy = max(
+            (
+                (candidate, float((expected_yes == (probabilities >= candidate)).mean()))
+                for candidate in sorted(probabilities.unique())
+            ),
+            key=lambda pair: pair[1],
         )
+        metrics["best_threshold"] = float(best_threshold)
+        metrics["best_thr_accuracy"] = best_accuracy
     return metrics
 
 
@@ -249,6 +259,7 @@ async def run_systemone_stages(
     thresholds_by_mode: dict[str, float],
     concurrency: int,
     batch_size: int,
+    detail_threshold: float,
 ) -> tuple[list[StageRun], dict[str, pd.DataFrame], pd.DataFrame]:
     """Run mapping (per question mode) and detail detection through SystemOne."""
     prices = (JEV_INPUT_PRICE_PER_M, JEV_OUTPUT_PRICE_PER_M)
@@ -288,7 +299,7 @@ async def run_systemone_stages(
             )
         )
 
-    threshold = thresholds_by_mode.get("noul", 0.5)
+    threshold = detail_threshold
     before = (client.usage.input_tokens, client.usage.output_tokens)
     start = time.perf_counter()
     detail_df, _ = await detail_detection_systemone(
@@ -326,6 +337,7 @@ async def run_systemone_stages(
         threshold=thresholds_by_mode[combined_mode],
         concurrency=concurrency,
         question_type=combined_mode,
+        detail_threshold=detail_threshold,
     )
     seconds = time.perf_counter() - start
     if not unprocessable.empty:
@@ -377,6 +389,7 @@ async def run_systemone_stages(
             concurrency=concurrency,
             question_type=combined_mode,
             batch_size=batch_size,
+            detail_threshold=detail_threshold,
         )
         seconds = time.perf_counter() - start
         if not unprocessable.empty:
@@ -481,6 +494,16 @@ async def main() -> None:
         type=int,
         default=50,
         help="Concurrent SystemOne calls (cheap, fast requests: go high)",
+    )
+    parser.add_argument(
+        "--detail-threshold",
+        type=float,
+        default=None,
+        help=(
+            "Probability threshold for evidence-rich classification "
+            "(default: --noul-threshold). Tune using the best_threshold "
+            "diagnostic in the results."
+        ),
     )
     parser.add_argument(
         "--systemone-batch-size",
@@ -605,6 +628,9 @@ async def main() -> None:
                 thresholds_by_mode,
                 args.systemone_concurrency,
                 args.systemone_batch_size,
+                args.detail_threshold
+                if args.detail_threshold is not None
+                else args.noul_threshold,
             )
             runs.extend(systemone_runs)
 

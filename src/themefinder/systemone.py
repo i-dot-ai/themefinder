@@ -530,6 +530,7 @@ async def classify_responses_systemone(
     concurrency: int = DEFAULT_CONCURRENCY,
     question_type: str = "noul",
     batch_size: int | None = None,
+    detail_threshold: float | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Run theme mapping and detail detection in one SystemOne call per response.
 
@@ -557,6 +558,8 @@ async def classify_responses_systemone(
             :func:`theme_mapping_systemone`).
         batch_size: Number of responses to share one request; None (default)
             sends one request per response.
+        detail_threshold: Separate probability threshold for the evidence-rich
+            classification; defaults to ``threshold``.
 
     Returns:
         tuple[pd.DataFrame, pd.DataFrame]: (processed results, unprocessable rows).
@@ -568,6 +571,8 @@ async def classify_responses_systemone(
         f"{f', batch size {batch_size}' if batch_size else ''}) on "
         f"{len(responses_df)} responses using {len(refined_themes_df)} themes"
     )
+    if detail_threshold is None:
+        detail_threshold = threshold
     if batch_size and batch_size > 1:
         return await _classify_batched(
             responses_df,
@@ -578,6 +583,7 @@ async def classify_responses_systemone(
             concurrency,
             question_type,
             batch_size,
+            detail_threshold,
         )
 
     questions, mapping_extractor = _mapping_questions_and_extractor(
@@ -589,7 +595,7 @@ async def classify_responses_systemone(
         client,
         question,
         questions,
-        extractors=[mapping_extractor, _evidence_extractor(threshold)],
+        extractors=[mapping_extractor, _evidence_extractor(detail_threshold)],
         concurrency=concurrency,
         stage_name="classification",
     )
@@ -604,6 +610,7 @@ async def _classify_batched(
     concurrency: int,
     question_type: str,
     batch_size: int,
+    detail_threshold: float,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Classify several responses per SystemOne request.
 
@@ -628,7 +635,7 @@ async def _classify_batched(
             questions[f"{prefix}evidence_rich"] = _evidence_question(preamble)
             extractors_by_id[response_id] = [
                 mapping_extractor,
-                _evidence_extractor(threshold, prefix),
+                _evidence_extractor(detail_threshold, prefix),
             ]
         return questions, extractors_by_id
 
