@@ -304,35 +304,128 @@ async def run_systemone_stage(
     return run, classified_df
 
 
+# Rows of the side-by-side table: (label, key, direction, format).
+# Direction "lower" = lower is better (compared as % change); "higher" =
+# higher is better (compared as absolute difference).
+COMPARISON_ROWS = [
+    ("Time (s)", "seconds", "lower", "{:.1f}"),
+    ("Input tokens", "input_tokens", "lower", "{:,.0f}"),
+    ("Output tokens", "output_tokens", "lower", "{:,.0f}"),
+    ("Cost (USD)", "cost_usd", "lower", "${:.4f}"),
+    ("Mapping F1", "map_f1_score", "higher", "{:.3f}"),
+    ("Mapping accuracy", "map_accuracy_score", "higher", "{:.3f}"),
+    ("Mapping overlap", "map_overlap_rate", "higher", "{:.3f}"),
+    ("Evidence accuracy", "detail_accuracy", "higher", "{:.3f}"),
+    ("Evidence kappa", "detail_cohen_kappa", "higher", "{:.3f}"),
+    ("Evidence AUC", "detail_auc", "higher", "{:.3f}"),
+]
+
+# Headline metrics drawn as bar charts underneath the table.
+CHART_ROWS = [
+    ("Time (s)", "seconds", "lower", "{:.1f}"),
+    ("Cost (USD)", "cost_usd", "lower", "${:.4f}"),
+    ("Mapping F1", "map_f1_score", "higher", "{:.3f}"),
+    ("Evidence accuracy", "detail_accuracy", "higher", "{:.3f}"),
+]
+
+BAR_WIDTH = 28
+BACKEND_COLOURS = {"llm": "cyan", "systemone": "magenta"}
+
+
+def _aggregate(runs: list[StageRun]) -> dict:
+    """Collapse one backend's stage runs into a single comparable value set."""
+    values = {
+        "seconds": sum(run.seconds for run in runs),
+        "input_tokens": sum(run.input_tokens for run in runs),
+        "output_tokens": sum(run.output_tokens for run in runs),
+        "cost_usd": sum(run.cost_usd for run in runs),
+    }
+    for run in runs:
+        if run.stage == "mapping":
+            values.update({f"map_{key}": v for key, v in run.metrics.items()})
+        elif run.stage == "detail_detection":
+            values.update({f"detail_{key}": v for key, v in run.metrics.items()})
+        else:
+            # SystemOne's combined run already prefixes its metrics.
+            values.update(run.metrics)
+    return values
+
+
+def _delta_cell(llm_value: float, s1_value: float, direction: str) -> str:
+    """Render the SystemOne-vs-LLM difference, green when SystemOne wins."""
+    if direction == "lower":
+        if llm_value == 0:
+            return "—"
+        change = (s1_value - llm_value) / llm_value * 100
+        colour = "green" if change < 0 else "red" if change > 0 else "dim"
+        return f"[{colour}]{change:+.0f}%[/]"
+    difference = s1_value - llm_value
+    if abs(difference) < 0.0005:
+        return "[dim]±0.000[/]"
+    colour = "green" if difference > 0 else "red"
+    return f"[{colour}]{difference:+.3f}[/]"
+
+
+def _bar(value: float, scale: float, colour: str) -> str:
+    if scale <= 0:
+        return "░" * BAR_WIDTH
+    filled = max(1, round(BAR_WIDTH * value / scale)) if value > 0 else 0
+    return f"[{colour}]{'█' * filled}[/][dim]{'░' * (BAR_WIDTH - filled)}[/]"
+
+
 def print_summary(question_part: str, runs: list[StageRun], agreement: dict) -> None:
     from rich.console import Console
     from rich.table import Table
 
     console = Console()
-    table = Table(title=f"LLM vs SystemOne — {question_part}")
-    for column in [
-        "Stage",
-        "Backend",
-        "Time (s)",
-        "Input tok",
-        "Output tok",
-        "Cost (USD)",
-        "Quality",
-    ]:
-        table.add_column(column)
+    backends = {
+        "llm": [run for run in runs if run.backend == "llm"],
+        "systemone": [run for run in runs if run.backend == "systemone"],
+    }
+    aggregates = {
+        name: _aggregate(stage_runs)
+        for name, stage_runs in backends.items()
+        if stage_runs
+    }
 
-    for run in runs:
-        quality = ", ".join(f"{key}={value:.3f}" for key, value in run.metrics.items())
-        table.add_row(
-            run.stage,
-            run.backend,
-            f"{run.seconds:.1f}",
-            str(run.input_tokens),
-            str(run.output_tokens),
-            f"${run.cost_usd:.4f}",
-            quality or "n/a",
-        )
+    table = Table(title=f"LLM vs SystemOne — {question_part}")
+    table.add_column("Metric")
+    for name in aggregates:
+        table.add_column(name.upper() if name == "llm" else "SystemOne", justify="right")
+    if len(aggregates) == 2:
+        table.add_column("SystemOne Δ", justify="right")
+
+    for label, key, direction, fmt in COMPARISON_ROWS:
+        cells = [
+            fmt.format(values[key]) if key in values else "—"
+            for values in aggregates.values()
+        ]
+        if all(cell == "—" for cell in cells):
+            continue
+        row = [label, *cells]
+        if len(aggregates) == 2:
+            llm_values, s1_values = aggregates["llm"], aggregates["systemone"]
+            row.append(
+                _delta_cell(llm_values[key], s1_values[key], direction)
+                if key in llm_values and key in s1_values
+                else "—"
+            )
+        table.add_row(*row)
     console.print(table)
+
+    if len(aggregates) == 2:
+        for label, key, direction, fmt in CHART_ROWS:
+            if any(key not in values for values in aggregates.values()):
+                continue
+            hint = "lower is better" if direction == "lower" else "higher is better"
+            console.print(f"[bold]{label}[/] [dim]({hint})[/]")
+            scale = max(values[key] for values in aggregates.values())
+            for name, values in aggregates.items():
+                bar = _bar(values[key], scale, BACKEND_COLOURS[name])
+                console.print(
+                    f"  {name:<10} {bar} {fmt.format(values[key])}"
+                )
+        console.print()
 
     if agreement:
         agreement_summary = ", ".join(
