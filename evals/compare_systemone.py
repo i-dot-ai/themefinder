@@ -325,6 +325,7 @@ CHART_ROWS = [
     ("Time (s)", "seconds", "lower", "{:.1f}"),
     ("Cost (USD)", "cost_usd", "lower", "${:.4f}"),
     ("Mapping F1", "map_f1_score", "higher", "{:.3f}"),
+    ("Mapping accuracy", "map_accuracy_score", "higher", "{:.3f}"),
     ("Evidence accuracy", "detail_accuracy", "higher", "{:.3f}"),
 ]
 
