@@ -248,6 +248,7 @@ async def run_systemone_stages(
     expected_detail: dict[int, str],
     thresholds_by_mode: dict[str, float],
     concurrency: int,
+    batch_size: int,
 ) -> tuple[list[StageRun], dict[str, pd.DataFrame], pd.DataFrame]:
     """Run mapping (per question mode) and detail detection through SystemOne."""
     prices = (JEV_INPUT_PRICE_PER_M, JEV_OUTPUT_PRICE_PER_M)
@@ -334,20 +335,23 @@ async def run_systemone_stages(
         )
     input_tokens = client.usage.input_tokens - before[0]
     output_tokens = client.usage.output_tokens - before[1]
-    combined_metrics = {
-        **{
-            f"map_{key}": value
-            for key, value in mapping_accuracy_metrics(
-                combined_df, expected_mapping
-            ).items()
-        },
-        **{
-            f"detail_{key}": value
-            for key, value in detail_accuracy_metrics(
-                combined_df, expected_detail
-            ).items()
-        },
-    }
+
+    def both_stage_metrics(df: pd.DataFrame) -> dict:
+        return {
+            **{
+                f"map_{key}": value
+                for key, value in mapping_accuracy_metrics(
+                    df, expected_mapping
+                ).items()
+            },
+            **{
+                f"detail_{key}": value
+                for key, value in detail_accuracy_metrics(
+                    df, expected_detail
+                ).items()
+            },
+        }
+
     runs.append(
         StageRun(
             backend=f"systemone-combined[{combined_mode}]",
@@ -356,9 +360,43 @@ async def run_systemone_stages(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
             cost_usd=cost_usd(input_tokens, output_tokens, prices),
-            metrics=combined_metrics,
+            metrics=both_stage_metrics(combined_df),
         )
     )
+
+    # Batched: several responses share each request via a list-shaped state.
+    if batch_size > 1:
+        before = (client.usage.input_tokens, client.usage.output_tokens)
+        start = time.perf_counter()
+        batched_df, unprocessable = await classify_responses_systemone(
+            responses_df=responses_df[["response_id", "response"]],
+            client=client,
+            question=question,
+            refined_themes_df=topics_df[["topic_id", "topic"]],
+            threshold=thresholds_by_mode[combined_mode],
+            concurrency=concurrency,
+            question_type=combined_mode,
+            batch_size=batch_size,
+        )
+        seconds = time.perf_counter() - start
+        if not unprocessable.empty:
+            print(
+                f"  Warning: {len(unprocessable)} responses unprocessable "
+                f"(SystemOne batched)"
+            )
+        input_tokens = client.usage.input_tokens - before[0]
+        output_tokens = client.usage.output_tokens - before[1]
+        runs.append(
+            StageRun(
+                backend=f"systemone-batch{batch_size}[{combined_mode}]",
+                stage="mapping+detail",
+                seconds=seconds,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost_usd(input_tokens, output_tokens, prices),
+                metrics=both_stage_metrics(batched_df),
+            )
+        )
 
     return runs, mapping_dfs, detail_df
 
@@ -443,6 +481,15 @@ async def main() -> None:
         type=int,
         default=50,
         help="Concurrent SystemOne calls (cheap, fast requests: go high)",
+    )
+    parser.add_argument(
+        "--systemone-batch-size",
+        type=int,
+        default=20,
+        help=(
+            "Responses per request in the batched SystemOne run "
+            "(0 or 1 disables that run)"
+        ),
     )
     parser.add_argument(
         "--skip-llm", action="store_true", help="Only run the SystemOne stages"
@@ -557,6 +604,7 @@ async def main() -> None:
                 expected_detail,
                 thresholds_by_mode,
                 args.systemone_concurrency,
+                args.systemone_batch_size,
             )
             runs.extend(systemone_runs)
 

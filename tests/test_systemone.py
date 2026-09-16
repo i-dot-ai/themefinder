@@ -330,6 +330,59 @@ async def test_combined_classification_uses_one_call_per_response(
     assert classifications == {1: "YES", 2: "NO"}
 
 
+async def test_batched_classification_shares_one_call_across_responses(
+    themes_df, responses_df
+):
+    transport = FakeTransport(
+        {
+            # Batched mode sends a list state; FakeTransport keys on response
+            # text, so use a transport that answers by question key instead.
+        }
+    )
+
+    class FakeBatchedTransport:
+        def __init__(self):
+            self.calls = []
+            self.answers = {
+                "r1_theme_A": 0.9,
+                "r1_evidence_rich": 0.8,
+                "r2_theme_B": 0.7,
+                "r2_evidence_rich": 0.1,
+            }
+
+        async def system_one(self, state, questions):
+            self.calls.append((state, questions))
+            return FakeResponse(
+                nouls={
+                    key: FakeNoulAnswer(noul=self.answers.get(key, 0.0))
+                    for key in questions
+                }
+            )
+
+    transport = FakeBatchedTransport()
+    client = SystemOne(transport=transport)
+
+    result, unprocessable = await classify_responses_systemone(
+        responses_df,
+        client,
+        question="Q?",
+        refined_themes_df=themes_df,
+        batch_size=2,
+    )
+
+    assert unprocessable.empty
+    # Both responses were classified in a single request
+    assert len(transport.calls) == 1
+    state, questions = transport.calls[0]
+    assert [r["response_id"] for r in state["responses"]] == [1, 2]
+    assert "r1_theme_A" in questions
+    assert "response_id is 1" in questions["r1_theme_A"].instructions
+    labels = dict(zip(result["response_id"], result["labels"]))
+    assert labels == {1: ["A"], 2: ["B"]}
+    classifications = dict(zip(result["response_id"], result["evidence_rich"]))
+    assert classifications == {1: "YES", 2: "NO"}
+
+
 async def test_client_accumulates_token_usage(themes_df, responses_df):
     transport = FakeTransport(
         {
