@@ -90,57 +90,81 @@ def request_structure(
 
 def print_request_structure(info: dict) -> None:
     from rich.console import Console
-    from rich.panel import Panel
+    from rich.tree import Tree
 
-    Console().print(
-        Panel(
-            f"{info['responses']} responses × {info['themes']} themes → "
-            f"{info['requests']} requests of ≤{info['batch_size']} responses, "
-            f"{info['questions_per_request']} questions each "
-            f"({info['questions_per_response']}/response: per-theme nouls + "
-            f"gives_reason + evidence_rich), "
-            f"~{info['sample_request_chars'] / 1000:.0f}kB payload/request\n\n"
-            "state    = {question, topics{id: text}, topic_match_definition,\n"
-            "            gives_reason_definition, evidence_rich_definition,\n"
-            "            responses[{response_id, response}]}\n"
-            'question = r<id>_theme_<topic>: {"question": ..., '
-            '"response_id": <id>, "topic_id": <topic>}\n'
-            "           (definitions live once in state; questions are pointers)",
-            title="SystemOne request structure",
-            expand=False,
-        )
+    root = Tree(
+        f"[bold]SystemOne request[/] — {info['requests']} requests of "
+        f"≤{info['batch_size']} responses, {info['questions_per_request']} "
+        f"questions each, ~{info['sample_request_chars'] / 1000:.0f}kB payload"
     )
+    state = root.add("[cyan]state[/] [dim](shared context, sent once per request)[/]")
+    state.add("question — the consultation question")
+    state.add(
+        f"topics — {{topic_id: text}} × {info['themes']} "
+        "[dim](each defined once, referenced by every question)[/]"
+    )
+    state.add(
+        "topic_match_definition / gives_reason_definition / "
+        "evidence_rich_definition [dim](judgement rubrics, stated once)[/]"
+    )
+    state.add(
+        f"responses — [{{response_id, response}}] × ≤{info['batch_size']}"
+    )
+    questions = root.add(
+        f"[magenta]questions[/] "
+        f"[dim]({info['questions_per_response']} per response — JSON pointers "
+        "into the state)[/]"
+    )
+    questions.add(
+        'r<id>_theme_<topic> — noul {"question", "response_id", "topic_id"} '
+        f"× {info['themes']} themes"
+    )
+    questions.add('r<id>_gives_reason — noul [dim](drives the fallback labels)[/]')
+    questions.add('r<id>_evidence_rich — noul [dim](detail detection)[/]')
+    Console().print(root)
 
 
 def print_pipeline_flow(n_themes: int | None, batch_size: int) -> None:
-    """Render the LLM vs hybrid pipeline flow as a terminal diagram."""
+    """Show the five pipeline stages and which ones SystemOne replaces."""
     from rich.console import Console
-    from rich.panel import Panel
+    from rich.table import Table
 
     themes = str(n_themes) if n_themes else "N"
-    diagram = f"""\
-                    responses + question
-                            │
-            ┌── generative stages (LLM, identical in both) ──┐
-            │  theme_generation → theme_condensation →       │
-            │  theme_refinement → {themes} themes (topic_id)        │
-            └───────────────────────┬────────────────────────┘
-                 ┌──────────────────┴──────────────────┐
-                 ▼                                     ▼
-        [ LLM pipeline ]                    [ Hybrid pipeline ]
-                 │                                     │
-     theme_mapping (LLM)              classify_responses_systemone (jev)
-     prompts of 20 responses,         1 request per {batch_size} responses:
-     free-text JSON out               per response, {themes} theme nouls +
-                 │                    gives_reason + evidence_rich,
-     detail_detection (LLM)           all answered in parallel with
-     a second pass over every         calibrated probabilities;
-     response                         no second pass needed
-                 │                                     │
-                 └──────────────────┬──────────────────┘
-                                    ▼
-              mapping (labels) + detailed_responses (evidence_rich)"""
-    Console().print(Panel(diagram, title="Pipeline flow: LLM vs hybrid", expand=False))
+    table = Table(
+        title="Pipeline stages: what the hybrid replaces",
+        caption=(
+            "Both pipelines produce the same outputs: themes, mapping (labels "
+            "per response) and detailed_responses (evidence_rich per response)."
+        ),
+    )
+    table.add_column("Stage")
+    table.add_column("LLM pipeline (find_themes)")
+    table.add_column("Hybrid pipeline (find_themes_hybrid)")
+
+    for stage, task in [
+        ("1. Theme generation", "draft themes from responses"),
+        ("2. Theme condensation", "merge duplicate themes"),
+        ("3. Theme refinement", f"finalise {themes} themes"),
+    ]:
+        table.add_row(
+            f"{stage}\n[dim]{task}[/]",
+            "LLM (generative)",
+            "[dim]same — unchanged[/]",
+        )
+    table.add_row(
+        "4. Theme mapping\n[dim]label each response with themes[/]",
+        "LLM: prompts of 20 responses,\nfree-text JSON output",
+        f"[magenta]replaced by jev SystemOne[/] ┐\none request per {batch_size} "
+        "responses;",
+    )
+    table.add_row(
+        "5. Detail detection\n[dim]flag evidence-rich responses[/]",
+        "LLM: a second full pass\nover every response",
+        f"[magenta]replaced by jev SystemOne[/] ┘\nmerged into the SAME request "
+        f"—\n{themes} theme nouls + gives_reason +\nevidence_rich per response, "
+        "all\nanswered in parallel with\ncalibrated probabilities",
+    )
+    Console().print(table)
 
 
 def result_caveats(

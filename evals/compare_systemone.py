@@ -500,11 +500,15 @@ async def compare_question_part(
     detail_threshold: float = DEFAULT_DETAIL_THRESHOLD,
     systemone_concurrency: int = DEFAULT_CONCURRENCY,
     batch_size: int = DEFAULT_BATCH_SIZE,
+    show_structure: bool = True,
+    seen_caveats: set | None = None,
 ) -> dict:
     """Run the stage-level comparison for one question part and print it.
 
     Either backend may be None to skip it. Returns the results as a
-    JSON-serialisable dict.
+    JSON-serialisable dict. The request structure prints only when
+    show_structure is set (it is identical across question parts), and
+    caveats already present in seen_caveats are recorded but not re-printed.
     """
     question_part = item["metadata"]["question_part"]
     print(f"\n=== {question_part} ===")
@@ -522,7 +526,8 @@ async def compare_question_part(
 
     if systemone_client is not None:
         structure = request_structure(responses_df, question, topics_df, batch_size)
-        print_request_structure(structure)
+        if show_structure:
+            print_request_structure(structure)
 
     if llm is not None:
         llm_runs, llm_mapping_df = await run_llm_stages(
@@ -570,7 +575,11 @@ async def compare_question_part(
         "probability_report": probabilities,
     }
     caveats = result_caveats(results, detail_threshold)
-    print_caveats(caveats)
+    if seen_caveats is not None:
+        print_caveats([caveat for caveat in caveats if caveat not in seen_caveats])
+        seen_caveats.update(caveats)
+    else:
+        print_caveats(caveats)
     results["caveats"] = caveats
     return results
 
@@ -676,7 +685,8 @@ async def main() -> None:
         "question_parts": {},
     }
 
-    for item in items:
+    seen_caveats: set = set()
+    for i, item in enumerate(items):
         part_results = await compare_question_part(
             item,
             config,
@@ -688,6 +698,8 @@ async def main() -> None:
             detail_threshold=args.detail_threshold,
             systemone_concurrency=args.systemone_concurrency,
             batch_size=args.systemone_batch_size,
+            show_structure=(i == 0),
+            seen_caveats=seen_caveats,
         )
         all_results["question_parts"][item["metadata"]["question_part"]] = part_results
 

@@ -189,7 +189,8 @@ async def main() -> None:
     question_parts: dict = {}
     if not args.skip_stages:
         print(f"\n{'=' * 20} Phase 2: stage-level accuracy {'=' * 20}")
-        for item in items:
+        seen_caveats: set = set()
+        for i, item in enumerate(items):
             question_parts[item["metadata"]["question_part"]] = (
                 await compare_question_part(
                     item,
@@ -202,6 +203,8 @@ async def main() -> None:
                     detail_threshold=args.detail_threshold,
                     systemone_concurrency=args.systemone_concurrency,
                     batch_size=args.systemone_batch_size,
+                    show_structure=(i == 0),
+                    seen_caveats=seen_caveats,
                 )
             )
 
