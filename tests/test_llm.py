@@ -41,7 +41,8 @@ class FakeChatCompletionsAPI:
 
 
 def make_llm(**kwargs) -> OpenAILLM:
-    return OpenAILLM(model="test-model", api_key="test", **kwargs)
+    api_key = "test"  # pragma: allowlist secret
+    return OpenAILLM(model="test-model", api_key=api_key, **kwargs)
 
 
 async def test_responses_api_returns_structured_output_and_records_usage():

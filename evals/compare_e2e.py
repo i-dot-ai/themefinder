@@ -106,7 +106,7 @@ async def run_pipeline(
 
     llm_input = llm.usage.input_tokens - llm_before[0]
     llm_output = llm.usage.output_tokens - llm_before[1]
-    cost = cost_usd(llm_input, llm_output, llm_prices())
+    cost = cost_usd(llm_input, llm_output, llm_prices(llm.model))
     s1_input = s1_output = 0
     if systemone_client:
         s1_input = systemone_client.usage.input_tokens - s1_before[0]
@@ -156,9 +156,7 @@ def print_comparison(question_part: str, pipeline_runs: list[dict]) -> None:
     for label, key, fmt in rows:
         cells = []
         for run in pipeline_runs:
-            value = (
-                run["stats"].get(key[1]) if isinstance(key, tuple) else run.get(key)
-            )
+            value = run["stats"].get(key[1]) if isinstance(key, tuple) else run.get(key)
             cells.append(fmt.format(value) if value is not None else "—")
         if any(cell != "—" for cell in cells):
             table.add_row(label, *cells)

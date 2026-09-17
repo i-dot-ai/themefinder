@@ -191,14 +191,14 @@ async def test_falls_back_to_no_reason_given_for_non_answers(themes_df):
 async def test_detail_threshold_is_separate_from_mapping_threshold(
     themes_df, responses_df
 ):
-    # Evidence probabilities cluster low; 0.06 is rich at the 0.05 default
+    # Evidence probabilities cluster low; 0.20 is rich at the 0.16 default
     # even though it is far below the 0.5 mapping threshold.
     transport = FakeTransport(
         {
             f"r1_{THEME_QUESTION_PREFIX}A": 0.9,
-            f"r1_{EVIDENCE_KEY}": 0.06,
+            f"r1_{EVIDENCE_KEY}": 0.20,
             f"r2_{THEME_QUESTION_PREFIX}B": 0.9,
-            f"r2_{EVIDENCE_KEY}": 0.04,
+            f"r2_{EVIDENCE_KEY}": 0.10,
         }
     )
     client = SystemOne(transport=transport)

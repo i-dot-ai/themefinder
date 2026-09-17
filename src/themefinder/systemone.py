@@ -27,11 +27,14 @@ Benchmarked against the local gambling_XS ground truth
 choice-question alternatives on F1 while making a twentieth of the requests,
 so the alternatives were removed.
 
-Thresholds: theme probabilities are well spread, so the default assignment
-threshold is 0.5. Evidence-rich probabilities cluster near zero (the rubric
-is strict) while ranking responses accurately, so the default detail
-threshold is 0.05 — tuned on one 100-response question part; sanity-check it
-per consultation rather than trusting it universally.
+Thresholds: theme probabilities are strongly bimodal, so the default
+assignment threshold of 0.5 is insensitive. Evidence-rich probabilities
+cluster low (the rubric is a strict conjunction) while ranking responses
+accurately (AUC 0.90), so the default detail threshold is 0.16 — the value a
+threshold sweep found stable (0.162 ± 0.008) across 10 benchmark runs on the
+gambling_XS reference labels. The optimum shifts with the request format and
+data, so re-check it (the benchmark's best_threshold diagnostic) per
+consultation rather than trusting it universally.
 """
 
 import asyncio
@@ -85,7 +88,7 @@ _NON_RETRYABLE_ERRORS: tuple[type[BaseException], ...] = (
 )
 
 DEFAULT_ASSIGNMENT_THRESHOLD = 0.5
-DEFAULT_DETAIL_THRESHOLD = 0.05
+DEFAULT_DETAIL_THRESHOLD = 0.16
 
 # SystemOne calls are small and fast; the model is built for high-throughput
 # parallel questioning, so a much higher concurrency than an LLM's is safe.
@@ -137,9 +140,7 @@ GIVES_REASON_DEFINITION = (
 )
 
 EVIDENCE_RICH_DEFINITION = {
-    "note": (
-        "Judge only the response named by the question's response_id."
-    ),
+    "note": ("Judge only the response named by the question's response_id."),
     "evidence_rich_if": (
         "The response clearly answers the question with insights beyond generic "
         "opinion (nuanced reasoning, contextual explanation or argumentation "
@@ -231,9 +232,7 @@ class SystemOne:
             return
         self.rate_limit_hits += 1
         retry_after_ms = getattr(exception, "retry_after_ms", None)
-        wait = (
-            retry_after_ms / 1000 if retry_after_ms else RATE_LIMIT_COOLDOWN_SECONDS
-        )
+        wait = retry_after_ms / 1000 if retry_after_ms else RATE_LIMIT_COOLDOWN_SECONDS
         now = time.monotonic()
         new_until = now + wait
         # The cooldown is one shared timeline, so the wall-clock time spent
@@ -273,9 +272,8 @@ def _retry_wait(retry_state) -> float:
     exponential wait on top would only inflate wall time.
     """
     exception = retry_state.outcome.exception() if retry_state.outcome else None
-    if (
-        typesafe_sdk is not None
-        and isinstance(exception, typesafe_sdk.TypeSafeRateLimitError)
+    if typesafe_sdk is not None and isinstance(
+        exception, typesafe_sdk.TypeSafeRateLimitError
     ):
         return 0.0
     return wait_random_exponential(

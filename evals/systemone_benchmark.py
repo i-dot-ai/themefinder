@@ -307,7 +307,9 @@ def aggregate_runs(runs: list[dict]) -> dict:
     e2e_values: dict = {}
     for run in runs:
         for pipeline in run["e2e"]:
-            entry = e2e_values.setdefault(pipeline["name"], {"seconds": [], "cost_usd": []})
+            entry = e2e_values.setdefault(
+                pipeline["name"], {"seconds": [], "cost_usd": []}
+            )
             entry["seconds"].append(pipeline["seconds"])
             entry["cost_usd"].append(pipeline["cost_usd"])
     aggregate["e2e"] = {
@@ -332,8 +334,7 @@ def aggregate_runs(runs: list[dict]) -> dict:
             "seconds": _mean_std(entry["seconds"]),
             "cost_usd": _mean_std(entry["cost_usd"]),
             "metrics": {
-                metric: _mean_std(values)
-                for metric, values in entry["metrics"].items()
+                metric: _mean_std(values) for metric, values in entry["metrics"].items()
             },
         }
         for (part, backend), entry in stage_values.items()
@@ -344,7 +345,11 @@ def aggregate_runs(runs: list[dict]) -> dict:
         for row in run["scale"]:
             entry = scale_values.setdefault(
                 row["responses"],
-                {"seconds": [], "responses_per_second_active": [], "rate_limit_hits": []},
+                {
+                    "seconds": [],
+                    "responses_per_second_active": [],
+                    "rate_limit_hits": [],
+                },
             )
             entry["seconds"].append(row["seconds"])
             entry["responses_per_second_active"].append(
@@ -392,7 +397,9 @@ def print_aggregate(aggregate: dict, n_runs: int) -> None:
         table.add_column("Cost (USD)", justify="right")
         for name, entry in sorted(aggregate["e2e"].items()):
             table.add_row(
-                name, cell(entry["seconds"], "{:.1f}"), cell(entry["cost_usd"], "{:.4f}")
+                name,
+                cell(entry["seconds"], "{:.1f}"),
+                cell(entry["cost_usd"], "{:.4f}"),
             )
         console.print(table)
 
@@ -456,21 +463,21 @@ async def run_once(
         print(f"\n{'=' * 20} Phase 2: stage-level accuracy {'=' * 20}")
         seen_caveats: set = set()
         for i, item in enumerate(items):
-            question_parts[item["metadata"]["question_part"]] = (
-                await compare_question_part(
-                    item,
-                    config,
-                    llm,
-                    systemone_client,
-                    limit=args.limit,
-                    llm_concurrency=args.concurrency,
-                    mapping_threshold=args.mapping_threshold,
-                    detail_threshold=args.detail_threshold,
-                    systemone_concurrency=args.systemone_concurrency,
-                    batch_size=args.systemone_batch_size,
-                    show_structure=(show_detail and i == 0),
-                    seen_caveats=seen_caveats,
-                )
+            question_parts[
+                item["metadata"]["question_part"]
+            ] = await compare_question_part(
+                item,
+                config,
+                llm,
+                systemone_client,
+                limit=args.limit,
+                llm_concurrency=args.concurrency,
+                mapping_threshold=args.mapping_threshold,
+                detail_threshold=args.detail_threshold,
+                systemone_concurrency=args.systemone_concurrency,
+                batch_size=args.systemone_batch_size,
+                show_structure=(show_detail and i == 0),
+                seen_caveats=seen_caveats,
             )
 
     # Phase 3: throughput at scale, resampled from the first question part.
@@ -531,10 +538,18 @@ async def main() -> None:
     parser.add_argument(
         "--model", default=None, help="SystemOne model override (default jev-latest)"
     )
-    parser.add_argument("--mapping-threshold", type=float, default=DEFAULT_ASSIGNMENT_THRESHOLD)
-    parser.add_argument("--detail-threshold", type=float, default=DEFAULT_DETAIL_THRESHOLD)
-    parser.add_argument("--concurrency", type=int, default=10, help="Concurrent LLM calls")
-    parser.add_argument("--systemone-concurrency", type=int, default=DEFAULT_CONCURRENCY)
+    parser.add_argument(
+        "--mapping-threshold", type=float, default=DEFAULT_ASSIGNMENT_THRESHOLD
+    )
+    parser.add_argument(
+        "--detail-threshold", type=float, default=DEFAULT_DETAIL_THRESHOLD
+    )
+    parser.add_argument(
+        "--concurrency", type=int, default=10, help="Concurrent LLM calls"
+    )
+    parser.add_argument(
+        "--systemone-concurrency", type=int, default=DEFAULT_CONCURRENCY
+    )
     parser.add_argument("--systemone-batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--scale-sizes",
@@ -550,9 +565,15 @@ async def main() -> None:
         default=1,
         help="Run every phase N times and report mean ± std across runs",
     )
-    parser.add_argument("--skip-e2e", action="store_true", help="Skip the end-to-end phase")
-    parser.add_argument("--skip-stages", action="store_true", help="Skip the stage-level phase")
-    parser.add_argument("--skip-scale", action="store_true", help="Skip the scale phase")
+    parser.add_argument(
+        "--skip-e2e", action="store_true", help="Skip the end-to-end phase"
+    )
+    parser.add_argument(
+        "--skip-stages", action="store_true", help="Skip the stage-level phase"
+    )
+    parser.add_argument(
+        "--skip-scale", action="store_true", help="Skip the scale phase"
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",

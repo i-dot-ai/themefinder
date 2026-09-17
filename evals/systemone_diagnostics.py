@@ -44,9 +44,7 @@ def build_sample_request(
         questions.update(_response_questions(response_id, theme_texts))
     return {
         "model": model,
-        "state": _build_state(
-            question, theme_texts, chunk.to_dict(orient="records")
-        ),
+        "state": _build_state(question, theme_texts, chunk.to_dict(orient="records")),
         "questions": {
             key: msgspec.to_builtins(value) for key, value in questions.items()
         },
@@ -107,9 +105,7 @@ def print_request_structure(info: dict) -> None:
         "topic_match_definition / gives_reason_definition / "
         "evidence_rich_definition [dim](judgement rubrics, stated once)[/]"
     )
-    state.add(
-        f"responses — [{{response_id, response}}] × ≤{info['batch_size']}"
-    )
+    state.add(f"responses — [{{response_id, response}}] × ≤{info['batch_size']}")
     questions = root.add(
         f"[magenta]questions[/] "
         f"[dim]({info['questions_per_response']} per response — JSON pointers "
@@ -119,8 +115,8 @@ def print_request_structure(info: dict) -> None:
         'r<id>_theme_<topic> — noul {"question", "response_id", "topic_id"} '
         f"× {info['themes']} themes"
     )
-    questions.add('r<id>_gives_reason — noul [dim](drives the fallback labels)[/]')
-    questions.add('r<id>_evidence_rich — noul [dim](detail detection)[/]')
+    questions.add("r<id>_gives_reason — noul [dim](drives the fallback labels)[/]")
+    questions.add("r<id>_evidence_rich — noul [dim](detail detection)[/]")
     Console().print(root)
 
 
@@ -167,9 +163,7 @@ def print_pipeline_flow(n_themes: int | None, batch_size: int) -> None:
     Console().print(table)
 
 
-def result_caveats(
-    part_results: dict, detail_threshold: float
-) -> list[str]:
+def result_caveats(part_results: dict, detail_threshold: float) -> list[str]:
     """Validate one question part's results and explain anything misleading."""
     caveats = [
         "Mapping 'accuracy' is exact-set match — a response scores 0 unless its "
@@ -183,9 +177,7 @@ def result_caveats(
         metrics_by_backend.setdefault(run["backend"], {}).update(run["metrics"])
 
     token_totals = {
-        backend: sum(
-            run["input_tokens"] for run in runs if run["backend"] == backend
-        )
+        backend: sum(run["input_tokens"] for run in runs if run["backend"] == backend)
         for backend in metrics_by_backend
     }
     if "llm" in token_totals and "systemone" in token_totals and token_totals["llm"]:
@@ -217,10 +209,7 @@ def result_caveats(
                 "concluding either backend failed."
             )
         best_threshold = metrics.get("detail_best_threshold")
-        if (
-            best_threshold is not None
-            and abs(best_threshold - detail_threshold) > 0.1
-        ):
+        if best_threshold is not None and abs(best_threshold - detail_threshold) > 0.1:
             caveats.append(
                 f"{backend}: the swept best evidence threshold "
                 f"({best_threshold:.2f}) is far from the configured "
@@ -318,9 +307,7 @@ def probability_report(
         "per_theme": {
             topic_id: {
                 "mean": float(pd.Series(values).mean()),
-                "assignment_rate": float(
-                    (pd.Series(values) >= threshold).mean()
-                ),
+                "assignment_rate": float((pd.Series(values) >= threshold).mean()),
             }
             for topic_id, values in sorted(per_theme.items())
         },
@@ -341,9 +328,7 @@ def _print_histogram(console, stats: dict, title: str, threshold: float) -> None
         low, high = i / HISTOGRAM_BINS, (i + 1) / HISTOGRAM_BINS
         bar = "█" * round(HISTOGRAM_BAR_WIDTH * count / peak)
         marker = " ←threshold" if low <= threshold < high else ""
-        console.print(
-            f"  {low:.1f}–{high:.1f} [cyan]{bar}[/] {count}[dim]{marker}[/]"
-        )
+        console.print(f"  {low:.1f}–{high:.1f} [cyan]{bar}[/] {count}[dim]{marker}[/]")
     console.print(
         f"  ≥threshold: {stats['share_above_threshold']:.1%}   "
         f"uncertain ({UNCERTAIN_BAND[0]}–{UNCERTAIN_BAND[1]}): "

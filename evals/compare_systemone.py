@@ -69,12 +69,23 @@ from themefinder.systemone import (  # noqa: E402
 )
 
 # USD per 1M tokens, overridable via env. jev pricing from docs.typesafe.ai
-# (jev-1.12, September 2026): input $0.042/1M, output free. LLM default
-# assumes GPT-4.1 — override when benchmarking a different model.
+# (jev-1.12, September 2026): input $0.042/1M, output free.
 JEV_INPUT_PRICE_PER_M = float(os.getenv("JEV_INPUT_PRICE_PER_M", 0.042))
 JEV_OUTPUT_PRICE_PER_M = float(os.getenv("JEV_OUTPUT_PRICE_PER_M", 0.0))
+
+# Published LLM prices (input, output) per 1M tokens, September 2026, matched
+# by longest model-name prefix. Unknown models fall back to GPT-4.1-class
+# pricing with a warning — costs computed that way are not comparable across
+# models, so extend this table or set the env overrides instead.
+KNOWN_LLM_PRICES = {
+    "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.00),
+    "gpt-4.1": (2.00, 8.00),
+    "gpt-5.6-luna": (0.20, 1.20),
+}
 DEFAULT_LLM_INPUT_PRICE_PER_M = 2.00
 DEFAULT_LLM_OUTPUT_PRICE_PER_M = 8.00
+_warned_unknown_price_models: set = set()
 
 
 @dataclass
@@ -116,14 +127,34 @@ def build_llm(llm_model: str, llm_api: str | None = None) -> OpenAILLM:
     )
 
 
-def llm_prices() -> tuple[float, float]:
-    return (
-        float(os.getenv("LLM_INPUT_PRICE_PER_M", DEFAULT_LLM_INPUT_PRICE_PER_M)),
-        float(os.getenv("LLM_OUTPUT_PRICE_PER_M", DEFAULT_LLM_OUTPUT_PRICE_PER_M)),
-    )
+def llm_prices(model: str | None = None) -> tuple[float, float]:
+    """Resolve LLM prices: env overrides, then the published table, then a
+    GPT-4.1-class fallback with a warning."""
+    if "LLM_INPUT_PRICE_PER_M" in os.environ or "LLM_OUTPUT_PRICE_PER_M" in os.environ:
+        return (
+            float(os.getenv("LLM_INPUT_PRICE_PER_M", DEFAULT_LLM_INPUT_PRICE_PER_M)),
+            float(os.getenv("LLM_OUTPUT_PRICE_PER_M", DEFAULT_LLM_OUTPUT_PRICE_PER_M)),
+        )
+    if model:
+        for prefix, prices in sorted(
+            KNOWN_LLM_PRICES.items(), key=lambda item: -len(item[0])
+        ):
+            if model.startswith(prefix):
+                return prices
+    if model not in _warned_unknown_price_models:
+        _warned_unknown_price_models.add(model)
+        print(
+            f"Warning: no published price entry for LLM '{model}'; costing it "
+            f"at GPT-4.1-class rates (${DEFAULT_LLM_INPUT_PRICE_PER_M}/"
+            f"${DEFAULT_LLM_OUTPUT_PRICE_PER_M} per 1M). Set "
+            "LLM_INPUT_PRICE_PER_M / LLM_OUTPUT_PRICE_PER_M for accurate costs."
+        )
+    return (DEFAULT_LLM_INPUT_PRICE_PER_M, DEFAULT_LLM_OUTPUT_PRICE_PER_M)
 
 
-def cost_usd(input_tokens: int, output_tokens: int, prices: tuple[float, float]) -> float:
+def cost_usd(
+    input_tokens: int, output_tokens: int, prices: tuple[float, float]
+) -> float:
     input_price, output_price = prices
     return (input_tokens * input_price + output_tokens * output_price) / 1_000_000
 
@@ -236,7 +267,7 @@ async def run_llm_stages(
     concurrency: int,
 ) -> tuple[list[StageRun], pd.DataFrame]:
     """Run mapping and detail detection through the LLM, measuring as we go."""
-    prices = llm_prices()
+    prices = llm_prices(llm.model)
 
     (mapping_df, unprocessable), seconds, input_tokens, output_tokens = await _measure(
         llm.usage,
@@ -445,7 +476,9 @@ def print_summary(question_part: str, runs: list[StageRun], agreement: dict) -> 
     table = Table(title=f"LLM vs SystemOne — {question_part}")
     table.add_column("Metric")
     for name in aggregates:
-        table.add_column(name.upper() if name == "llm" else "SystemOne", justify="right")
+        table.add_column(
+            name.upper() if name == "llm" else "SystemOne", justify="right"
+        )
     if len(aggregates) == 2:
         table.add_column("SystemOne Δ", justify="right")
 
@@ -476,9 +509,7 @@ def print_summary(question_part: str, runs: list[StageRun], agreement: dict) -> 
             scale = max(values[key] for values in aggregates.values())
             for name, values in aggregates.items():
                 bar = _bar(values[key], scale, BACKEND_COLOURS[name])
-                console.print(
-                    f"  {name:<10} {bar} {fmt.format(values[key])}"
-                )
+                console.print(f"  {name:<10} {bar} {fmt.format(values[key])}")
         console.print()
 
     if agreement:

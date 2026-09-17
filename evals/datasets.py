@@ -173,9 +173,7 @@ def load_detail_ground_truth(
     Returns:
         Dict mapping response_id to "YES"/"NO"; empty if no ground truth exists.
     """
-    detail_path = (
-        _latest_outputs_dir(config) / question_part / "detail_detection.jsonl"
-    )
+    detail_path = _latest_outputs_dir(config) / question_part / "detail_detection.jsonl"
     if not detail_path.exists():
         return {}
     df = pd.read_json(detail_path, lines=True)
