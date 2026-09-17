@@ -222,6 +222,38 @@ async def test_failed_batches_are_returned_as_unprocessable(themes_df, responses
     assert list(unprocessable["response_id"]) == [1, 2]
 
 
+async def test_rate_limit_sets_shared_cooldown_and_recovers(
+    monkeypatch, themes_df, responses_df
+):
+    import httpx
+    from typesafe_sdk import TypeSafeRateLimitError
+
+    monkeypatch.setattr(systemone, "RATE_LIMIT_COOLDOWN_SECONDS", 0.01)
+
+    class RateLimitedOnceTransport(FakeTransport):
+        def __init__(self):
+            super().__init__({})
+            self.failures_remaining = 1
+
+        async def system_one(self, state, questions):
+            if self.failures_remaining:
+                self.failures_remaining -= 1
+                raise TypeSafeRateLimitError(429, None, httpx.Headers())
+            return await super().system_one(state, questions)
+
+    transport = RateLimitedOnceTransport()
+    client = SystemOne(transport=transport)
+
+    result, unprocessable = await classify_responses_systemone(
+        responses_df, client, question="Q?", refined_themes_df=themes_df
+    )
+
+    assert unprocessable.empty
+    assert len(result) == len(responses_df)
+    assert client.rate_limit_hits == 1
+    assert client._cooldown_until > 0
+
+
 async def test_client_accumulates_token_usage(themes_df, responses_df):
     transport = FakeTransport({})
     client = SystemOne(transport=transport)

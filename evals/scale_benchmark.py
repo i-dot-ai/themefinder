@@ -81,6 +81,7 @@ async def run_size(
     """Run the classification stage at one scale and measure it."""
     responses_df = scale_responses(base_df, size)
     usage_before = (client.usage.input_tokens, client.usage.output_tokens)
+    rate_limits_before = client.rate_limit_hits
 
     start = time.perf_counter()
     classified_df, unprocessable_df = await classify_responses_systemone(
@@ -108,6 +109,7 @@ async def run_size(
         "cost_usd": round(cost, 4),
         "cost_per_1k_responses_usd": round(cost / size * 1000, 4),
         "unprocessable": len(unprocessable_df),
+        "rate_limit_hits": client.rate_limit_hits - rate_limits_before,
     }
 
 
@@ -131,6 +133,8 @@ def print_results(rows: list[dict], concurrency: int, batch_size: int) -> None:
         ("Input tokens", "right"),
         ("Cost", "right"),
         ("Cost / 1k resp", "right"),
+        ("429s", "right"),
+        ("Dropped", "right"),
     ]:
         table.add_column(column, justify=justify)
     for row in rows:
@@ -142,6 +146,8 @@ def print_results(rows: list[dict], concurrency: int, batch_size: int) -> None:
             f"{row['input_tokens']:,}",
             f"${row['cost_usd']:.4f}",
             f"${row['cost_per_1k_responses_usd']:.4f}",
+            str(row.get("rate_limit_hits", 0)),
+            str(row.get("unprocessable", 0)),
         )
     console.print(table)
 

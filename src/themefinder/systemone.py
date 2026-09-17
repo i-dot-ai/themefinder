@@ -36,6 +36,7 @@ per consultation rather than trusting it universally.
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
@@ -98,6 +99,9 @@ DEFAULT_BATCH_SIZE = 20
 RETRY_ATTEMPTS = 6
 RETRY_MIN_WAIT_SECONDS = 1
 RETRY_MAX_WAIT_SECONDS = 20
+
+# Fallback shared cooldown after a 429 when the server sends no Retry-After.
+RATE_LIMIT_COOLDOWN_SECONDS = 5.0
 
 THEME_QUESTION_PREFIX = "theme_"
 GIVES_REASON_KEY = "gives_reason"
@@ -179,6 +183,8 @@ class SystemOne:
 
     transport: SystemOneTransport
     usage: Usage = field(default_factory=Usage)
+    rate_limit_hits: int = field(default=0, init=False)
+    _cooldown_until: float = field(default=0.0, init=False, repr=False)
 
     @classmethod
     def from_env(cls, model: str | None = None, **client_kwargs) -> "SystemOne":
@@ -194,13 +200,42 @@ class SystemOne:
         return cls(transport=sdk.AsyncTypeSafeClient(**client_kwargs))
 
     async def ask(self, state: Any, questions: dict[str, Any]) -> Any:
-        """Send one SystemOne request and record its token usage."""
-        result = await self.transport.system_one(state=state, questions=questions)
+        """Send one SystemOne request and record its token usage.
+
+        Rate limiting is handled with a cooldown shared across all concurrent
+        callers of this client: one 429 pauses every worker until the server's
+        Retry-After (or a fallback interval) has passed, instead of each
+        worker retrying independently and stampeding the endpoint.
+        """
+        while True:
+            delay = self._cooldown_until - time.monotonic()
+            if delay <= 0:
+                break
+            await asyncio.sleep(delay)
+        try:
+            result = await self.transport.system_one(state=state, questions=questions)
+        except Exception as exception:
+            self._note_rate_limit(exception)
+            raise
         usage = getattr(result, "usage", None)
         self.usage.record(
             getattr(usage, "input_tokens", 0), getattr(usage, "output_tokens", 0)
         )
         return result
+
+    def _note_rate_limit(self, exception: BaseException) -> None:
+        if typesafe_sdk is None or not isinstance(
+            exception, typesafe_sdk.TypeSafeRateLimitError
+        ):
+            return
+        self.rate_limit_hits += 1
+        retry_after_ms = getattr(exception, "retry_after_ms", None)
+        wait = (
+            retry_after_ms / 1000 if retry_after_ms else RATE_LIMIT_COOLDOWN_SECONDS
+        )
+        self._cooldown_until = max(
+            self._cooldown_until, time.monotonic() + wait
+        )
 
 
 def _theme_texts(refined_themes_df: pd.DataFrame) -> dict[str, str]:
