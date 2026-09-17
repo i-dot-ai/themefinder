@@ -184,6 +184,7 @@ class SystemOne:
     transport: SystemOneTransport
     usage: Usage = field(default_factory=Usage)
     rate_limit_hits: int = field(default=0, init=False)
+    rate_limit_pause_seconds: float = field(default=0.0, init=False)
     _cooldown_until: float = field(default=0.0, init=False, repr=False)
 
     @classmethod
@@ -233,9 +234,12 @@ class SystemOne:
         wait = (
             retry_after_ms / 1000 if retry_after_ms else RATE_LIMIT_COOLDOWN_SECONDS
         )
-        self._cooldown_until = max(
-            self._cooldown_until, time.monotonic() + wait
-        )
+        now = time.monotonic()
+        new_until = now + wait
+        # The cooldown is one shared timeline, so the wall-clock time spent
+        # paused is the sum of the spans by which it is extended.
+        self.rate_limit_pause_seconds += new_until - max(self._cooldown_until, now)
+        self._cooldown_until = max(self._cooldown_until, new_until)
 
 
 def _theme_texts(refined_themes_df: pd.DataFrame) -> dict[str, str]:
@@ -261,14 +265,30 @@ def _is_retryable(exception: BaseException) -> bool:
     return not isinstance(exception, _NON_RETRYABLE_ERRORS)
 
 
+def _retry_wait(retry_state) -> float:
+    """Backoff between attempts.
+
+    Rate-limited attempts get no extra backoff: the client's shared cooldown
+    already paces them to the server's Retry-After, and stacking a random
+    exponential wait on top would only inflate wall time.
+    """
+    exception = retry_state.outcome.exception() if retry_state.outcome else None
+    if (
+        typesafe_sdk is not None
+        and isinstance(exception, typesafe_sdk.TypeSafeRateLimitError)
+    ):
+        return 0.0
+    return wait_random_exponential(
+        min=RETRY_MIN_WAIT_SECONDS, max=RETRY_MAX_WAIT_SECONDS
+    )(retry_state)
+
+
 async def _ask_with_retries(
     client: SystemOne, state: Any, questions: dict[str, Any]
 ) -> Any:
     """Ask SystemOne with the same retry policy as the LLM batch processor."""
     retrying = AsyncRetrying(
-        wait=wait_random_exponential(
-            min=RETRY_MIN_WAIT_SECONDS, max=RETRY_MAX_WAIT_SECONDS
-        ),
+        wait=_retry_wait,
         stop=stop_after_attempt(RETRY_ATTEMPTS),
         retry=retry_if_exception(_is_retryable),
         before_sleep=before_sleep_log(logger, logging.ERROR),

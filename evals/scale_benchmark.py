@@ -8,10 +8,16 @@ size. Resampled duplicates are fine for throughput measurement but carry no
 ground truth, so this benchmark reports no accuracy metrics; use
 compare_systemone.py for those.
 
+Rate limits are handled by a cooldown shared across workers, and the time
+spent paused on 429s is reported separately, so throughput ("resp/sec
+active") reflects raw latency rather than waiting. Larger sizes (10k+) may
+currently exceed the account's sustainable rate; the 429s column shows how
+hard a run pushed the limit.
+
 Usage:
     uv run python evals/scale_benchmark.py --dry-run          # estimate only
-    uv run python evals/scale_benchmark.py                    # 100, 1k, 10k
-    uv run python evals/scale_benchmark.py --sizes 1000       # one size
+    uv run python evals/scale_benchmark.py                    # 100 and 1,000
+    uv run python evals/scale_benchmark.py --sizes 10000      # push the limit
 
 Environment: TYPESAFE_API_KEY.
 """
@@ -82,6 +88,7 @@ async def run_size(
     responses_df = scale_responses(base_df, size)
     usage_before = (client.usage.input_tokens, client.usage.output_tokens)
     rate_limits_before = client.rate_limit_hits
+    pause_before = client.rate_limit_pause_seconds
 
     start = time.perf_counter()
     classified_df, unprocessable_df = await classify_responses_systemone(
@@ -99,11 +106,15 @@ async def run_size(
     cost = (
         input_tokens * JEV_INPUT_PRICE_PER_M + output_tokens * JEV_OUTPUT_PRICE_PER_M
     ) / 1_000_000
+    pause_seconds = min(client.rate_limit_pause_seconds - pause_before, seconds)
+    active_seconds = max(seconds - pause_seconds, 1e-9)
     return {
         "responses": size,
         "requests": -(-size // batch_size),
         "seconds": round(seconds, 2),
-        "responses_per_second": round(size / seconds, 1),
+        "rate_limit_pause_seconds": round(pause_seconds, 2),
+        "active_seconds": round(active_seconds, 2),
+        "responses_per_second_active": round(size / active_seconds, 1),
         "input_tokens": input_tokens,
         "output_tokens": output_tokens,
         "cost_usd": round(cost, 4),
@@ -122,14 +133,17 @@ def print_results(rows: list[dict], concurrency: int, batch_size: int) -> None:
         title="SystemOne classification at scale",
         caption=(
             f"batch size {batch_size}, concurrency {concurrency}. Responses "
-            "resampled from real data (throughput only, no accuracy)."
+            "resampled from real data (throughput only, no accuracy). "
+            "Resp/sec is computed on active time, i.e. wall time minus 429 "
+            "pauses, so it reflects raw latency rather than waiting."
         ),
     )
     for column, justify in [
         ("Responses", "right"),
         ("Requests", "right"),
         ("Wall time", "right"),
-        ("Resp/sec", "right"),
+        ("429 pause", "right"),
+        ("Resp/sec (active)", "right"),
         ("Input tokens", "right"),
         ("Cost", "right"),
         ("Cost / 1k resp", "right"),
@@ -142,7 +156,8 @@ def print_results(rows: list[dict], concurrency: int, batch_size: int) -> None:
             f"{row['responses']:,}",
             str(row["requests"]),
             f"{row['seconds']:.1f} s",
-            f"{row['responses_per_second']:,.0f}",
+            f"{row['rate_limit_pause_seconds']:.1f} s",
+            f"{row['responses_per_second_active']:,.0f}",
             f"{row['input_tokens']:,}",
             f"${row['cost_usd']:.4f}",
             f"${row['cost_per_1k_responses_usd']:.4f}",
@@ -153,11 +168,13 @@ def print_results(rows: list[dict], concurrency: int, batch_size: int) -> None:
 
     if rows:
         best = max(rows, key=lambda row: row["responses"])
-        throughput = best["responses_per_second"]
+        throughput = best["responses_per_second_active"]
         cost_per_1k = best["cost_per_1k_responses_usd"]
         console.print(
-            f"Projection at this rate: 100,000 responses ≈ "
-            f"{100_000 / throughput / 60:.1f} min, ${cost_per_1k * 100:.2f}"
+            f"Projection at the active rate (excludes rate-limit pauses): "
+            f"100,000 responses ≈ {100_000 / throughput / 60:.1f} min, "
+            f"${cost_per_1k * 100:.2f}. Sustained runs at this scale will be "
+            "paced by the account's rate limit."
         )
 
 
@@ -173,8 +190,11 @@ async def main() -> None:
     )
     parser.add_argument(
         "--sizes",
-        default="100,1000,10000",
-        help="Comma-separated response counts to test",
+        default="100,1000",
+        help=(
+            "Comma-separated response counts to test (10,000+ currently "
+            "exceeds the sustainable rate; expect 429 pauses)"
+        ),
     )
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)

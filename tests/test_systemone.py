@@ -252,6 +252,7 @@ async def test_rate_limit_sets_shared_cooldown_and_recovers(
     assert len(result) == len(responses_df)
     assert client.rate_limit_hits == 1
     assert client._cooldown_until > 0
+    assert 0 < client.rate_limit_pause_seconds < 0.05
 
 
 async def test_client_accumulates_token_usage(themes_df, responses_df):
