@@ -43,6 +43,13 @@ from datasets import (  # noqa: E402
     load_detail_ground_truth,
     load_local_mapping_data,
 )
+from systemone_diagnostics import (  # noqa: E402
+    print_probability_report,
+    print_request_structure,
+    probability_report,
+    request_structure,
+    save_sample_request,
+)
 from metrics import calculate_mapping_metrics  # noqa: E402
 
 from themefinder import (  # noqa: E402
@@ -504,6 +511,11 @@ async def compare_question_part(
 
     runs: list[StageRun] = []
     llm_mapping_df = systemone_df = None
+    structure = probabilities = None
+
+    if systemone_client is not None:
+        structure = request_structure(responses_df, question, topics_df, batch_size)
+        print_request_structure(structure)
 
     if llm is not None:
         llm_runs, llm_mapping_df = await run_llm_stages(
@@ -537,10 +549,17 @@ async def compare_question_part(
         agreement = mapping_agreement(llm_mapping_df, systemone_df)
 
     print_summary(question_part, runs, agreement)
+    if systemone_df is not None and not systemone_df.empty:
+        probabilities = probability_report(
+            systemone_df, mapping_threshold, detail_threshold
+        )
+        print_probability_report(probabilities)
     return {
         "n_responses": len(responses_df),
         "runs": [run.as_dict() for run in runs],
         "mapping_agreement": agreement,
+        "request_structure": structure,
+        "probability_report": probabilities,
     }
 
 
@@ -662,12 +681,17 @@ async def main() -> None:
 
     results_dir = Path(__file__).parent / "results"
     results_dir.mkdir(exist_ok=True)
-    output_path = (
-        results_dir
-        / f"systemone_compare_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
-    )
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = results_dir / f"systemone_compare_{timestamp}.json"
     output_path.write_text(json.dumps(all_results, indent=2))
     print(f"\nResults written to {output_path}")
+
+    if systemone_client is not None and items:
+        sample_path = results_dir / f"systemone_sample_request_{timestamp}.json"
+        save_sample_request(
+            items[0], args.systemone_batch_size, sample_path, limit=args.limit
+        )
+        print(f"Sample SystemOne request written to {sample_path}")
 
 
 if __name__ == "__main__":

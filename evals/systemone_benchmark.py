@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from compare_e2e import print_comparison, run_pipeline  # noqa: E402
 from compare_systemone import build_llm, compare_question_part  # noqa: E402
 from datasets import DatasetConfig, load_local_mapping_data  # noqa: E402
+from systemone_diagnostics import save_sample_request  # noqa: E402
 
 from themefinder import SystemOne  # noqa: E402
 from themefinder.systemone import (  # noqa: E402
@@ -201,10 +202,13 @@ async def main() -> None:
 
     results_dir = Path(__file__).parent / "results"
     results_dir.mkdir(exist_ok=True)
-    output_path = (
-        results_dir
-        / f"systemone_benchmark_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    sample_path = results_dir / f"systemone_sample_request_{timestamp}.json"
+    save_sample_request(
+        items[0], args.systemone_batch_size, sample_path, limit=args.limit
     )
+    print(f"\nSample SystemOne request written to {sample_path}")
+    output_path = results_dir / f"systemone_benchmark_{timestamp}.json"
     output_path.write_text(
         json.dumps(
             {
