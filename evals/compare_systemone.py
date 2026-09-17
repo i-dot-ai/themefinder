@@ -474,6 +474,76 @@ def print_summary(question_part: str, runs: list[StageRun], agreement: dict) -> 
         console.print(f"LLM vs SystemOne mapping agreement: {agreement_summary}")
 
 
+async def compare_question_part(
+    item: dict,
+    config: DatasetConfig,
+    llm: OpenAILLM | None,
+    systemone_client: SystemOne | None,
+    *,
+    limit: int | None = None,
+    llm_concurrency: int = 10,
+    mapping_threshold: float = DEFAULT_ASSIGNMENT_THRESHOLD,
+    detail_threshold: float = DEFAULT_DETAIL_THRESHOLD,
+    systemone_concurrency: int = DEFAULT_CONCURRENCY,
+    batch_size: int = DEFAULT_BATCH_SIZE,
+) -> dict:
+    """Run the stage-level comparison for one question part and print it.
+
+    Either backend may be None to skip it. Returns the results as a
+    JSON-serialisable dict.
+    """
+    question_part = item["metadata"]["question_part"]
+    print(f"\n=== {question_part} ===")
+    responses_df = pd.DataFrame(item["input"]["responses"])
+    if limit:
+        responses_df = responses_df.head(limit)
+    question = item["input"]["question"]
+    topics_df = pd.DataFrame(item["input"]["topics"])
+    expected_mapping = item["expected_output"]["mappings"]
+    expected_detail = load_detail_ground_truth(config, question_part)
+
+    runs: list[StageRun] = []
+    llm_mapping_df = systemone_df = None
+
+    if llm is not None:
+        llm_runs, llm_mapping_df = await run_llm_stages(
+            llm,
+            responses_df,
+            question,
+            topics_df,
+            expected_mapping,
+            expected_detail,
+            llm_concurrency,
+        )
+        runs.extend(llm_runs)
+
+    if systemone_client is not None:
+        systemone_run, systemone_df = await run_systemone_stage(
+            systemone_client,
+            responses_df,
+            question,
+            topics_df,
+            expected_mapping,
+            expected_detail,
+            mapping_threshold,
+            detail_threshold,
+            systemone_concurrency,
+            batch_size,
+        )
+        runs.append(systemone_run)
+
+    agreement = {}
+    if llm_mapping_df is not None and systemone_df is not None:
+        agreement = mapping_agreement(llm_mapping_df, systemone_df)
+
+    print_summary(question_part, runs, agreement)
+    return {
+        "n_responses": len(responses_df),
+        "runs": [run.as_dict() for run in runs],
+        "mapping_agreement": agreement,
+    }
+
+
 async def main() -> None:
     dotenv.load_dotenv()
 
@@ -576,56 +646,19 @@ async def main() -> None:
     }
 
     for item in items:
-        question_part = item["metadata"]["question_part"]
-        print(f"\n=== {question_part} ===")
-        responses_df = pd.DataFrame(item["input"]["responses"])
-        if args.limit:
-            responses_df = responses_df.head(args.limit)
-        question = item["input"]["question"]
-        topics_df = pd.DataFrame(item["input"]["topics"])
-        expected_mapping = item["expected_output"]["mappings"]
-        expected_detail = load_detail_ground_truth(config, question_part)
-
-        runs: list[StageRun] = []
-        llm_mapping_df = systemone_df = None
-
-        if llm is not None:
-            llm_runs, llm_mapping_df = await run_llm_stages(
-                llm,
-                responses_df,
-                question,
-                topics_df,
-                expected_mapping,
-                expected_detail,
-                args.concurrency,
-            )
-            runs.extend(llm_runs)
-
-        if systemone_client is not None:
-            systemone_run, systemone_df = await run_systemone_stage(
-                systemone_client,
-                responses_df,
-                question,
-                topics_df,
-                expected_mapping,
-                expected_detail,
-                args.mapping_threshold,
-                args.detail_threshold,
-                args.systemone_concurrency,
-                args.systemone_batch_size,
-            )
-            runs.append(systemone_run)
-
-        agreement = {}
-        if llm_mapping_df is not None and systemone_df is not None:
-            agreement = mapping_agreement(llm_mapping_df, systemone_df)
-
-        print_summary(question_part, runs, agreement)
-        all_results["question_parts"][question_part] = {
-            "n_responses": len(responses_df),
-            "runs": [run.as_dict() for run in runs],
-            "mapping_agreement": agreement,
-        }
+        part_results = await compare_question_part(
+            item,
+            config,
+            llm,
+            systemone_client,
+            limit=args.limit,
+            llm_concurrency=args.concurrency,
+            mapping_threshold=args.mapping_threshold,
+            detail_threshold=args.detail_threshold,
+            systemone_concurrency=args.systemone_concurrency,
+            batch_size=args.systemone_batch_size,
+        )
+        all_results["question_parts"][item["metadata"]["question_part"]] = part_results
 
     results_dir = Path(__file__).parent / "results"
     results_dir.mkdir(exist_ok=True)
