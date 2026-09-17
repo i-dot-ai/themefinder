@@ -279,6 +279,230 @@ def print_scale_results(rows: list[dict], concurrency: int, batch_size: int) -> 
         )
 
 
+# ---------------------------------------------------------------- aggregation
+
+
+def _mean_std(values: list[float]) -> dict:
+    n = len(values)
+    mean = sum(values) / n
+    std = (
+        (sum((value - mean) ** 2 for value in values) / (n - 1)) ** 0.5
+        if n > 1
+        else 0.0
+    )
+    return {"mean": mean, "std": std, "n": n}
+
+
+STAGE_AGGREGATE_METRICS = [
+    ("map_f1_score", "Mapping F1"),
+    ("detail_accuracy", "Evidence acc"),
+    ("detail_auc", "Evidence AUC"),
+]
+
+
+def aggregate_runs(runs: list[dict]) -> dict:
+    """Collect per-run values into mean/std summaries across repeats."""
+    aggregate: dict = {"e2e": {}, "stage": {}, "scale": {}}
+
+    e2e_values: dict = {}
+    for run in runs:
+        for pipeline in run["e2e"]:
+            entry = e2e_values.setdefault(pipeline["name"], {"seconds": [], "cost_usd": []})
+            entry["seconds"].append(pipeline["seconds"])
+            entry["cost_usd"].append(pipeline["cost_usd"])
+    aggregate["e2e"] = {
+        name: {key: _mean_std(values) for key, values in entries.items()}
+        for name, entries in e2e_values.items()
+    }
+
+    stage_values: dict = {}
+    for run in runs:
+        for part, part_data in run["question_parts"].items():
+            for stage_run in part_data["runs"]:
+                key = (part, stage_run["backend"])
+                entry = stage_values.setdefault(
+                    key, {"seconds": [], "cost_usd": [], "metrics": {}}
+                )
+                entry["seconds"].append(stage_run["seconds"])
+                entry["cost_usd"].append(stage_run["cost_usd"])
+                for metric, value in stage_run["metrics"].items():
+                    entry["metrics"].setdefault(metric, []).append(value)
+    aggregate["stage"] = {
+        f"{part}/{backend}": {
+            "seconds": _mean_std(entry["seconds"]),
+            "cost_usd": _mean_std(entry["cost_usd"]),
+            "metrics": {
+                metric: _mean_std(values)
+                for metric, values in entry["metrics"].items()
+            },
+        }
+        for (part, backend), entry in stage_values.items()
+    }
+
+    scale_values: dict = {}
+    for run in runs:
+        for row in run["scale"]:
+            entry = scale_values.setdefault(
+                row["responses"],
+                {"seconds": [], "responses_per_second_active": [], "rate_limit_hits": []},
+            )
+            entry["seconds"].append(row["seconds"])
+            entry["responses_per_second_active"].append(
+                row["responses_per_second_active"]
+            )
+            entry["rate_limit_hits"].append(row["rate_limit_hits"])
+    aggregate["scale"] = {
+        str(size): {key: _mean_std(values) for key, values in entries.items()}
+        for size, entries in scale_values.items()
+    }
+
+    return aggregate
+
+
+def print_aggregate(aggregate: dict, n_runs: int) -> None:
+    from rich.console import Console
+    from rich.table import Table
+
+    console = Console()
+
+    def cell(stats: dict, fmt: str = "{:.3f}") -> str:
+        return f"{fmt.format(stats['mean'])} ± {fmt.format(stats['std'])}"
+
+    if aggregate["stage"]:
+        table = Table(title=f"Aggregate over {n_runs} runs — stage-level")
+        table.add_column("Part / backend")
+        for _, label in STAGE_AGGREGATE_METRICS:
+            table.add_column(label, justify="right")
+        table.add_column("Time (s)", justify="right")
+        table.add_column("Cost (USD)", justify="right")
+        for key, entry in sorted(aggregate["stage"].items()):
+            row = [key]
+            for metric, _ in STAGE_AGGREGATE_METRICS:
+                stats = entry["metrics"].get(metric)
+                row.append(cell(stats) if stats else "—")
+            row.append(cell(entry["seconds"], "{:.1f}"))
+            row.append(cell(entry["cost_usd"], "{:.4f}"))
+            table.add_row(*row)
+        console.print(table)
+
+    if aggregate["e2e"]:
+        table = Table(title=f"Aggregate over {n_runs} runs — end-to-end")
+        table.add_column("Pipeline")
+        table.add_column("Time (s)", justify="right")
+        table.add_column("Cost (USD)", justify="right")
+        for name, entry in sorted(aggregate["e2e"].items()):
+            table.add_row(
+                name, cell(entry["seconds"], "{:.1f}"), cell(entry["cost_usd"], "{:.4f}")
+            )
+        console.print(table)
+
+    if aggregate["scale"]:
+        table = Table(title=f"Aggregate over {n_runs} runs — scale")
+        table.add_column("Responses", justify="right")
+        table.add_column("Wall time (s)", justify="right")
+        table.add_column("Resp/sec (active)", justify="right")
+        table.add_column("429s (mean)", justify="right")
+        for size, entry in sorted(
+            aggregate["scale"].items(), key=lambda item: int(item[0])
+        ):
+            table.add_row(
+                f"{int(size):,}",
+                cell(entry["seconds"], "{:.1f}"),
+                cell(entry["responses_per_second_active"], "{:.0f}"),
+                f"{entry['rate_limit_hits']['mean']:.1f}",
+            )
+        console.print(table)
+
+
+# ---------------------------------------------------------------- one run
+
+
+async def run_once(
+    args,
+    items: list[dict],
+    config: DatasetConfig,
+    llm,
+    systemone_client: SystemOne,
+    scale_sizes: list[int],
+    first_item: dict,
+    first_responses: pd.DataFrame,
+    first_question: str,
+    first_themes: pd.DataFrame,
+    show_detail: bool = True,
+) -> dict:
+    """Run the three phases once; show_detail limits repeated boilerplate."""
+    # Phase 1: end-to-end totals on one question part (both pipelines share
+    # the generative stages, so one part suffices for the overall picture).
+    e2e_runs: list[dict] = []
+    if not args.skip_e2e:
+        e2e_part = first_item["metadata"]["question_part"]
+        print(f"\n{'=' * 20} Phase 1: end-to-end ({e2e_part}) {'=' * 20}")
+        responses_df = first_responses
+        if args.limit:
+            responses_df = responses_df.head(args.limit)
+        e2e_runs.append(
+            await run_pipeline("llm", responses_df, first_question, llm, None)
+        )
+        e2e_runs.append(
+            await run_pipeline(
+                "hybrid", responses_df, first_question, llm, systemone_client
+            )
+        )
+        print_comparison(e2e_part, e2e_runs)
+
+    # Phase 2: stage-level accuracy against ground truth, all selected parts.
+    question_parts: dict = {}
+    if not args.skip_stages:
+        print(f"\n{'=' * 20} Phase 2: stage-level accuracy {'=' * 20}")
+        seen_caveats: set = set()
+        for i, item in enumerate(items):
+            question_parts[item["metadata"]["question_part"]] = (
+                await compare_question_part(
+                    item,
+                    config,
+                    llm,
+                    systemone_client,
+                    limit=args.limit,
+                    llm_concurrency=args.concurrency,
+                    mapping_threshold=args.mapping_threshold,
+                    detail_threshold=args.detail_threshold,
+                    systemone_concurrency=args.systemone_concurrency,
+                    batch_size=args.systemone_batch_size,
+                    show_structure=(show_detail and i == 0),
+                    seen_caveats=seen_caveats,
+                )
+            )
+
+    # Phase 3: throughput at scale, resampled from the first question part.
+    scale_rows: list[dict] = []
+    if not args.skip_scale:
+        print(f"\n{'=' * 20} Phase 3: scale {'=' * 20}")
+        for size in scale_sizes:
+            print(f"Running {size:,} responses...")
+            scale_rows.append(
+                await run_scale_size(
+                    size,
+                    first_responses,
+                    first_question,
+                    first_themes,
+                    systemone_client,
+                    args.systemone_batch_size,
+                    args.systemone_concurrency,
+                )
+            )
+        print_scale_results(
+            scale_rows, args.systemone_concurrency, args.systemone_batch_size
+        )
+
+    print()
+    print_verdict(e2e_runs, question_parts, scale_rows)
+    return {
+        "e2e": [{**run, "seconds": round(run["seconds"], 2)} for run in e2e_runs],
+        "question_parts": question_parts,
+        "scale": scale_rows,
+    }
+
+
 # ---------------------------------------------------------------- main
 
 
@@ -319,6 +543,12 @@ async def main() -> None:
             "Comma-separated response counts for the scale phase (10,000+ "
             "currently exceeds the sustainable rate; expect 429 pauses)"
         ),
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=1,
+        help="Run every phase N times and report mean ± std across runs",
     )
     parser.add_argument("--skip-e2e", action="store_true", help="Skip the end-to-end phase")
     parser.add_argument("--skip-stages", action="store_true", help="Skip the stage-level phase")
@@ -373,71 +603,30 @@ async def main() -> None:
         batch_size=args.systemone_batch_size,
     )
 
-    # Phase 1: end-to-end totals on one question part (both pipelines share
-    # the generative stages, so one part suffices for the overall picture).
-    e2e_runs: list[dict] = []
-    if not args.skip_e2e:
-        e2e_part = first_item["metadata"]["question_part"]
-        print(f"\n{'=' * 20} Phase 1: end-to-end ({e2e_part}) {'=' * 20}")
-        responses_df = first_responses
-        if args.limit:
-            responses_df = responses_df.head(args.limit)
-        e2e_runs.append(
-            await run_pipeline("llm", responses_df, first_question, llm, None)
+    all_runs: list[dict] = []
+    for repeat in range(args.repeats):
+        if args.repeats > 1:
+            print(f"\n{'#' * 24} Run {repeat + 1} of {args.repeats} {'#' * 24}")
+        run_results = await run_once(
+            args,
+            items,
+            config,
+            llm,
+            systemone_client,
+            scale_sizes,
+            first_item,
+            first_responses,
+            first_question,
+            first_themes,
+            show_detail=(repeat == 0),
         )
-        e2e_runs.append(
-            await run_pipeline(
-                "hybrid", responses_df, first_question, llm, systemone_client
-            )
-        )
-        print_comparison(e2e_part, e2e_runs)
+        all_runs.append(run_results)
 
-    # Phase 2: stage-level accuracy against ground truth, all selected parts.
-    question_parts: dict = {}
-    if not args.skip_stages:
-        print(f"\n{'=' * 20} Phase 2: stage-level accuracy {'=' * 20}")
-        seen_caveats: set = set()
-        for i, item in enumerate(items):
-            question_parts[item["metadata"]["question_part"]] = (
-                await compare_question_part(
-                    item,
-                    config,
-                    llm,
-                    systemone_client,
-                    limit=args.limit,
-                    llm_concurrency=args.concurrency,
-                    mapping_threshold=args.mapping_threshold,
-                    detail_threshold=args.detail_threshold,
-                    systemone_concurrency=args.systemone_concurrency,
-                    batch_size=args.systemone_batch_size,
-                    show_structure=(i == 0),
-                    seen_caveats=seen_caveats,
-                )
-            )
-
-    # Phase 3: throughput at scale, resampled from the first question part.
-    scale_rows: list[dict] = []
-    if not args.skip_scale:
-        print(f"\n{'=' * 20} Phase 3: scale {'=' * 20}")
-        for size in scale_sizes:
-            print(f"Running {size:,} responses...")
-            scale_rows.append(
-                await run_scale_size(
-                    size,
-                    first_responses,
-                    first_question,
-                    first_themes,
-                    systemone_client,
-                    args.systemone_batch_size,
-                    args.systemone_concurrency,
-                )
-            )
-        print_scale_results(
-            scale_rows, args.systemone_concurrency, args.systemone_batch_size
-        )
-
-    print()
-    print_verdict(e2e_runs, question_parts, scale_rows)
+    aggregate = None
+    if args.repeats > 1:
+        print()
+        aggregate = aggregate_runs(all_runs)
+        print_aggregate(aggregate, args.repeats)
 
     results_dir = Path(__file__).parent / "results"
     results_dir.mkdir(exist_ok=True)
@@ -456,12 +645,10 @@ async def main() -> None:
                 "mapping_threshold": args.mapping_threshold,
                 "detail_threshold": args.detail_threshold,
                 "batch_size": args.systemone_batch_size,
+                "repeats": args.repeats,
                 "timestamp": datetime.now().isoformat(),
-                "e2e": [
-                    {**run, "seconds": round(run["seconds"], 2)} for run in e2e_runs
-                ],
-                "question_parts": question_parts,
-                "scale": scale_rows,
+                "runs": all_runs,
+                "aggregate": aggregate,
             },
             indent=2,
         )
