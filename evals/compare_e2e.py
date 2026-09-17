@@ -160,6 +160,13 @@ def print_comparison(question_part: str, pipeline_runs: list[dict]) -> None:
         for topic in run["themes"]:
             console.print(f"  • {topic}")
 
+    console.print(
+        "\n[dim]Note: each pipeline generated its own theme set, so labels are "
+        "not comparable between pipelines or against ground truth here — theme "
+        "coverage and evidence-rich rates are descriptive only. Use the "
+        "stage-level phase (fixed themes) for accuracy claims.[/]"
+    )
+
 
 async def main() -> None:
     dotenv.load_dotenv()

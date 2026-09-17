@@ -37,7 +37,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from compare_e2e import print_comparison, run_pipeline  # noqa: E402
 from compare_systemone import build_llm, compare_question_part  # noqa: E402
 from datasets import DatasetConfig, load_local_mapping_data  # noqa: E402
-from systemone_diagnostics import save_sample_request  # noqa: E402
+from systemone_diagnostics import (  # noqa: E402
+    print_pipeline_flow,
+    save_sample_request,
+)
 
 from themefinder import SystemOne  # noqa: E402
 from themefinder.systemone import (  # noqa: E402
@@ -155,6 +158,11 @@ async def main() -> None:
         ]
     if not items:
         sys.exit(f"No matching question parts in dataset {args.dataset}")
+
+    print_pipeline_flow(
+        n_themes=len(items[0]["input"]["topics"]),
+        batch_size=args.systemone_batch_size,
+    )
 
     # Phase 1: end-to-end totals on one question part (both pipelines share
     # the generative stages, so one part suffices for the overall picture).

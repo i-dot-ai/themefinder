@@ -44,10 +44,12 @@ from datasets import (  # noqa: E402
     load_local_mapping_data,
 )
 from systemone_diagnostics import (  # noqa: E402
+    print_caveats,
     print_probability_report,
     print_request_structure,
     probability_report,
     request_structure,
+    result_caveats,
     save_sample_request,
 )
 from metrics import calculate_mapping_metrics  # noqa: E402
@@ -143,9 +145,14 @@ def mapping_accuracy_metrics(
     df = df[df["expected"].notna()]
     if df.empty:
         return {}
-    return _numeric_metrics(
-        calculate_mapping_metrics(df, column_one="expected", column_two="labels")
+    raw_metrics = calculate_mapping_metrics(
+        df, column_one="expected", column_two="labels"
     )
+    metrics = _numeric_metrics(raw_metrics)
+    ci = raw_metrics.get("f1_confidence_interval")
+    if ci:
+        metrics["f1_ci_low"], metrics["f1_ci_high"] = float(ci[0]), float(ci[1])
+    return metrics
 
 
 def mapping_agreement(llm_df: pd.DataFrame, systemone_df: pd.DataFrame) -> dict:
@@ -554,13 +561,18 @@ async def compare_question_part(
             systemone_df, mapping_threshold, detail_threshold
         )
         print_probability_report(probabilities)
-    return {
+
+    results = {
         "n_responses": len(responses_df),
         "runs": [run.as_dict() for run in runs],
         "mapping_agreement": agreement,
         "request_structure": structure,
         "probability_report": probabilities,
     }
+    caveats = result_caveats(results, detail_threshold)
+    print_caveats(caveats)
+    results["caveats"] = caveats
+    return results
 
 
 async def main() -> None:
