@@ -56,14 +56,23 @@ def output_stats(result: dict) -> dict:
         "responses_mapped": len(mapping_df),
         "unprocessable": len(result["unprocessables"]),
     }
-    if not mapping_df.empty:
-        topic_ids = set(themes_df["topic_id"])
+    # A failed generative stage can leave the themes (or downstream frames)
+    # empty and column-less; report degenerate stats rather than crashing.
+    if stats["themes"] == 0:
+        print(
+            "  Warning: this run produced 0 themes (a generative LLM stage "
+            "failed); its stats are degenerate."
+        )
+    if not mapping_df.empty and "labels" in mapping_df.columns:
+        topic_ids = (
+            set(themes_df["topic_id"]) if "topic_id" in themes_df.columns else set()
+        )
         on_theme = mapping_df["labels"].apply(
             lambda labels: any(label in topic_ids for label in labels)
         )
         stats["coverage"] = float(on_theme.mean())
         stats["labels_per_response"] = float(mapping_df["labels"].apply(len).mean())
-    if not detailed_df.empty:
+    if not detailed_df.empty and "evidence_rich" in detailed_df.columns:
         stats["evidence_rich_rate"] = float(
             (detailed_df["evidence_rich"] == "YES").mean()
         )
@@ -116,7 +125,7 @@ async def run_pipeline(
         "cost_usd": cost,
         "stats": output_stats(result),
         "themes": result["themes"]["topic"].tolist()
-        if not result["themes"].empty
+        if "topic" in result["themes"].columns
         else [],
     }
 
