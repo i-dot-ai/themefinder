@@ -18,8 +18,8 @@ import msgspec
 import pandas as pd
 
 from themefinder.systemone import (
+    _build_state,
     _response_questions,
-    _theme_bodies,
     _theme_texts,
 )
 
@@ -38,16 +38,15 @@ def build_sample_request(
 ) -> dict:
     """Build the exact JSON payload of the first chunk's SystemOne request."""
     chunk = responses_df.head(batch_size)
-    theme_bodies = _theme_bodies(_theme_texts(themes_df))
+    theme_texts = _theme_texts(themes_df)
     questions: dict = {}
     for response_id in chunk["response_id"]:
-        questions.update(_response_questions(response_id, theme_bodies))
+        questions.update(_response_questions(response_id, theme_texts))
     return {
         "model": model,
-        "state": {
-            "question": question,
-            "responses": chunk[["response_id", "response"]].to_dict(orient="records"),
-        },
+        "state": _build_state(
+            question, theme_texts, chunk.to_dict(orient="records")
+        ),
         "questions": {
             key: msgspec.to_builtins(value) for key, value in questions.items()
         },

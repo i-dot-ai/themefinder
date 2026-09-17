@@ -129,7 +129,7 @@ async def test_classifies_both_stages_in_one_batched_call(themes_df, responses_d
     assert result["evidence_probability"].tolist() == [0.8, 0.01]
 
 
-async def test_each_question_names_its_response(themes_df, responses_df):
+async def test_each_question_names_its_response_and_topic(themes_df, responses_df):
     transport = FakeTransport({})
     client = SystemOne(transport=transport)
 
@@ -137,10 +137,14 @@ async def test_each_question_names_its_response(themes_df, responses_df):
         responses_df, client, question="Q?", refined_themes_df=themes_df
     )
 
-    _, questions = transport.calls[0]
-    assert "response_id is 1" in questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
-    assert "response_id is 2" in questions[f"r2_{THEME_QUESTION_PREFIX}A"].instructions
-    assert "Ban support" in questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
+    state, questions = transport.calls[0]
+    # Questions are compact JSON pointers; the definitions live in the state
+    theme_question = questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
+    assert theme_question["response_id"] == 1
+    assert theme_question["topic_id"] == "A"
+    assert questions[f"r2_{THEME_QUESTION_PREFIX}A"].instructions["response_id"] == 2
+    assert state["topics"]["A"] == "Ban support: Supports a complete ban."
+    assert "evidence_rich_if" in state["evidence_rich_definition"]
 
 
 async def test_batch_size_splits_responses_across_requests(themes_df, responses_df):
@@ -252,8 +256,5 @@ async def test_uses_label_and_description_when_no_combined_topic_column():
     )
 
     assert result["labels"].iloc[0] == ["A"]
-    _, questions = transport.calls[0]
-    assert (
-        "ban support: Supports a ban."
-        in questions[f"r1_{THEME_QUESTION_PREFIX}A"].instructions
-    )
+    state, _ = transport.calls[0]
+    assert state["topics"]["A"] == "ban support: Supports a ban."

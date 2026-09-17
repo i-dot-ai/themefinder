@@ -12,10 +12,15 @@ Requests are shaped for efficiency, following TypeSafe's guidance that the
 state dominates each request and that questions in one request are evaluated
 independently and in parallel:
 
-- both stages' questions are asked in the same request, and
+- both stages' questions are asked in the same request;
 - a batch of responses shares each request: the state carries the question
   and a list of responses, and every question names the response_id it is
-  about.
+  about; and
+- shared context lives once in the state (the topics dictionary and the
+  evidence-rich definition), with each question a terse JSON object
+  ({"question": ..., "response_id": ..., "topic_id": ...}) referencing it —
+  the structured-instruction format the TypeSafe docs recommend over string
+  templates.
 
 Benchmarked against the local gambling_XS ground truth
 (evals/compare_systemone.py), this shape matched or beat the per-response and
@@ -100,44 +105,54 @@ EVIDENCE_KEY = "evidence_rich"
 FALLBACK_OTHER = "Other"
 FALLBACK_NO_REASON = "No Reason Given"
 
-# Every question opens with this preamble so its judgement targets exactly
-# one response within the shared state.
-RESPONSE_PREAMBLE = (
-    "The state contains a consultation question and a list of responses, each "
-    "with a response_id. Consider only the response whose response_id is "
-    "{response_id}, ignoring all other responses. "
+# Shared context (topic texts, the definition of each judgement) lives once
+# in the state; each question is a minimal JSON pointer referencing it. The
+# question strings are repeated per response, so they stay terse.
+THEME_MAPPING_QUESTION = (
+    "Does the response express the topic? (See topic_match_definition.)"
+)
+GIVES_REASON_QUESTION = (
+    "Does the response give a substantive answer? (See gives_reason_definition.)"
+)
+EVIDENCE_RICH_QUESTION = (
+    "Is the response evidence-rich? (See evidence_rich_definition.)"
 )
 
-THEME_MAPPING_BODY = (
-    "Does the response express the following topic? The response does not need to "
-    "use the same wording as the topic; it is a match if it expresses a similar "
-    "sentiment or point of view. Topic: {topic}"
+TOPIC_MATCH_DEFINITION = (
+    "A response expresses a topic (from the topics dictionary) if it conveys "
+    "that topic or a similar sentiment or point of view; exact wording is not "
+    "required. Judge only the response named by the question's response_id, "
+    "ignoring all other responses."
 )
 
-GIVES_REASON_BODY = (
-    "Does the response give any substantive opinion, reason or argument in answer "
-    "to the question, as opposed to being empty, off-topic or a refusal to answer?"
+GIVES_REASON_DEFINITION = (
+    "A response gives a substantive answer if it offers any opinion, reason or "
+    "argument in answer to the consultation question, rather than being empty, "
+    "off-topic or a refusal to answer. Judge only the response named by the "
+    "question's response_id."
 )
 
-EVIDENCE_RICH_BODY = (
-    "Is the response evidence-rich? A response is evidence-rich only if it clearly "
-    "answers the question with insights beyond generic opinion (nuanced reasoning, "
-    "contextual explanation or argumentation that could inform decision-making) "
-    "AND it contains substantive evidence: specific verifiable facts or data "
-    "(statistics, dates, named reports or studies), concrete illustrative examples "
-    "that support a broader claim, or detailed personal or professional experiences "
-    "with contextual information such as roles, locations or timelines."
-)
-
-EVIDENCE_RICH_TRUE_CRITERIA = (
-    "The response would provide useful input to someone drafting policy, beyond "
-    "what is already commonly known or expected."
-)
-EVIDENCE_RICH_FALSE_CRITERIA = (
-    "The response uses vague language with no supporting detail, restates commonly "
-    "known points, or shares anecdotes without sufficient context or a clear "
-    "takeaway."
-)
+EVIDENCE_RICH_DEFINITION = {
+    "note": (
+        "Judge only the response named by the question's response_id."
+    ),
+    "evidence_rich_if": (
+        "The response clearly answers the question with insights beyond generic "
+        "opinion (nuanced reasoning, contextual explanation or argumentation "
+        "that could inform decision-making) AND it contains substantive "
+        "evidence: specific verifiable facts or data (statistics, dates, named "
+        "reports or studies), concrete illustrative examples that support a "
+        "broader claim, or detailed personal or professional experiences with "
+        "contextual information such as roles, locations or timelines. It would "
+        "provide useful input to someone drafting policy, beyond what is "
+        "already commonly known or expected."
+    ),
+    "not_evidence_rich_if": (
+        "The response uses vague language with no supporting detail, restates "
+        "commonly known points, or shares anecdotes without sufficient context "
+        "or a clear takeaway."
+    ),
+}
 
 
 # SystemOne and the LLM client share one usage type.
@@ -202,23 +217,9 @@ def _theme_texts(refined_themes_df: pd.DataFrame) -> dict[str, str]:
     }
 
 
-def _noul(
-    instructions: str,
-    true_criteria: str | None = None,
-    false_criteria: str | None = None,
-) -> Any:
-    """Build a noul (yes/no) SystemOne question.
-
-    The optional criteria describe the yes and no outcomes, in the
-    ``NoulCriteria`` shape the API expects ({"true": ..., "false": ...}).
-    """
-    sdk = _require_typesafe_sdk()
-    if true_criteria or false_criteria:
-        return sdk.Noul(
-            instructions=instructions,
-            criteria={"true": true_criteria, "false": false_criteria},
-        )
-    return sdk.Noul(instructions=instructions)
+def _noul(instructions: Any) -> Any:
+    """Build a noul (yes/no) SystemOne question from string or JSON instructions."""
+    return _require_typesafe_sdk().Noul(instructions=instructions)
 
 
 def _is_retryable(exception: BaseException) -> bool:
@@ -241,27 +242,43 @@ async def _ask_with_retries(
     return await retrying(client.ask, state=state, questions=questions)
 
 
-def _theme_bodies(theme_texts: dict[str, str]) -> dict[str, str]:
-    """Pre-format the per-theme question bodies, shared by every response."""
+def _build_state(question: str, theme_texts: dict[str, str], rows: list[dict]) -> dict:
+    """Build one request's state: the shared context plus the response batch."""
     return {
-        topic_id: THEME_MAPPING_BODY.format(topic=topic_text)
-        for topic_id, topic_text in theme_texts.items()
+        "question": question,
+        "topics": theme_texts,
+        "topic_match_definition": TOPIC_MATCH_DEFINITION,
+        "gives_reason_definition": GIVES_REASON_DEFINITION,
+        "evidence_rich_definition": EVIDENCE_RICH_DEFINITION,
+        "responses": [
+            {"response_id": row["response_id"], "response": row["response"]}
+            for row in rows
+        ],
     }
 
 
-def _response_questions(response_id: Any, theme_bodies: dict[str, str]) -> dict[str, Any]:
-    """Build one response's question set: per-theme nouls, fallback, evidence."""
+def _response_questions(response_id: Any, topic_ids) -> dict[str, Any]:
+    """Build one response's question set: per-theme nouls, fallback, evidence.
+
+    Each question is a compact JSON object naming the response (and topic) it
+    is about; the definitions themselves live in the request state.
+    """
     prefix = f"r{response_id}_"
-    preamble = RESPONSE_PREAMBLE.format(response_id=response_id)
     questions = {
-        f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}": _noul(preamble + body)
-        for topic_id, body in theme_bodies.items()
+        f"{prefix}{THEME_QUESTION_PREFIX}{topic_id}": _noul(
+            {
+                "question": THEME_MAPPING_QUESTION,
+                "response_id": response_id,
+                "topic_id": topic_id,
+            }
+        )
+        for topic_id in topic_ids
     }
-    questions[f"{prefix}{GIVES_REASON_KEY}"] = _noul(preamble + GIVES_REASON_BODY)
+    questions[f"{prefix}{GIVES_REASON_KEY}"] = _noul(
+        {"question": GIVES_REASON_QUESTION, "response_id": response_id}
+    )
     questions[f"{prefix}{EVIDENCE_KEY}"] = _noul(
-        preamble + EVIDENCE_RICH_BODY,
-        true_criteria=EVIDENCE_RICH_TRUE_CRITERIA,
-        false_criteria=EVIDENCE_RICH_FALSE_CRITERIA,
+        {"question": EVIDENCE_RICH_QUESTION, "response_id": response_id}
     )
     return questions
 
@@ -341,21 +358,14 @@ async def classify_responses_systemone(
         f"using {len(refined_themes_df)} themes (batch size {batch_size})"
     )
     theme_texts = _theme_texts(refined_themes_df)
-    theme_bodies = _theme_bodies(theme_texts)
     semaphore = asyncio.Semaphore(concurrency)
 
     async def process_chunk(chunk: pd.DataFrame) -> list[dict]:
         rows = chunk.to_dict(orient="records")
-        state = {
-            "question": question,
-            "responses": [
-                {"response_id": row["response_id"], "response": row["response"]}
-                for row in rows
-            ],
-        }
+        state = _build_state(question, theme_texts, rows)
         questions: dict[str, Any] = {}
         for row in rows:
-            questions.update(_response_questions(row["response_id"], theme_bodies))
+            questions.update(_response_questions(row["response_id"], theme_texts))
 
         async with semaphore:
             try:
