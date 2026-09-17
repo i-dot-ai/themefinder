@@ -88,6 +88,25 @@ class StageRun:
         }
 
 
+def build_llm(llm_model: str, llm_api: str | None = None) -> OpenAILLM:
+    """Build the eval LLM client, handling gpt-5 family quirks.
+
+    gpt-5* models are served only through the Responses API and reject
+    explicit temperature settings; other models default to Chat Completions
+    with temperature 0. Pass llm_api ("chat"/"responses") to override.
+    """
+    is_gpt5_family = llm_model.startswith("gpt-5")
+    use_responses_api = llm_api == "responses" if llm_api else is_gpt5_family
+    request_kwargs = {} if is_gpt5_family else {"temperature": 0}
+    return OpenAILLM(
+        model=llm_model,
+        request_kwargs=request_kwargs,
+        use_responses_api=use_responses_api,
+        base_url=os.getenv("LLM_GATEWAY_URL"),
+        api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
+    )
+
+
 def llm_prices() -> tuple[float, float]:
     return (
         float(os.getenv("LLM_INPUT_PRICE_PER_M", DEFAULT_LLM_INPUT_PRICE_PER_M)),
@@ -542,19 +561,7 @@ async def main() -> None:
                 "No LLM model configured: pass --llm-model or set the "
                 "AUTO_EVAL_4_1_SWEDEN_DEPLOYMENT env var (or use --skip-llm)."
             )
-        is_gpt5_family = args.llm_model.startswith("gpt-5")
-        use_responses_api = (
-            args.llm_api == "responses" if args.llm_api else is_gpt5_family
-        )
-        # gpt-5 family models reject explicit temperature settings.
-        request_kwargs = {} if is_gpt5_family else {"temperature": 0}
-        llm = OpenAILLM(
-            model=args.llm_model,
-            request_kwargs=request_kwargs,
-            use_responses_api=use_responses_api,
-            base_url=os.getenv("LLM_GATEWAY_URL"),
-            api_key=os.getenv("CONSULT_EVAL_LITELLM_API_KEY"),
-        )
+        llm = build_llm(args.llm_model, args.llm_api)
     systemone_client = None
     if not args.skip_systemone:
         systemone_client = SystemOne.from_env(model=args.model)
