@@ -59,22 +59,8 @@ async def find_themes(
     """
     logger.setLevel(logging.INFO if verbose else logging.CRITICAL)
 
-    theme_df, _ = await theme_generation(
+    refined_theme_df = await generate_refined_themes(
         responses_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-        concurrency=concurrency,
-    )
-    condensed_theme_df, _ = await theme_condensation(
-        theme_df,
-        llm,
-        question=question,
-        system_prompt=system_prompt,
-        concurrency=concurrency,
-    )
-    refined_theme_df, _ = await theme_refinement(
-        condensed_theme_df,
         llm,
         question=question,
         system_prompt=system_prompt,
@@ -106,6 +92,51 @@ async def find_themes(
         "detailed_responses": detailed_df,
         "unprocessables": mapping_unprocessables,
     }
+
+
+async def generate_refined_themes(
+    responses_df: pd.DataFrame,
+    llm: LLM,
+    question: str,
+    system_prompt: str = CONSULTATION_SYSTEM_PROMPT,
+    concurrency: int = 10,
+) -> pd.DataFrame:
+    """Run the generative pipeline stages: generation, condensation, refinement.
+
+    Shared by :func:`find_themes` and the SystemOne hybrid pipeline.
+
+    Args:
+        responses_df: DataFrame containing survey responses.
+        llm: LLM instance for text analysis.
+        question: The survey question.
+        system_prompt: System prompt to guide the LLM's behaviour.
+        concurrency: Number of concurrent API calls to make.
+
+    Returns:
+        DataFrame of refined themes with sequential topic_ids.
+    """
+    theme_df, _ = await theme_generation(
+        responses_df,
+        llm,
+        question=question,
+        system_prompt=system_prompt,
+        concurrency=concurrency,
+    )
+    condensed_theme_df, _ = await theme_condensation(
+        theme_df,
+        llm,
+        question=question,
+        system_prompt=system_prompt,
+        concurrency=concurrency,
+    )
+    refined_theme_df, _ = await theme_refinement(
+        condensed_theme_df,
+        llm,
+        question=question,
+        system_prompt=system_prompt,
+        concurrency=concurrency,
+    )
+    return refined_theme_df
 
 
 async def theme_generation(

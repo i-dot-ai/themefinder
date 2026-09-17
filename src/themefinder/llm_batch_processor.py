@@ -255,7 +255,14 @@ async def call_llm(
                     if isinstance(all_results, dict)
                     else all_results.responses
                 )
-            except (openai.BadRequestError, ValueError) as e:
+            except (
+                openai.BadRequestError,
+                openai.AuthenticationError,
+                openai.PermissionDeniedError,
+                openai.NotFoundError,
+                ValueError,
+            ) as e:
+                # Deterministic client errors: retrying cannot succeed.
                 logger.warning(e)
                 return [], batch_prompt.response_ids
             except ValidationError as e:

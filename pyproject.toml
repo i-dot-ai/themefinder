@@ -35,6 +35,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+systemone = [
+    "typesafe-sdk",
+]
 dev = [
     "pytest",
     "pytest-asyncio>=0.24.0",

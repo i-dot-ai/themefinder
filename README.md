@@ -110,6 +110,33 @@ The file `src/themefinder.core.py` contains the function `find_themes` which run
 **For more detail - see the docs: [https://i-dot-ai.github.io/themefinder/](https://i-dot-ai.github.io/themefinder/).**
 
 
+## SystemOne (jev) classification stages — experimental
+
+The classification-shaped stages of the pipeline (theme mapping and detail detection) have an alternative implementation backed by [TypeSafe's jev SystemOne model](https://docs.typesafe.ai/), which answers typed yes/no ("noul") questions with calibrated probabilities instead of generating text. Both stages are batched into a single SystemOne request per group of responses. The generative stages (theme generation, condensation and refinement) still run on an LLM.
+
+Install the extra and set your API key:
+
+```sh
+pip install 'themefinder[systemone]'
+export TYPESAFE_API_KEY=...
+```
+
+```python
+from themefinder import SystemOne, find_themes_hybrid
+
+systemone_client = SystemOne.from_env()
+result = await find_themes_hybrid(responses_df, llm, systemone_client, question)
+```
+
+`classify_responses_systemone` runs the classification stages on their own, returning theme labels and evidence-rich flags with per-answer probabilities. The evidence-rich threshold defaults to 0.16 (jev's probabilities for that strict rubric cluster low); it was tuned on a small synthetic ground-truth set, so sanity-check it per consultation using the benchmark's `best_threshold` diagnostic. To compare the regular LLM pipeline against SystemOne on speed, cost and accuracy, run:
+
+```sh
+uv run python evals/systemone_benchmark.py --llm-model gpt-4o-mini
+```
+
+See `docs/systemone.md` for the request/response structure and how the two pipelines compare, and `examples/example_systemone_notebook.ipynb` for a minimal walkthrough.
+
+
 ## Model Compatibility
 
 ThemeFinder's structured output approach makes it compatible with a wide range of language models from various providers. This list is non-exhaustive, and other models may also work effectively:
