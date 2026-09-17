@@ -131,8 +131,10 @@ result = await find_themes_hybrid(responses_df, llm, systemone_client, question)
 `classify_responses_systemone` runs the classification stages on their own, returning theme labels and evidence-rich flags with per-answer probabilities. The evidence-rich threshold defaults to 0.16 (jev's probabilities for that strict rubric cluster low); it was tuned on a small synthetic ground-truth set, so sanity-check it per consultation using the benchmark's `best_threshold` diagnostic. To compare the regular LLM pipeline against SystemOne on speed, cost and accuracy, run:
 
 ```sh
-uv run python evals/compare_systemone.py --dataset gambling_XS
+uv run python evals/systemone_benchmark.py --llm-model gpt-4o-mini
 ```
+
+See `docs/systemone.md` for the request/response structure and how the two pipelines compare, and `examples/example_systemone_notebook.ipynb` for a minimal walkthrough.
 
 
 ## Model Compatibility
